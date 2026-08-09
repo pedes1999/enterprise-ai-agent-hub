@@ -3,9 +3,9 @@ package com.enterprisehub.gateway.auth;
 import com.enterprisehub.gateway.error.DomainException;
 import org.springframework.http.HttpStatus;
 
-public class AuthException extends DomainException {
+public class UserManagementException extends DomainException {
 
-    public AuthException(HttpStatus status, String message) {
+    public UserManagementException(HttpStatus status, String message) {
         super(status, message);
     }
 }

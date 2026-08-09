@@ -1,17 +1,11 @@
 package com.enterprisehub.gateway.apikey;
 
+import com.enterprisehub.gateway.error.DomainException;
 import org.springframework.http.HttpStatus;
 
-public class ApiKeyException extends RuntimeException {
-
-    private final HttpStatus status;
+public class ApiKeyException extends DomainException {
 
     public ApiKeyException(HttpStatus status, String message) {
-        super(message);
-        this.status = status;
-    }
-
-    public HttpStatus getStatus() {
-        return status;
+        super(status, message);
     }
 }

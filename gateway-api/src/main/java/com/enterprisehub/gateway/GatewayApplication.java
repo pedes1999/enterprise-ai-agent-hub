@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway;
 
+import com.enterprisehub.gateway.config.CredentialsProperties;
 import com.enterprisehub.gateway.config.SecurityProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -18,7 +19,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
  */
 @SpringBootApplication(scanBasePackages = "com.enterprisehub")
 @EnableAsync
-@EnableConfigurationProperties(SecurityProperties.class)
+@EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class})
 public class GatewayApplication {
 
     public static void main(String[] args) {
