@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.agent;
 
 import com.enterprisehub.dto.AgentPingResponse;
+import com.enterprisehub.dto.AgentToolPingResponse;
 import com.enterprisehub.gateway.error.GlobalExceptionHandler;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
 import org.junit.jupiter.api.AfterEach;
@@ -83,5 +84,31 @@ class AgentPingControllerTest {
                         .content("""
                                 {"prompt":"Hello"}"""))
                 .andExpect(status().isBadGateway());
+    }
+
+    @Test
+    void pingWithTools_returns200WithReplyAndToolUsageFlag() throws Exception {
+        when(agentPingService.pingWithTools(eq(tenantId), eq("What time is it?"))).thenReturn(
+                new AgentToolPingResponse("ANTHROPIC", "claude-3-5-sonnet-20240620", "It is noon", true));
+
+        mockMvc.perform(post("/agents/ping-with-tools")
+                        .contentType("application/json")
+                        .content("""
+                                {"prompt":"What time is it?"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reply").value("It is noon"))
+                .andExpect(jsonPath("$.toolWasUsed").value(true));
+    }
+
+    @Test
+    void pingWithTools_noCredential_returns400() throws Exception {
+        when(agentPingService.pingWithTools(any(), any())).thenThrow(
+                new AgentException(HttpStatus.BAD_REQUEST, "No active ANTHROPIC credential configured for this tenant -- PUT /vendor-credentials first"));
+
+        mockMvc.perform(post("/agents/ping-with-tools")
+                        .contentType("application/json")
+                        .content("""
+                                {"prompt":"Hello"}"""))
+                .andExpect(status().isBadRequest());
     }
 }

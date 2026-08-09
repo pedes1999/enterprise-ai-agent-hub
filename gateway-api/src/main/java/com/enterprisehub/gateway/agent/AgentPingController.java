@@ -2,6 +2,7 @@ package com.enterprisehub.gateway.agent;
 
 import com.enterprisehub.dto.AgentPingRequest;
 import com.enterprisehub.dto.AgentPingResponse;
+import com.enterprisehub.dto.AgentToolPingResponse;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,6 +33,13 @@ public class AgentPingController {
     public ResponseEntity<AgentPingResponse> ping(@AuthenticationPrincipal PlatformPrincipal principal,
                                                     @RequestBody AgentPingRequest request) {
         var response = agentPingService.ping(UUID.fromString(principal.tenantId()), request.prompt());
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/ping-with-tools")
+    public ResponseEntity<AgentToolPingResponse> pingWithTools(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                                  @RequestBody AgentPingRequest request) {
+        var response = agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt());
         return ResponseEntity.ok(response);
     }
 }
