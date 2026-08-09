@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "7c79f37e-dc37-41ed-aaf4-bea5b9ec6096",
+    "_postman_id": "a2325036-bfc6-432d-be5a-6c5100d44291",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through Week 3 (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.",
+    "description": "Covers every endpoint built through Week 5 (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, LLM ping + tool-calling spikes) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API and costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502 (which is itself a valid, testable outcome).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1255,7 +1255,631 @@
       ]
     },
     {
-      "name": "5. Cross-Tenant Isolation",
+      "name": "5. Agents (LLM ping + tool-calling)",
+      "item": [
+        {
+          "name": "Store Anthropic Credential For Agent Tests",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vendor-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vendor-credentials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"anthropic\",\n  \"token\": \"{{anthropicApiKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "if (!pm.collectionVariables.get('anthropicApiKey')) {",
+                  "    console.warn('anthropicApiKey collection variable is empty -- the Ping requests below will fail with 502 against the real Anthropic API. Set it to a real key to exercise this folder for real.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping - Simple Prompt (no tool involved)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Reply with exactly one word: PONG\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK (requires a valid anthropicApiKey collection variable)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Provider is ANTHROPIC', () => pm.expect(json.provider).to.eql('ANTHROPIC'));",
+                  "pm.test('Reply is present', () => pm.expect(json.reply).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping - Blank Prompt Rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping With Tools - Question That Should Trigger The Tool",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping-with-tools",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping-with-tools"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"What is the current date and time in UTC? Use the tool, do not guess.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('The date/time tool was actually invoked', () => pm.expect(json.toolWasUsed).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping With Tools - Question That Should NOT Trigger The Tool",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping-with-tools",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping-with-tools"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Reply with exactly one word: PONG\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('The tool was NOT invoked for an unrelated prompt', () => pm.expect(json.toolWasUsed).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Developer For Agent Tests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"agent-dev@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"DEVELOPER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login As Agent Developer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantSlug\": \"{{tenantSlug}}\",\n  \"email\": \"agent-dev@{{tenantSlug}}.com\",\n  \"password\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('agentDevToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Developer Can Trigger Agents (not ADMIN-only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentDevToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Reply with exactly one word: PONG\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK (DEVELOPER is allowed, unlike credentials/keys/users)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Readonly For Agent Tests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"agent-readonly@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"READONLY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login As Agent Readonly",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantSlug\": \"{{tenantSlug}}\",\n  \"email\": \"agent-readonly@{{tenantSlug}}.com\",\n  \"password\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('agentReadonlyToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readonly Forbidden From Triggering Agents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentReadonlyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Reply with exactly one word: PONG\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403 Forbidden (READONLY cannot trigger agents)', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Tenant With No Vendor Credential",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantName\": \"No Credential Co\",\n  \"tenantSlug\": \"{{noCredSlug}}\",\n  \"email\": \"admin@{{noCredSlug}}.com\",\n  \"password\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('noCredSlug', 'no-cred-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('noCredToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping Without A Configured Credential Returns 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{noCredToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Hello\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Message tells the caller how to fix it', () => pm.expect(pm.response.json().message).to.include('PUT /vendor-credentials'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Cross-Tenant Isolation",
       "item": [
         {
           "name": "Register Second Tenant (Globex)",
@@ -1465,7 +2089,7 @@
       ]
     },
     {
-      "name": "6. Health",
+      "name": "7. Health",
       "item": [
         {
           "name": "Actuator Health Check",
@@ -1563,6 +2187,31 @@
     },
     {
       "key": "isolationApiKeyId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anthropicApiKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "agentDevToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "agentReadonlyToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "noCredSlug",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "noCredToken",
       "value": "",
       "type": "string"
     }
