@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.config;
 
+import com.enterprisehub.gateway.security.JwtAuthFilter;
 import com.enterprisehub.gateway.security.TenantResolvingFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,16 +20,18 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  *    since callers are CI pipelines, webhooks, and CLIs, not browsers with cookies.
  *  - CSRF disabled because there is no session/cookie-based auth to protect.
  *  - Everything denied by default except explicitly listed public endpoints.
- *    The JwtAuthFilter (added in the next step) will populate the SecurityContext
- *    per-request based on the validated token/platform API key.
+ *    JwtAuthFilter populates the SecurityContext per-request based on the
+ *    validated Bearer token.
  */
 @Configuration
 public class SecurityConfig {
 
     private final TenantResolvingFilter tenantResolvingFilter;
+    private final JwtAuthFilter jwtAuthFilter;
 
-    public SecurityConfig(TenantResolvingFilter tenantResolvingFilter) {
+    public SecurityConfig(TenantResolvingFilter tenantResolvingFilter, JwtAuthFilter jwtAuthFilter) {
         this.tenantResolvingFilter = tenantResolvingFilter;
+        this.jwtAuthFilter = jwtAuthFilter;
     }
 
     @Bean
@@ -37,15 +40,15 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/login", "/actuator/health").permitAll()
+                .requestMatchers("/auth/**", "/actuator/health").permitAll()
                 .requestMatchers("/webhooks/**").permitAll() // signature validation happens in the webhook controller itself
                 .anyRequest().authenticated()
             );
 
-        // JwtAuthFilter gets wired in here once implemented, running BEFORE
-        // the tenant filter since tenant resolution depends on auth already
-        // having populated the SecurityContext:
-        // http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        // JwtAuthFilter populates the SecurityContext from the Bearer token,
+        // running before the tenant filter since tenant resolution depends
+        // on auth already having populated the SecurityContext.
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterAfter(tenantResolvingFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
