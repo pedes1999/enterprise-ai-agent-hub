@@ -5,8 +5,9 @@ package com.enterprisehub.gateway.tenant;
  *
  * Populated by {@link com.enterprisehub.gateway.security.TenantResolvingFilter}
  * after authentication resolves who the caller is. Read by
- * {@link com.enterprisehub.gateway.tenant.TenantSessionAspect} to set the
- * Postgres session variable that RLS policies key off.
+ * {@link com.enterprisehub.gateway.tenant.TenantAwareDataSource} on every
+ * JDBC connection checkout to set the Postgres session variable that RLS
+ * policies key off.
  *
  * MUST be cleared at the end of every request (see the filter's finally block) —
  * thread pools reuse threads, and a stale tenant ID leaking into the next

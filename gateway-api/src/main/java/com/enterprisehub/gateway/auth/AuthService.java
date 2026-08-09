@@ -20,10 +20,11 @@ import org.springframework.stereotype.Service;
  * manually here once the tenant is identified (by slug, or freshly created)
  * so the RLS-scoped app_users queries below it succeed, then cleared in a
  * finally block. Deliberately NOT @Transactional at the method level: each
- * repository call already runs in its own Spring Data-managed transaction,
- * and TenantSessionAspect reads TenantContext at the start of THAT
- * transaction -- wrapping this whole method in one outer @Transactional
- * would fire the aspect once, before the tenant is even resolved.
+ * repository call checks out its own JDBC connection (see
+ * TenantAwareDataSource), which reads TenantContext at THAT checkout --
+ * wrapping this whole method in one outer @Transactional would check out
+ * the connection once at the very start, before the tenant is even
+ * resolved (register() doesn't know the new tenant's id yet at that point).
  */
 @Service
 public class AuthService {

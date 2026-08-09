@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.*;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.UUID;
 
@@ -21,8 +22,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * DB, since VendorCredentialServiceTest only proves the encryptor and
  * repository are called correctly, not that the wiring between them
  * (config-bound key, @Component registration) actually works end to end.
+ *
+ * Runs against agent_hub_test, not the dev DB -- see AuthIntegrationTest's
+ * javadoc.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 class RolesAndCredentialsIntegrationTest {
 
     @LocalServerPort

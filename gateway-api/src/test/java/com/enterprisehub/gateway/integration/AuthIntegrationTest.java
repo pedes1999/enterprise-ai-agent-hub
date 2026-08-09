@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.*;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
 import java.util.UUID;
@@ -22,11 +23,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * catch since it lives in the interaction between the DB session variable
  * and the RLS policy itself.
  *
- * Requires the local Postgres instance described in application.yml
- * (agent_hub / hub_user / password) to be up and migrated, same as running
- * the app itself.
+ * Runs against agent_hub_test (see application-test.yml), a separate
+ * database from the one used for manual/dev testing, so test runs never
+ * create or leave behind data in the dev DB. Requires that database to
+ * exist locally (CREATE DATABASE agent_hub_test OWNER hub_user;) -- Flyway
+ * migrates it automatically on first run, same as the dev DB.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 class AuthIntegrationTest {
 
     @LocalServerPort

@@ -1,0 +1,6 @@
+spring:
+  datasource:
+    # Integration tests get their own database so test runs never create or
+    # pollute data in the same DB used for manual/dev testing. Same
+    # hub_user/password, same host -- just a different database name.
+    url: ${TEST_DB_URL:jdbc:postgresql://localhost:5432/agent_hub_test}

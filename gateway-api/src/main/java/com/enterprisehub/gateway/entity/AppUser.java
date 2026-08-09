@@ -10,9 +10,9 @@ import java.util.UUID;
 
 /**
  * RLS-scoped: Postgres will only ever return rows where tenant_id matches
- * the current session's app.current_tenant_id (see V1__init_schema.sql
- * and TenantSessionAspect). No JPA-level @Where/@Filter needed on top —
- * the DB is the enforcement point.
+ * the current session's app.current_tenant_id (see V1__init_schema.sql,
+ * V2__force_row_level_security.sql, and TenantAwareDataSource). No
+ * JPA-level @Where/@Filter needed on top — the DB is the enforcement point.
  */
 @Entity
 @Table(name = "app_users")

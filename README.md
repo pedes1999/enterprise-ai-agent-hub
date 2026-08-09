@@ -29,6 +29,23 @@ Requires a running Postgres instance matching the `DB_URL` / `DB_USERNAME` /
 `DB_PASSWORD` env vars in `application.yml` (defaults assume local Postgres
 on 5432, db `agent_hub`).
 
+## Test
+
+```bash
+mvn test
+```
+
+Integration tests (`@SpringBootTest`, tagged `@ActiveProfiles("test")`) run
+against a **separate** database, `agent_hub_test`, so test runs never create
+or leave behind data in the dev DB (`agent_hub`). Create it once, owned by
+the same app role:
+
+```sql
+CREATE DATABASE agent_hub_test OWNER hub_user;
+```
+
+Flyway migrates it automatically on first test run, same as the dev DB.
+
 ## Status
 
 Phase 1 (foundation) in progress:
