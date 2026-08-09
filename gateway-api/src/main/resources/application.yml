@@ -48,6 +48,11 @@ app:
     # shared environment. Generate a real one with:
     #   python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
     local-key: ${CREDENTIAL_LOCAL_KEY:/3dBhMR8lbAxFJy33RJzEcW0Tuk8Y1jsqxR09zA1R48=}
+  llm:
+    # Not the langchain4j-bundled AnthropicChatModelName enum -- see
+    # LlmProperties javadoc. Override via env var as Anthropic ships newer
+    # models; the API accepts any valid model id string.
+    anthropic-model-name: ${ANTHROPIC_MODEL_NAME:claude-sonnet-4-5-20250929}
 
 logging:
   level:
