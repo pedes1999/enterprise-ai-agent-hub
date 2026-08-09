@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: enterprise-ai-agent-hub-gateway
+
+  datasource:
+    # Never commit real credentials. Pull from env vars / secret manager in every environment.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/agent_hub}
+    username: ${DB_USERNAME:hub_user}
+    password: ${DB_PASSWORD:password}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Flyway owns the schema. Hibernate only ever validates it matches, never generates DDL.
+    properties:
+      hibernate:
+        format_sql: false
+    open-in-view: false     # Avoid lazy-loading traps outside the transaction boundary
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    # The migration user needs CREATE/ALTER privileges. This can be the same
+    # role the app runs as, as long as that role is NOT superuser/BYPASSRLS
+    # (see the note at the bottom of V1__init_schema.sql) -- otherwise RLS
+    # policies get silently ignored for every query the app makes.
+
+server:
+  port: ${SERVER_PORT:8080}
+
+app:
+  security:
+    jwt-secret: ${JWT_SECRET:REPLACE_ME_WITH_A_STRONG_SECRET_FROM_VAULT}
+    jwt-expiration-minutes: 60
+  execution:
+    # Thread pool backing @Async agent execution triggers.
+    # This is a starting point — Phase 3 replaces this with a proper job queue (RabbitMQ/SQS)
+    # for durability across restarts and horizontal scaling.
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 100
+  credentials:
+    # Placeholder for the encryption key used to encrypt vendor API tokens at rest.
+    # In production this comes from AWS KMS / HashiCorp Vault, never from application.yml directly.
+    encryption-key-provider: ${CREDENTIAL_KMS_PROVIDER:local-dev-only}
+
+logging:
+  level:
+    com.enterprisehub: INFO
+    org.springframework.security: INFO
