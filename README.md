@@ -39,6 +39,13 @@ at the database layer (Postgres RLS), not just in application code.
   — given a tenant's decrypted credential, returns a LangChain4j
   `ChatLanguageModel` regardless of vendor. Only Anthropic is wired up so
   far.
+- **Tools are our own interface** (`AgentTool`), not LangChain4j's
+  reflection-based `@Tool` annotation — `agent-core` is the only module that
+  knows LangChain4j exists; `agent-runtime`'s eventual filesystem/terminal/
+  git tools (Weeks 6–8) implement `AgentTool` directly, no LangChain4j
+  import needed. `ToolCallingChatEngine` handles the actual tool-calling
+  round trip, and `SharedExecutionContext` is the object (tenant + LLM
+  client + available tools) threaded through a single agent invocation.
 
 ## Setup
 
@@ -94,6 +101,7 @@ in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterpris
 | `POST /api-keys` · `GET /api-keys` · `DELETE /api-keys/{id}` | ADMIN | Issue/revoke platform API keys (for future CI/CD & webhook triggers) |
 | `PUT /vendor-credentials` · `GET /vendor-credentials` · `DELETE /vendor-credentials/{provider}` | ADMIN | Store/rotate/remove encrypted LLM vendor credentials |
 | `POST /agents/ping` | ADMIN, DEVELOPER | Spike endpoint: real round-trip to the tenant's configured LLM, proves the credential → LangChain4j → provider chain works. Not the real agent execution model. |
+| `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: same as above, but through `SharedExecutionContext` with one demo tool registered — proves the tool-calling loop (model decides to call a tool, tool runs, result folded into a final answer) works end to end. |
 | `GET /actuator/health` | none | Health check |
 
 ## Test
@@ -107,7 +115,7 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-129 tests as of the last update — unit tests (mocked) for every
+136 tests as of the last update — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
@@ -121,8 +129,8 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **Week 2** — JWT auth, register/login, platform API key issuance
 - [x] **Week 3** — Role-based `@PreAuthorize`, KMS-style (local AES-GCM) credential encryption
 - [x] **Week 4** — `LlmEngineFactory` + real Anthropic round-trip proof (`/agents/ping`)
-- [ ] **Week 5** — `SharedExecutionContext`, per-tenant credential injection, basic tool interface
-- [ ] Weeks 6–8 — Sandboxed tool execution (filesystem/terminal/git)
+- [x] **Week 5** — `SharedExecutionContext`, `AgentTool` interface, tool-calling loop proven live (`/agents/ping-with-tools`)
+- [ ] Weeks 6–8 — Sandboxed tool execution (filesystem/terminal/git) implementing `AgentTool` for real
 - [ ] Weeks 9–10 — Job orchestration (message queue, durable execution tracking)
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)
