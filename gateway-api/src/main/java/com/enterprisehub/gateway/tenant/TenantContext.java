@@ -15,6 +15,15 @@ package com.enterprisehub.gateway.tenant;
  */
 public final class TenantContext {
 
+    /**
+     * Reserved, non-UUID sentinel used ONLY by {@code AgentJobWorker} to
+     * claim queued jobs across every tenant (see V5__agent_execution_queue.sql's
+     * RLS policy carve-out). Never set from anything derived from a JWT
+     * claim or other caller-controlled input -- if it ever were, that
+     * would be a cross-tenant privilege escalation on agent_executions.
+     */
+    public static final String SYSTEM_WORKER_TENANT_ID = "__agent_job_worker__";
+
     private static final ThreadLocal<String> CURRENT_TENANT = new ThreadLocal<>();
 
     private TenantContext() {

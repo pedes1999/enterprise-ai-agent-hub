@@ -58,6 +58,13 @@ app:
     # separately (node --env-file=.env server.js, or the Dockerfile) for
     # any sandboxed AgentTool (e.g. RunShellCommandTool) to work.
     sidecar-url: ${SANDBOX_SIDECAR_URL:http://localhost:8090/}
+  job-worker:
+    # AgentJobWorker's poll loop against agent_executions (POST
+    # /agents/execute enqueues, this picks it up). Disabled in
+    # application-test.yml so integration tests don't race a background
+    # poller against rows they're asserting on.
+    enabled: ${JOB_WORKER_ENABLED:true}
+    poll-interval-ms: ${JOB_WORKER_POLL_INTERVAL_MS:2000}
 
 logging:
   level:

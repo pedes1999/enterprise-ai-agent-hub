@@ -5,10 +5,10 @@ user stories with acceptance criteria. Intended for stakeholders, prospective cu
 partners evaluating the product — it describes *what the system does and for whom*, not how
 it is implemented.
 
-**Status:** covers everything shipped through Weeks 1–8 of the build plan (multi-tenant
-foundation, auth & roles, encrypted credential management, LLM integration, and sandboxed
-agent tool execution). Job orchestration, CLI/webhook triggers, and the first fully autonomous
-agent are on the roadmap but not yet built (see the last section).
+**Status:** covers everything shipped through Weeks 1–10 of the build plan (multi-tenant
+foundation, auth & roles, encrypted credential management, LLM integration, sandboxed agent
+tool execution, and durable async job execution). CLI/webhook triggers and the first fully
+autonomous agent are on the roadmap but not yet built (see the last section).
 
 ---
 
@@ -198,12 +198,50 @@ review agent activity for security and compliance purposes.*
 
 ---
 
+## Epic 6 — Durable Agent Execution
+
+### US-6.1 — Trigger an agent run without waiting for it to finish
+*As a Developer, I want to kick off an agent run and get an immediate acknowledgment, rather
+than my request hanging open until the model (and any tool it uses) finishes, so that
+triggering an agent is fast and doesn't depend on how long the underlying work takes.*
+
+**Acceptance criteria**
+- Triggering an agent returns immediately with an id for that run and a status of "queued" —
+  it does not wait for the LLM or any tool to complete.
+- The run is picked up and processed automatically, without any further action from the
+  caller.
+
+### US-6.2 — Check on a run's status and result
+*As a Developer, I want to check on a previously triggered agent run — whether it's still in
+progress, finished successfully, or failed — and see its result once it's done, so that I can
+build on top of agent runs asynchronously.*
+
+**Acceptance criteria**
+- A run's status is one of: queued, running, succeeded, or failed.
+- Once succeeded, the agent's final answer is available; once failed, a clear error message
+  is available.
+- A run is visible only to the tenant that triggered it (same isolation guarantee as
+  everything else — see US-1.3), including to an Admin or Developer who didn't personally
+  trigger it, but not to any other tenant.
+- Read-only users can check a run's status (consistent with "view history" access); only
+  Admins and Developers can trigger new runs.
+
+### US-6.3 — A crash doesn't silently lose a triggered run
+*As an Admin, I want a triggered agent run to survive an application restart or crash, rather
+than simply vanishing, so that "I asked for this to run" is a durable fact, not something that
+depends on the server staying up the whole time.*
+
+**Acceptance criteria**
+- A triggered run is recorded durably (not held only in memory) before any work on it begins.
+- If the application restarts, a run that was queued but not yet started is still queued
+  afterward and gets picked up normally.
+
+---
+
 ## Roadmap (not yet built)
 
 The following are on the plan but intentionally out of scope for what's described above:
 
-- **Durable job orchestration** — today's agent invocations are synchronous, single-request
-  proofs of the underlying mechanics; a durable, queued, resumable execution model is next.
 - **Multi-round agent reasoning** — the current tool-calling loop resolves one round of tool
   calls per request; chaining multiple dependent tool calls in a single agent turn (e.g.
   "clone, then list files, then summarize") is planned.

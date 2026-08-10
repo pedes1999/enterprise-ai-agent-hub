@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "ed4ce74c-4503-4cba-b2f5-4d6a75f38b82",
+    "_postman_id": "b80bd61a-babd-49c2-adc0-56a4c51e138e",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption, LLM ping + tool-calling, real sandboxed shell command execution, real sandboxed git clone) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.",
+    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption, LLM ping + tool-calling, real sandboxed shell command execution, real sandboxed git clone, durable async agent execution) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -2294,6 +2294,213 @@
               }
             }
           ]
+        },
+        {
+          "name": "Enqueue Agent Execution (Async, Weeks 9-10 Job Queue)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/execute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "execute"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"List the files in the current directory.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202 Accepted (returns immediately, does not wait for the LLM)', () => pm.response.to.have.status(202));",
+                  "const json = pm.response.json();",
+                  "pm.test('Execution starts QUEUED', () => pm.expect(json.status).to.eql('QUEUED'));",
+                  "pm.test('An execution id is returned', () => pm.expect(json.executionId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('executionId', json.executionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Execution Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions/{{executionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions",
+                "{{executionId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Prompt is echoed back', () => pm.expect(json.prompt).to.eql('List the files in the current directory.'));",
+                  "pm.test('Status is one AgentJobWorker\\'s poll loop would produce (timing-dependent -- it may already have been picked up)',",
+                  "    () => pm.expect(['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED']).to.include(json.status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Execution - Unknown Id Returns 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions/{{$guid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions",
+                "{{$guid}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readonly Can View Execution Status (view history is allowed)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentReadonlyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions/{{executionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions",
+                "{{executionId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK (READONLY can view, unlike triggering)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readonly Forbidden From Enqueueing Agent Execution",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentReadonlyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/execute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "execute"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Hello\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403 Forbidden (READONLY cannot trigger agents)', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2504,6 +2711,41 @@
               }
             }
           ]
+        },
+        {
+          "name": "Globex Cannot View Acme's Agent Execution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{globexToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions/{{executionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions",
+                "{{executionId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 Not Found (not 403 -- existence not confirmed or denied)', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2631,6 +2873,11 @@
     },
     {
       "key": "noCredToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "executionId",
       "value": "",
       "type": "string"
     }

@@ -4,3 +4,11 @@ spring:
     # pollute data in the same DB used for manual/dev testing. Same
     # hub_user/password, same host -- just a different database name.
     url: ${TEST_DB_URL:jdbc:postgresql://localhost:5432/agent_hub_test}
+
+app:
+  job-worker:
+    # AgentJobWorker's bean is entirely absent (see its
+    # @ConditionalOnProperty) when this is false -- @SpringBootTest
+    # integration tests assert on agent_executions rows directly and must
+    # not have a background poller claiming/mutating them concurrently.
+    enabled: false

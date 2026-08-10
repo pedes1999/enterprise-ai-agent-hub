@@ -11,9 +11,16 @@ import java.util.UUID;
 /**
  * One row per triggered agent run (security patch, cross-stack alignment,
  * etc). status transitions QUEUED -> RUNNING -> SUCCEEDED|FAILED, driven by
- * the job orchestrator introduced in Phase 3 (message-queue-backed, not
- * in-process @Async — see architecture discussion on why that's decided
- * up front rather than retrofitted).
+ * AgentJobWorker's DB-backed poll loop (SELECT ... FOR UPDATE SKIP LOCKED
+ * against this table) rather than a message broker -- durable and safe
+ * under multiple workers without new infrastructure; see
+ * V5__agent_execution_queue.sql for the reasoning and the RLS carve-out
+ * that lets the worker find jobs across every tenant.
+ *
+ * prompt/reply/toolWasUsed back the current prompt-plus-tools flow
+ * (AgentPromptRunner); repository_url/agent_type/trigger_source are the
+ * original Week 1 columns for a future repository-driven agent and are
+ * either unused or given a fixed placeholder value by that flow today.
  */
 @Entity
 @Table(name = "agent_executions")
@@ -35,7 +42,7 @@ public class AgentExecution {
     @Column(name = "trigger_source", nullable = false)
     private String triggerSource; // CI_CD, WEBHOOK, CLI, DASHBOARD
 
-    @Column(name = "repository_url", nullable = false)
+    @Column(name = "repository_url")
     private String repositoryUrl;
 
     @Column(nullable = false)
@@ -43,6 +50,15 @@ public class AgentExecution {
 
     @Column(name = "llm_provider")
     private String llmProvider;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String prompt;
+
+    @Column(columnDefinition = "TEXT")
+    private String reply;
+
+    @Column(name = "tool_was_used")
+    private Boolean toolWasUsed;
 
     @Column(name = "started_at")
     private Instant startedAt;

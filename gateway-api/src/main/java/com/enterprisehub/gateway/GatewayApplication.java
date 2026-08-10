@@ -8,6 +8,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Entry point for the Enterprise AI Agent Hub gateway.
@@ -16,11 +17,16 @@ import org.springframework.scheduling.annotation.EnableAsync;
  * and the /agents/execute entrypoint. All LLM logic lives in agent-core,
  * all filesystem/terminal/git tool execution lives in agent-runtime.
  *
- * @EnableAsync is required from day one — agent executions must never
- * block the request thread that triggered them (CI/CD, webhook, CLI, etc).
+ * @EnableScheduling drives AgentJobWorker's poll loop (Weeks 9-10 job
+ * orchestration -- DB-backed, see V5__agent_execution_queue.sql).
+ * @EnableAsync predates that decision and nothing uses it yet (app.execution's
+ * thread-pool properties are still just a placeholder) -- kept for now
+ * since removing it isn't part of this change, but it is not what
+ * AgentJobWorker is built on.
  */
 @SpringBootApplication(scanBasePackages = "com.enterprisehub")
 @EnableAsync
+@EnableScheduling
 @EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class, LlmProperties.class, SandboxProperties.class})
 public class GatewayApplication {
 

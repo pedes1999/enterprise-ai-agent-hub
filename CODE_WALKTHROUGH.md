@@ -83,16 +83,20 @@ controller method body.
 | Class | Responsibility |
 |---|---|
 | `credential.JpaCredentialResolver` | Implements `CredentialResolver`. Looks up the tenant's active `tool_credentials` row for the given kind via `ToolCredentialService.decryptActiveValue`, maps `"GIT" -> "GIT_TOKEN"` (see `envVarNameFor`). |
-| `audit.JpaToolExecutionListener` | Implements `ToolExecutionListener`. Persists a `ToolExecution` entity via `ToolExecutionRepository.save`. Runs synchronously on the request thread today — see its javadoc for the caveat once execution goes async. |
+| `audit.JpaToolExecutionListener` | Implements `ToolExecutionListener`. Persists a `ToolExecution` entity via `ToolExecutionRepository.save`. Runs synchronously on whichever thread calls it — for `/agents/ping-with-tools` that's the request thread; for `POST /agents/execute` (async, see §8) it's `AgentJobWorker`'s poll thread, which is fine **only because** `AgentJobWorker` explicitly sets `TenantContext` to the job's real tenant before running anything — this listener itself has no idea which thread it's on. |
 | `config.SandboxConfig` / `SandboxProperties` | Wires the `SandboxClientHttpImpl` bean from `app.sandbox.sidecar-url`. |
 
 ### Agent-facing controllers/services
 
 | Class | Responsibility |
 |---|---|
-| `agent.AgentPingController` | `POST /agents/ping` and `POST /agents/ping-with-tools`. `@PreAuthorize("hasAnyRole('ADMIN','DEVELOPER')")`. Pulls `tenantId` off the authenticated `PlatformPrincipal` — **never** trusts a tenant id in the request body. |
-| `agent.AgentPingService` | The orchestration logic behind both endpoints. See §3/§4 for full call sequences. |
+| `agent.AgentPingController` | `POST /agents/ping` and `POST /agents/ping-with-tools`. `@PreAuthorize("hasAnyRole('ADMIN','DEVELOPER')")`. Pulls `tenantId` off the authenticated `PlatformPrincipal` — **never** trusts a tenant id in the request body. The **synchronous spike** path. |
+| `agent.AgentPingService` | Thin orchestration behind both spike endpoints; delegates the actual tool-calling work to `AgentPromptRunner`. See §3 for the full call sequence. |
+| `agent.AgentPromptRunner` | The real "run this prompt with tools for this tenant" logic (resolve credential, assemble tools, build `SharedExecutionContext`, call `chat()`) — extracted so both `AgentPingService` (sync) and `AgentJobWorker` (async) share one implementation instead of two that could drift apart. |
 | `agent.tools.CurrentDateTimeTool` | Trivial, non-sandboxed `AgentTool` used to prove the tool-calling wiring works independent of the sandbox infrastructure. |
+| `agent.AgentExecutionController` | `POST /agents/execute` (ADMIN/DEVELOPER) and `GET /agents/executions/{id}` (ADMIN/DEVELOPER/READONLY) — the **real, durable, async** path. See §8. |
+| `agent.AgentExecutionService` | Every state transition of an `agent_executions` row: `enqueue()`, `claimNext()` (flips `QUEUED`→`RUNNING`), `complete()`/`fail()`, `findForTenant()`. Each is its own short `@Transactional` method — `claimNext()` in particular must commit fast so its row lock isn't held for the whole agent run that follows. |
+| `agent.AgentJobWorker` | `@Scheduled` poll loop (`app.job-worker.poll-interval-ms`, default 2000ms). The only place `TenantContext.SYSTEM_WORKER_TENANT_ID` is ever set. See §8. Absent as a bean entirely (not just inert) when `app.job-worker.enabled=false` — set in `application-test.yml` so integration tests don't race it. |
 
 ---
 
@@ -277,7 +281,96 @@ second `chatModel.generate()` call as the tool's result.
 
 ---
 
-## 6. Where to look, by symptom
+## 6. The real (async, durable) path: `POST /agents/execute` → `AgentJobWorker`
+
+Everything in §3-§5 above is the **synchronous spike** (`/agents/ping-with-tools`) — it blocks
+the HTTP thread for the whole run and persists nothing if the app crashes mid-request. This is
+the actual job-queue path (Weeks 9-10), and it reuses `AgentPromptRunner` (§3's step 3b/4/5 —
+tool assembly, `SharedExecutionContext`, the tool-calling loop) for the real work; what's
+different here is everything *around* that call.
+
+**6a. The enqueue request returns immediately, before any LLM call happens**
+
+```
+POST /agents/execute  { "prompt": "..." }
+ -> JwtAuthFilter / TenantResolvingFilter (same as any request, see §3 step 1)
+ -> AgentExecutionController.execute(principal, request)
+      validates prompt is non-blank
+      -> AgentExecutionService.enqueue(tenantId, prompt)
+           new AgentExecution(tenantId, agentType="PROMPT_WITH_TOOLS", triggerSource="API",
+                               llmProvider="ANTHROPIC", prompt, status="QUEUED")
+           -> repository.save(...)   // RLS-scoped INSERT, ordinary tenant context, nothing special here
+      <- 202 Accepted  { executionId, status: "QUEUED" }
+```
+
+No Anthropic call has happened yet. The caller now polls `GET /agents/executions/{id}`
+(RLS + `findByIdAndTenantId` — same tenant-scoping pattern as everything else) until `status`
+is `SUCCEEDED` or `FAILED`.
+
+**6b. `AgentJobWorker.pollAndProcessOne()` — runs on a `@Scheduled` thread, NOT a request thread**
+
+This is the one piece of the whole codebase that deliberately breaks the "tenant context comes
+from an authenticated request" assumption everything else relies on. Read this closely if
+you're debugging anything queue-related.
+
+```
+pollAndProcessOne()                                    // fires every app.job-worker.poll-interval-ms (default 2000ms)
+ │
+ ├─ claimNext()
+ │    TenantContext.set(TenantContext.SYSTEM_WORKER_TENANT_ID)   // "__agent_job_worker__" -- see its javadoc
+ │    try:
+ │        AgentExecutionService.claimNext()
+ │          -> repository.claimNextQueued()
+ │               SELECT * FROM agent_executions WHERE status='QUEUED'
+ │               ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+ │               -- RLS's tenant_isolation_agent_executions policy has an OR clause recognizing
+ │               -- this exact sentinel string (V5__agent_execution_queue.sql) -- THIS is the only
+ │               -- reason this query can see rows across every tenant. Under any other
+ │               -- TenantContext value (a real tenant, or unset/empty), it sees nothing.
+ │               -- FOR UPDATE SKIP LOCKED means concurrent workers never double-claim: each one
+ │               -- just skips whatever row another worker's open transaction already has locked.
+ │             sets status="RUNNING", startedAt=now()   // same short transaction -- commits fast,
+ │             return execution                          // releasing the row lock before the slow part starts
+ │    finally: TenantContext.clear()
+ │
+ │  if no job claimed: return (nothing to do this tick)
+ │
+ └─ runClaimedJob(job)
+      TenantContext.set(job.getTenantId().toString())   // <-- switches OFF the sentinel, onto the
+      try:                                                //     job's REAL tenant, before anything else runs
+          result = AgentPromptRunner.run(job.tenantId, job.id.toString(), job.prompt)
+               -- IDENTICAL to §3 step 3b/§4's tool-calling loop -- resolves this tenant's
+               -- Anthropic credential (RLS-scoped, now correctly, since TenantContext is the
+               -- real tenant), builds the same 3-tool list, runs chat() to completion,
+               -- including any sandboxed tool execution and its own audit logging.
+          AgentExecutionService.complete(job.id, result.reply(), result.toolWasUsed())
+               -- sets status="SUCCEEDED", reply, toolWasUsed, completedAt -- RLS-scoped UPDATE,
+               -- correctly scoped because TenantContext is still the real tenant here.
+      catch RuntimeException e:
+          AgentExecutionService.fail(job.id, e.getMessage())
+               -- status="FAILED", errorMessage, completedAt. Never rethrown -- a failed agent
+               -- run must not crash the poll loop; the NEXT tick just claims the next job.
+      finally: TenantContext.clear()
+```
+
+**Why the sentinel switch matters (the bug this design prevents):** if `AgentJobWorker` ran
+`AgentPromptRunner`/`AgentExecutionService.complete()` while `TenantContext` was still set to
+the sentinel (or never switched it at all), every credential lookup, tool execution, audit
+insert, and the final status UPDATE would be running with the wrong (or no) tenant scope —
+either failing outright against `FORCE ROW LEVEL SECURITY`, or worse, silently touching the
+wrong tenant's data if the sentinel accidentally matched something. The `runClaimedJob` switch
+is not a style choice; it's the actual security boundary between "the worker claiming across
+tenants" and "the worker acting as one specific tenant."
+
+**Only one job runs at a time per app instance:** `@Scheduled(fixedDelay=...)` (not
+`fixedRate`) means Spring won't start the next poll tick until the current one — including the
+full agent run inside it — has returned. Multiple jobs in parallel would mean either running
+multiple app instances (each with its own poller, safely coordinated by `FOR UPDATE SKIP
+LOCKED`) or increasing the scheduler's thread pool, neither of which has been done yet.
+
+---
+
+## 7. Where to look, by symptom
 
 | Symptom | Start here |
 |---|---|
@@ -289,10 +382,14 @@ second `chatModel.generate()` call as the tool's result.
 | "Credential resolves to nothing / clone runs unauthenticated" | `JpaCredentialResolver.resolve()` → `ToolCredentialService.decryptActiveValue` → is there actually an **active** `tool_credentials` row for this tenant + `GIT` kind? (`PUT /tool-credentials` sets it; a soft-deleted/inactive row won't be found.) |
 | "Audit row missing for a tool call" | `AbstractSandboxedTool.execute()` should have called the listener on both success and failure paths — if truly missing, check whether the tool bypassed `AbstractSandboxedTool` entirely (only sandboxed tools get audited automatically; a hypothetical non-sandboxed real tool would need its own audit call). |
 | "New tenant's first request looks unauthenticated" | Registration flow: `AuthController.register` → `AuthService.register` — confirm a JWT is actually returned in `AuthResponse` and the client is sending it as `Authorization: Bearer <token>` on the next call, not treating registration as also logging in via a session/cookie (there are none — the platform is fully stateless). |
+| "Execution stays QUEUED forever, never picked up" | Is `AgentJobWorker` even running? Check `app.job-worker.enabled` (it's a `@ConditionalOnProperty` — if false, there's no bean at all, not just an idle one) and confirm `@EnableScheduling` is still on `GatewayApplication`. If the bean exists, check for an exception in the previous poll tick's logs — an uncaught exception in `pollAndProcessOne()` itself (as opposed to inside the try/catch around `AgentPromptRunner.run`) would silently kill future scheduled invocations of that method. |
+| "Execution jumps straight to FAILED with a credential error" | That's `AgentPromptRunner.resolveApiKey()` throwing inside `AgentJobWorker.runClaimedJob()` — check `errorMessage` on the row (`GET /agents/executions/{id}`); "No active ANTHROPIC credential..." means exactly what it says, `PUT /vendor-credentials` for that tenant first. This is expected, correct behavior, not a bug — see the live-verification note in the README. |
+| "Two workers claimed the same job" / "a job got processed twice" | Should be structurally impossible — `claimNextQueued()`'s `FOR UPDATE SKIP LOCKED` guarantees only one transaction can hold a given row. If you see this, check whether `AgentExecutionService.claimNext()` is being called **outside** a real `@Transactional` context (e.g. a test double or a refactor that lost the annotation) — without an active transaction, the `FOR UPDATE` lock isn't actually held. |
+| "Worker query sees nothing even though rows are QUEUED" | Check `TenantContext.get()` at the moment `claimNextQueued()` runs — it must be exactly `TenantContext.SYSTEM_WORKER_TENANT_ID`. If `AgentJobWorker.claimNext()`'s `TenantContext.set(...)` call was ever removed, refactored away, or reordered after the repository call, the RLS policy's sentinel OR-clause won't match and the query returns nothing for every tenant, silently. |
 
 ---
 
-## 7. Quick reference: the two Anthropic API calls per `ping-with-tools` request
+## 8. Quick reference: the two Anthropic API calls per `ping-with-tools` request
 
 Easy to forget when reading logs/costs: a single `/agents/ping-with-tools` call that ends up
 using a tool makes **two** real calls to Anthropic, not one — one to decide whether/which
