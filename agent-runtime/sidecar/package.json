@@ -1,0 +1,16 @@
+{
+  "name": "agent-hub-sandbox-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal HTTP sidecar wrapping E2B's official JS SDK, called by agent-runtime's SandboxClientHttpImpl. Not a public API.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "e2b": "^1.0.0"
+  }
+}

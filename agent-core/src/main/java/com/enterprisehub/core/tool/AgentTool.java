@@ -25,6 +25,13 @@ public interface AgentTool {
     /** parameter name -> human-readable description, shown to the LLM. */
     Map<String, String> parameterDescriptions();
 
-    /** Arguments are always present and non-null; the LLM decided to call this tool with these values. */
-    String execute(Map<String, String> arguments);
+    /**
+     * Arguments are always present and non-null; the LLM decided to call this
+     * tool with these values. context.tenantId() is how a sandboxed
+     * implementation knows which tenant's credentials to inject and which
+     * repo it's allowed to touch -- never trust anything in `arguments` for
+     * that, since those values came from the LLM, not from authenticated
+     * request state.
+     */
+    String execute(ToolExecutionContext context, Map<String, String> arguments);
 }

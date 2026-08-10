@@ -22,9 +22,9 @@ public class SharedExecutionContextFactory {
         this.llmEngineFactory = llmEngineFactory;
     }
 
-    public SharedExecutionContext create(String tenantId, LlmProvider provider, String apiKey,
+    public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
                                           String modelName, List<AgentTool> tools) {
         ChatLanguageModel chatModel = llmEngineFactory.create(provider, apiKey, modelName);
-        return new SharedExecutionContext(tenantId, chatModel, tools);
+        return new SharedExecutionContext(tenantId, executionId, chatModel, tools);
     }
 }

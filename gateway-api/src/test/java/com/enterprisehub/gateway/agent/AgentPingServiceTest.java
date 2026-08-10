@@ -152,8 +152,10 @@ class AgentPingServiceTest {
 
     private void stubContextFactory() {
         SharedExecutionContext context = new SharedExecutionContext(
-                tenantId.toString(), chatLanguageModel, List.of(new CurrentDateTimeTool()));
-        when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(LlmProvider.ANTHROPIC),
+                tenantId.toString(), "test-exec-id", chatLanguageModel, List.of(new CurrentDateTimeTool()));
+        // executionId is generated internally (UUID.randomUUID()) by AgentPingService,
+        // so the test can't know it in advance -- match any() for that position.
+        when(sharedExecutionContextFactory.create(eq(tenantId.toString()), any(), eq(LlmProvider.ANTHROPIC),
                 eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any()))
                 .thenReturn(context);
     }

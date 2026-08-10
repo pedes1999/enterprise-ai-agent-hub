@@ -13,12 +13,15 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 class ToolCallingChatEngineTest {
+
+    private static final ToolExecutionContext CONTEXT = new ToolExecutionContext("tenant-1", "exec-1");
 
     private final AgentTool echoTool = new AgentTool() {
         @Override
@@ -37,7 +40,7 @@ class ToolCallingChatEngineTest {
         }
 
         @Override
-        public String execute(Map<String, String> arguments) {
+        public String execute(ToolExecutionContext context, Map<String, String> arguments) {
             return "echo: " + arguments.get("message");
         }
     };
@@ -47,7 +50,7 @@ class ToolCallingChatEngineTest {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("Just an answer")));
 
-        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool));
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
         ToolCallingChatEngine.ToolChatResult result = engine.chat("Hi");
 
         assertThat(result.reply()).isEqualTo("Just an answer");
@@ -68,12 +71,51 @@ class ToolCallingChatEngineTest {
                 .thenReturn(Response.from(AiMessage.from(List.of(request))))
                 .thenReturn(Response.from(AiMessage.from("Final answer using tool result")));
 
-        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool));
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
         ToolCallingChatEngine.ToolChatResult result = engine.chat("Echo 'hello'");
 
         assertThat(result.toolWasUsed()).isTrue();
         assertThat(result.reply()).isEqualTo("Final answer using tool result");
         verify(model, times(2)).generate(anyList(), anyList());
+    }
+
+    @Test
+    void chat_toolReceivesTheExecutionContextPassedToTheEngine() {
+        AtomicReference<ToolExecutionContext> observed = new AtomicReference<>();
+        AgentTool observingTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "observe";
+            }
+
+            @Override
+            public String description() {
+                return "records the context it was called with";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                observed.set(context);
+                return "ok";
+            }
+        };
+
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder().id("1").name("observe").arguments("{}").build();
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request))))
+                .thenReturn(Response.from(AiMessage.from("done")));
+
+        new ToolCallingChatEngine(model, List.of(observingTool), CONTEXT).chat("go");
+
+        assertThat(observed.get()).isEqualTo(CONTEXT);
+        assertThat(observed.get().tenantId()).isEqualTo("tenant-1");
+        assertThat(observed.get().executionId()).isEqualTo("exec-1");
     }
 
     @Test
@@ -86,7 +128,7 @@ class ToolCallingChatEngineTest {
                 .thenReturn(Response.from(AiMessage.from(List.of(request))))
                 .thenReturn(Response.from(AiMessage.from("done")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool)).chat("Echo 'hello'");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("Echo 'hello'");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);
@@ -111,7 +153,7 @@ class ToolCallingChatEngineTest {
                 .thenReturn(Response.from(AiMessage.from(List.of(request))))
                 .thenReturn(Response.from(AiMessage.from("handled gracefully")));
 
-        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool)).chat("call ghost tool");
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("call ghost tool");
 
         assertThat(result.reply()).isEqualTo("handled gracefully");
     }
@@ -135,7 +177,7 @@ class ToolCallingChatEngineTest {
             }
 
             @Override
-            public String execute(Map<String, String> arguments) {
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
                 throw new RuntimeException("kaboom");
             }
         };
@@ -148,7 +190,7 @@ class ToolCallingChatEngineTest {
                 .thenReturn(Response.from(AiMessage.from(List.of(request))))
                 .thenReturn(Response.from(AiMessage.from("recovered")));
 
-        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(failingTool)).chat("trigger boom");
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(failingTool), CONTEXT).chat("trigger boom");
 
         assertThat(result.reply()).isEqualTo("recovered");
     }
@@ -158,7 +200,7 @@ class ToolCallingChatEngineTest {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool)).chat("hi");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("hi");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ToolSpecification>> specsCaptor = ArgumentCaptor.forClass(List.class);
@@ -175,7 +217,7 @@ class ToolCallingChatEngineTest {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool)).chat("hi there");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("hi there");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);

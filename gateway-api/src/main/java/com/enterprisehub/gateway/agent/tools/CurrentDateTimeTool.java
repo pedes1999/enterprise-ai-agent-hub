@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.agent.tools;
 
 import com.enterprisehub.core.tool.AgentTool;
+import com.enterprisehub.core.tool.ToolExecutionContext;
 
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -35,7 +36,7 @@ public class CurrentDateTimeTool implements AgentTool {
     }
 
     @Override
-    public String execute(Map<String, String> arguments) {
+    public String execute(ToolExecutionContext context, Map<String, String> arguments) {
         ZoneId zoneId;
         try {
             zoneId = ZoneId.of(arguments.getOrDefault("timezone", "UTC"));

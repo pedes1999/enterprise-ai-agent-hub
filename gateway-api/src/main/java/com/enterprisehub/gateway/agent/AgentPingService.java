@@ -72,8 +72,12 @@ public class AgentPingService {
         String apiKey = resolveApiKey(tenantId);
         String modelName = llmProperties.anthropicModelName();
 
+        // Synthetic id -- these spike endpoints don't create a real
+        // agent_executions row (see the class javadoc). Once real agent
+        // orchestration exists (Weeks 9-10), this becomes that row's id.
+        String executionId = UUID.randomUUID().toString();
         SharedExecutionContext context = sharedExecutionContextFactory.create(
-                tenantId.toString(), LlmProvider.ANTHROPIC, apiKey, modelName,
+                tenantId.toString(), executionId, LlmProvider.ANTHROPIC, apiKey, modelName,
                 List.of(new CurrentDateTimeTool()));
 
         ToolCallingChatEngine.ToolChatResult result;

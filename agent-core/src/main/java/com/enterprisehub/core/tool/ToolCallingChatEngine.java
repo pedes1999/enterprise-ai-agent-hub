@@ -33,13 +33,15 @@ public class ToolCallingChatEngine {
     private final ChatLanguageModel chatModel;
     private final Map<String, AgentTool> toolsByName;
     private final List<ToolSpecification> toolSpecifications;
+    private final ToolExecutionContext executionContext;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools) {
+    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
         this.toolSpecifications = tools.stream().map(ToolCallingChatEngine::toSpecification).toList();
+        this.executionContext = executionContext;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way. */
@@ -70,7 +72,7 @@ public class ToolCallingChatEngine {
             return "Error: no tool registered with name '" + request.name() + "'";
         }
         try {
-            return tool.execute(parseArguments(request.arguments()));
+            return tool.execute(executionContext, parseArguments(request.arguments()));
         } catch (Exception e) {
             return "Error executing tool '" + request.name() + "': " + e.getMessage();
         }
