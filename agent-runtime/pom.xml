@@ -15,17 +15,15 @@
     <name>agent-runtime</name>
     <description>Sandboxed tool execution: filesystem, terminal, and git operations invoked by agents</description>
 
+    <!-- No JGit: git operations run INSIDE the sandbox (a `git` shell command
+         via SandboxClient), same as everything else agents do. An in-process
+         library would clone LLM-directed, potentially-untrusted repository
+         content directly onto our own host, defeating the whole point of
+         sandboxing. See GitCloneTool. -->
     <dependencies>
         <dependency>
             <groupId>com.enterprisehub</groupId>
             <artifactId>agent-core</artifactId>
-        </dependency>
-
-        <!-- JGit for programmatic git operations instead of shelling out where possible -->
-        <dependency>
-            <groupId>org.eclipse.jgit</groupId>
-            <artifactId>org.eclipse.jgit</artifactId>
-            <version>6.10.0.202406032230-r</version>
         </dependency>
 
         <dependency>

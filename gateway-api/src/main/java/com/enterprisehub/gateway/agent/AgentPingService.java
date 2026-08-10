@@ -14,7 +14,9 @@ import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
+import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
+import com.enterprisehub.runtime.tools.GitCloneTool;
 import com.enterprisehub.runtime.tools.RunShellCommandTool;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.springframework.http.HttpStatus;
@@ -28,9 +30,11 @@ import java.util.UUID;
  * chain end to end -- encrypted vendor credential in Postgres -> decrypted
  * at request time -> real LangChain4j client -> real Anthropic API call ->
  * response back to the caller, and now also -> SharedExecutionContext ->
- * tool-calling loop -> a real tool actually invoked, including a real
- * sandboxed one (RunShellCommandTool, via agent-runtime's SandboxClient ->
- * sidecar -> E2B). Every tool call is audited to tool_executions
+ * tool-calling loop -> a real tool actually invoked, including real
+ * sandboxed ones (RunShellCommandTool and GitCloneTool, via agent-runtime's
+ * SandboxClient -> sidecar -> E2B; GitCloneTool additionally resolves the
+ * tenant's GIT tool_credentials via CredentialResolver). Every tool call is
+ * audited to tool_executions
  * regardless (JpaToolExecutionListener), but this is still deliberately
  * NOT the real agent execution model: no async job, nothing persisted to
  * agent_executions itself, no repository/workspace context. It exists to
@@ -47,6 +51,7 @@ public class AgentPingService {
     private final LlmProperties llmProperties;
     private final SandboxClient sandboxClient;
     private final ToolExecutionListener toolExecutionListener;
+    private final CredentialResolver credentialResolver;
 
     public AgentPingService(VendorCredentialRepository vendorCredentialRepository,
                              VendorCredentialService vendorCredentialService,
@@ -54,7 +59,8 @@ public class AgentPingService {
                              SharedExecutionContextFactory sharedExecutionContextFactory,
                              LlmProperties llmProperties,
                              SandboxClient sandboxClient,
-                             ToolExecutionListener toolExecutionListener) {
+                             ToolExecutionListener toolExecutionListener,
+                             CredentialResolver credentialResolver) {
         this.vendorCredentialRepository = vendorCredentialRepository;
         this.vendorCredentialService = vendorCredentialService;
         this.llmEngineFactory = llmEngineFactory;
@@ -62,6 +68,7 @@ public class AgentPingService {
         this.llmProperties = llmProperties;
         this.sandboxClient = sandboxClient;
         this.toolExecutionListener = toolExecutionListener;
+        this.credentialResolver = credentialResolver;
     }
 
     public AgentPingResponse ping(UUID tenantId, String prompt) {
@@ -91,7 +98,8 @@ public class AgentPingService {
         String executionId = UUID.randomUUID().toString();
         List<AgentTool> tools = List.of(
                 new CurrentDateTimeTool(),
-                new RunShellCommandTool(sandboxClient, toolExecutionListener));
+                new RunShellCommandTool(sandboxClient, toolExecutionListener),
+                new GitCloneTool(sandboxClient, toolExecutionListener, credentialResolver));
         SharedExecutionContext context = sharedExecutionContextFactory.create(
                 tenantId.toString(), executionId, LlmProvider.ANTHROPIC, apiKey, modelName, tools);
 

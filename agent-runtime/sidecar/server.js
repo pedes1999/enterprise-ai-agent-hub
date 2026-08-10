@@ -99,22 +99,36 @@ app.post('/sandboxes/:id/commands', async (req, res) => {
     const result = await entry.sandbox.commands.run(command, {
       timeoutMs: (timeoutSeconds || 30) * 1000,
     });
-
-    const stdout = truncate(result.stdout, entry.maxOutputBytes);
-    const stderr = truncate(result.stderr, entry.maxOutputBytes);
-
-    res.json({
-      exitCode: result.exitCode,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      truncated: stdout.truncated || stderr.truncated,
-      durationMs: Date.now() - start,
-    });
+    respondWithCommandResult(res, result, entry, start);
   } catch (err) {
+    // E2B's SDK throws (rather than returning a result) when the command
+    // itself exits non-zero -- the thrown error still carries
+    // exitCode/stdout/stderr, so surface those as a normal 200 response.
+    // The command RAN fine; it's the PROGRAM it invoked that failed, which
+    // is a completely different, non-exceptional outcome from the
+    // sidecar/sandbox itself failing (network error, sandbox creation
+    // failure, timeout) -- only the latter is a real 502.
+    if (err && typeof err.exitCode === 'number') {
+      respondWithCommandResult(res, err, entry, start);
+      return;
+    }
     console.error(`[command failed] sandboxId=${req.params.id}`, err);
     res.status(502).json({ error: `Command execution failed: ${err.message}` });
   }
 });
+
+function respondWithCommandResult(res, result, entry, start) {
+  const stdout = truncate(result.stdout, entry.maxOutputBytes);
+  const stderr = truncate(result.stderr, entry.maxOutputBytes);
+
+  res.json({
+    exitCode: result.exitCode,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    truncated: stdout.truncated || stderr.truncated,
+    durationMs: Date.now() - start,
+  });
+}
 
 app.put('/sandboxes/:id/files', async (req, res) => {
   const entry = getEntry(req, res);

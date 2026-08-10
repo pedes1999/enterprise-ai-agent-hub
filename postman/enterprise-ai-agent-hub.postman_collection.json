@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "eba2f972-87f1-46b8-b6b1-103940792bfa",
+    "_postman_id": "ed4ce74c-4503-4cba-b2f5-4d6a75f38b82",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through the agent-runtime sandbox integration (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, LLM ping + tool-calling, real sandboxed shell command execution) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command request will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up.",
+    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption, LLM ping + tool-calling, real sandboxed shell command execution, real sandboxed git clone) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1255,7 +1255,326 @@
       ]
     },
     {
-      "name": "5. Agents (LLM ping + tool-calling)",
+      "name": "5. Tool Credentials (Admin-only)",
+      "item": [
+        {
+          "name": "Store Git Credential",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialKind\": \"git\",\n  \"value\": \"ghp_test_token_12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Kind stored as GIT', () => pm.expect(json.credentialKind).to.eql('GIT'));",
+                  "pm.test('Response never echoes the raw value back', () => pm.expect(JSON.stringify(json)).to.not.include('ghp_test_token_12345'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Tool Credentials",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Git credential is listed', () => pm.expect(json.some(c => c.credentialKind === 'GIT')).to.eql(true));",
+                  "pm.test('Summary never includes a value field', () => pm.expect(JSON.stringify(json)).to.not.include('ghp_test_token'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rotate Git Credential (Same Kind Twice)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialKind\": \"GIT\",\n  \"value\": \"ghp_rotated_token_67890\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List After Rotate - Still Exactly One Git Row",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const gitRows = json.filter(c => c.credentialKind === 'GIT');",
+                  "pm.test('Rotation updated in place, did not duplicate the row', () => pm.expect(gitRows.length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Store Credential - Invalid Kind Rejected",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialKind\": \"SSH\",\n  \"value\": \"some-value\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Developer Forbidden From Tool Credentials",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403 Forbidden (DEVELOPER cannot manage credentials)', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Git Credential",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials/GIT",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials",
+                "GIT"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Credential - Unknown Kind Returns 404",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials/GIT",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials",
+                "GIT"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 Not Found (already deleted above)', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Agents (LLM ping + tool-calling)",
       "item": [
         {
           "name": "Store Anthropic Credential For Agent Tests",
@@ -1546,6 +1865,56 @@
                   "const json = pm.response.json();",
                   "pm.test('The shell command tool was invoked', () => pm.expect(json.toolWasUsed).to.eql(true));",
                   "pm.test('Reply reflects a real sandboxed command result', () => pm.expect(json.reply.toLowerCase()).to.include('linux'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping With Tools - Clones A Real Public Repository",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping-with-tools",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping-with-tools"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Use the git_clone tool to clone https://github.com/octocat/Hello-World.git. Just report whether the clone succeeded or failed and the exit code -- do not run any other commands.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK (requires the sandbox sidecar running)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('The git_clone tool was invoked', () => pm.expect(json.toolWasUsed).to.eql(true));",
+                  "pm.test('Reply reports success (public repo, no credential needed)', () => pm.expect(json.reply.toLowerCase()).to.include('succeed'));"
                 ]
               }
             }
@@ -1929,7 +2298,7 @@
       ]
     },
     {
-      "name": "6. Cross-Tenant Isolation",
+      "name": "7. Cross-Tenant Isolation",
       "item": [
         {
           "name": "Register Second Tenant (Globex)",
@@ -2139,7 +2508,7 @@
       ]
     },
     {
-      "name": "7. Health",
+      "name": "8. Health",
       "item": [
         {
           "name": "Actuator Health Check",

@@ -12,6 +12,7 @@ import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
+import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -52,8 +53,9 @@ class AgentPingServiceTest {
         LlmProperties properties = new LlmProperties("claude-3-5-sonnet-20240620");
         SandboxClient sandboxClient = mock(SandboxClient.class);
         ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
+        CredentialResolver credentialResolver = mock(CredentialResolver.class);
         service = new AgentPingService(vendorCredentialRepository, vendorCredentialService, llmEngineFactory,
-                sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener);
+                sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver);
     }
 
     private VendorCredential activeCredential() {
