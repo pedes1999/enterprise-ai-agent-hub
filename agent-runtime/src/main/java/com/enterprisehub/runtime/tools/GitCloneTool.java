@@ -27,11 +27,7 @@ public class GitCloneTool extends AbstractSandboxedTool {
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration SANDBOX_MAX_LIFETIME = Duration.ofMinutes(3);
     private static final long MAX_OUTPUT_BYTES = 64 * 1024;
-    // /workspace at filesystem root is NOT writable by the sandbox's default
-    // user (confirmed live: mkdir itself fails there with exit 1,
-    // permission denied). /tmp is writable -- already confirmed by
-    // RunShellCommandToolManualIT's ephemerality test.
-    private static final String CLONE_TARGET_DIR = "/tmp/workspace/repo";
+    private static final String CLONE_TARGET_DIR = Workspace.ROOT;
     private static final String GIT_CREDENTIAL_KIND = "GIT";
     private static final String GIT_TOKEN_ENV_VAR = "GIT_TOKEN";
 

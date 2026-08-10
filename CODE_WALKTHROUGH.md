@@ -60,7 +60,7 @@ controller method body.
 | `SharedExecutionContextFactory` | `create(tenantId, executionId, provider, apiKey, modelName, tools)` → builds the `ChatLanguageModel` via `LlmEngineFactory` and wraps it in a new `SharedExecutionContext`. This is the only place `agent-core` and `gateway-api` meet for context assembly. |
 | `tool.AgentTool` | The interface every tool (real or trivial) implements: `name()`, `description()`, `parameterDescriptions()`, `execute(ToolExecutionContext, Map<String,String> arguments)`. Deliberately our own interface, not LangChain4j's `@Tool` annotation — see its javadoc. |
 | `tool.ToolExecutionContext` | `record(tenantId, executionId)` — passed explicitly into every `execute()` call instead of a `ThreadLocal`, because sandboxed execution goes over HTTP to a sidecar and may eventually be asynchronous; `ThreadLocal`s don't survive a thread hop. |
-| `tool.ToolCallingChatEngine` | The actual tool-calling loop. See §3 below for the full call sequence. |
+| `tool.ToolCallingChatEngine` | The actual tool-calling loop -- bounded multi-round now (`MAX_TOOL_ROUNDS = 6`), not single-shot. See §3 below for the full call sequence. |
 
 ### Sandboxed tool execution (`agent-runtime`)
 
@@ -72,9 +72,14 @@ controller method body.
 | `sandbox.SandboxClient` | Interface: `create(spec)`, `runCommand(handle, command, timeout)`, `writeFile`, `readFile`, `destroy(handle)`. Vendor-neutral — knows nothing about E2B. |
 | `sandbox.http.SandboxClientHttpImpl` | The only implementation. Talks HTTP (JDK's `java.net.http.HttpClient`) to the Node sidecar. Pure translation layer — no retry/timeout policy of its own beyond a connect timeout; the sidecar owns real enforcement. |
 | `sandbox.SandboxRunner` | `withSandbox(spec, work)` — guarantees `create → work.apply(handle) → destroy`, even if `work` throws. Used by every sandboxed tool so a tool implementation can't forget cleanup. |
+| `sandbox.SandboxSession` | Decorator around a `SandboxClient` that makes ONE real sandbox last for a whole execution instead of one tool call. Every tool still calls `create()`/`destroy()` on what it thinks is its own `SandboxClient` (via `SandboxRunner`, unmodified) — the session intercepts those: first `create()` from any tool actually provisions one (using the session's own pre-built spec, not the caller's), every later `create()` returns the cached handle, `destroy()` no-ops. `endSession()` is the real teardown, called once by whoever owns the session (`AgentPromptRunner`). See §6/§8 below. |
+| `tools.Workspace` | Package-private constant: `ROOT = "/tmp/workspace/repo"` — the directory every sandboxed tool now agrees on, so `git_clone`, `run_shell_command`, `read_file`, and `write_file` can all see each other's work within one session. |
+| `tools.WorkspacePath` | Resolves an LLM-supplied relative path against `Workspace.ROOT`, rejecting absolute paths and `..` traversal — the same "never trust tool arguments" posture as `GitCloneTool`'s URL validation. Used by `ReadFileTool`/`WriteFileTool`. |
 | `tools.AbstractSandboxedTool` | Base class every real tool extends. Its `execute()` is `final` — wraps a subclass's `doExecute()` with audit logging (success and failure paths, via `ToolExecutionListener`) so that logic lives in exactly one place. |
-| `tools.RunShellCommandTool` | `doExecute()`: builds a `SandboxSpec` with no credentials, runs the given `command` via `withSandbox`, formats `CommandResult` into a string the LLM can read. |
-| `tools.GitCloneTool` | `doExecute()`: validates the URL is `https://` and doesn't start with `-` (argument-injection defense), calls `CredentialResolver.resolve(tenantId, "GIT")`, builds a `git clone` command (with `git -c http.extraHeader=...` if a token was resolved), runs it the same way as `RunShellCommandTool`. |
+| `tools.RunShellCommandTool` | `doExecute()`: builds a `SandboxSpec` with no credentials, prefixes the command with `mkdir -p <workspace> && cd <workspace> &&` so it runs from the shared workspace, runs it via `withSandbox`, formats `CommandResult` into a string the LLM can read. |
+| `tools.GitCloneTool` | `doExecute()`: validates the URL is `https://` and doesn't start with `-` (argument-injection defense), calls `CredentialResolver.resolve(tenantId, "GIT")` (to decide whether to add an auth header — the actual env var, if any, was already injected when the session's sandbox was created, see `AgentPromptRunner`), builds a `git clone` command (with `git -c http.extraHeader=...` if a token was resolved), runs it the same way as `RunShellCommandTool`, cloning into `Workspace.ROOT`. |
+| `tools.ReadFileTool` | `doExecute()`: resolves `path` via `WorkspacePath`, reads it via `SandboxClient.readFile`, truncates client-side at 64KB. |
+| `tools.WriteFileTool` | `doExecute()`: resolves `path`, validates `content` isn't over 256KB, runs a `mkdir -p` for the parent directory first (same lesson as `GitCloneTool`'s original bug — never assume a directory exists), then `SandboxClient.writeFile`. |
 | `credential.CredentialResolver` | Interface: `resolve(tenantId, credentialKind) -> Map<String,String>` (env-var-name → value). agent-runtime doesn't know how or where credentials are stored. |
 | `audit.ToolExecutionListener` | Interface: `onToolExecuted(ToolExecutionAuditRecord)`. agent-runtime doesn't know how or where audit records are persisted. |
 
@@ -92,7 +97,7 @@ controller method body.
 |---|---|
 | `agent.AgentPingController` | `POST /agents/ping` and `POST /agents/ping-with-tools`. `@PreAuthorize("hasAnyRole('ADMIN','DEVELOPER')")`. Pulls `tenantId` off the authenticated `PlatformPrincipal` — **never** trusts a tenant id in the request body. The **synchronous spike** path. |
 | `agent.AgentPingService` | Thin orchestration behind both spike endpoints; delegates the actual tool-calling work to `AgentPromptRunner`. See §3 for the full call sequence. |
-| `agent.AgentPromptRunner` | The real "run this prompt with tools for this tenant" logic (resolve credential, assemble tools, build `SharedExecutionContext`, call `chat()`) — extracted so both `AgentPingService` (sync) and `AgentJobWorker` (async) share one implementation instead of two that could drift apart. |
+| `agent.AgentPromptRunner` | The real "run this prompt with tools for this tenant" logic — extracted so both `AgentPingService` (sync) and `AgentJobWorker` (async) share one implementation instead of two that could drift apart. `run()`: resolve the LLM credential, resolve every OTHER credential kind a tool might need up front (`buildSessionSpec` — today just `GIT`) and build one `SandboxSession` from it, construct all five tools wired to that shared session, build `SharedExecutionContext`, call `chat()`, and `session.endSession()` in a `finally` block regardless of outcome. See §3/§6. |
 | `agent.tools.CurrentDateTimeTool` | Trivial, non-sandboxed `AgentTool` used to prove the tool-calling wiring works independent of the sandbox infrastructure. |
 | `agent.AgentExecutionController` | `POST /agents/execute` (ADMIN/DEVELOPER) and `GET /agents/executions/{id}` (ADMIN/DEVELOPER/READONLY) — the **real, durable, async** path. See §8. |
 | `agent.AgentExecutionService` | Every state transition of an `agent_executions` row: `enqueue()`, `claimNext()` (flips `QUEUED`→`RUNNING`), `complete()`/`fail()`, `findForTenant()`. Each is its own short `@Transactional` method — `claimNext()` in particular must commit fast so its row lock isn't held for the whole agent run that follows. |
@@ -128,15 +133,24 @@ Authorization: Bearer <jwt>
   → `agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt())`
   — note: tenant id comes from the **validated JWT principal**, never from the request body
 
-**3. Service orchestration — `AgentPingService.pingWithTools()`**
+**3. Service orchestration — `AgentPingService.pingWithTools()` → `AgentPromptRunner.run()`**
 ```java
+// AgentPingService.pingWithTools() -- thin wrapper
 validatePrompt(prompt)                     // rejects null/blank
-String apiKey = resolveApiKey(tenantId)    // see 3a below
-String executionId = UUID.randomUUID()...  // synthetic — no agent_executions row yet (spike)
-List<AgentTool> tools = [CurrentDateTimeTool, RunShellCommandTool, GitCloneTool]
-SharedExecutionContext context = sharedExecutionContextFactory.create(...)   // see 3b
-ToolChatResult result = context.chat(prompt)                                  // see §4 (the loop)
-return new AgentToolPingResponse(...)
+String executionId = UUID.randomUUID()...  // synthetic -- no agent_executions row for this spike endpoint
+ToolChatResult result = agentPromptRunner.run(tenantId, executionId, prompt)   // everything below
+
+// AgentPromptRunner.run() -- the actual work
+String apiKey = resolveApiKey(tenantId)             // see 3a below -- same as before
+SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId))  // see 3c
+try {
+    List<AgentTool> tools = [CurrentDateTimeTool, RunShellCommandTool(session,...), GitCloneTool(session,...),
+                              ReadFileTool(session,...), WriteFileTool(session,...)]
+    SharedExecutionContext context = sharedExecutionContextFactory.create(...)   // see 3b
+    return context.chat(prompt)                                                  // see §4 (the multi-round loop)
+} finally {
+    session.endSession()   // real sandbox teardown, exactly once, regardless of how many tool calls happened
+}
 ```
 
 **3a. `resolveApiKey(tenantId)`**
@@ -151,6 +165,11 @@ return new AgentToolPingResponse(...)
 - `new SharedExecutionContext(tenantId, executionId, chatModel, tools)`
   → internally builds `new ToolCallingChatEngine(chatModel, tools, new ToolExecutionContext(tenantId, executionId))` — this is where the explicit context object gets created and frozen for the whole request
 
+**3c. `buildSessionSpec(tenantId, executionId)` — the credential-merging step SandboxSession needs**
+- `credentialResolver.resolve(tenantId, "GIT")` — resolved HERE, before any tool runs, not lazily inside `GitCloneTool` the way it used to be the only place this happened
+- why up front: E2B only accepts env vars at sandbox **creation** time. If the session's sandbox got created by whichever tool happens to run first — say `RunShellCommandTool`, which asks for no credentials — a `GitCloneTool` call two rounds later would find no `GIT_TOKEN` in the already-running sandbox, silently. Resolving every known credential kind before the session even exists sidesteps that ordering trap entirely.
+- `GitCloneTool` still calls `credentialResolver.resolve()` itself too, redundantly — not to get the token into the sandbox (already done here), but to decide whether to add the `http.extraHeader` flag to its `git clone` command at all.
+
 ---
 
 ## 4. The tool-calling loop itself — `ToolCallingChatEngine.chat(prompt)`
@@ -162,28 +181,34 @@ tool" or "why did the tool get the wrong arguments" bugs live.
 chat(userMessage)
  │
  ├─ messages = [UserMessage(userMessage)]
+ ├─ toolWasUsed = false
  │
- ├─ response = chatModel.generate(messages, toolSpecifications)     // <- REAL Anthropic API call #1
- │       toolSpecifications was built once in the constructor:
- │       toSpecification(tool) for each AgentTool -> ToolSpecification
- │       (name, description, and EVERY parameter typed as a plain string —
- │        see AgentTool's javadoc for why: no nested/typed params yet)
+ ├─ for round in 0 until MAX_TOOL_ROUNDS (6):                         // <- the multi-round loop
+ │     response = chatModel.generate(messages, toolSpecifications)    // <- REAL Anthropic API call
+ │         toolSpecifications was built once in the constructor:
+ │         toSpecification(tool) for each AgentTool -> ToolSpecification
+ │         (name, description, and EVERY parameter typed as a plain string —
+ │          see AgentTool's javadoc for why: no nested/typed params yet)
  │
- ├─ aiMessage = response.content()
+ │     aiMessage = response.content()
  │
- ├─ if !aiMessage.hasToolExecutionRequests():
- │       return ToolChatResult(aiMessage.text(), toolWasUsed=false)   // model answered directly, no tool needed
+ │     if !aiMessage.hasToolExecutionRequests():
+ │         return ToolChatResult(aiMessage.text(), toolWasUsed)   // model settled on a final answer THIS round -- done
  │
- ├─ (model wants to call one or more tools)
- ├─ messages.add(aiMessage)
- ├─ for each ToolExecutionRequest in aiMessage.toolExecutionRequests():
- │       result = executeTool(request)          // see below
- │       messages.add(ToolExecutionResultMessage.from(request, result))
+ │     toolWasUsed = true
+ │     messages.add(aiMessage)
+ │     for each ToolExecutionRequest in aiMessage.toolExecutionRequests():
+ │         result = executeTool(request)          // see below -- may run a sandboxed tool for real
+ │         messages.add(ToolExecutionResultMessage.from(request, result))
+ │     // loop back to the top -- model gets another turn, now seeing this round's tool results too
  │
- ├─ finalResponse = chatModel.generate(messages, toolSpecifications)  // <- REAL Anthropic API call #2, now WITH tool results in context
- │
- └─ return ToolChatResult(finalResponse.content().text(), toolWasUsed=true)
+ └─ (round cap hit -- model never stopped asking for tools on its own)
+    finalResponse = chatModel.generate(messages, [])   // NO tool specs -- forces a text answer, not another round
+    return ToolChatResult(finalResponse.content().text(), toolWasUsed)
 ```
+
+Each round is a real Anthropic API call — a 3-round exchange (clone, read, final answer) costs
+3 calls, not 2. Easy to undercount when estimating latency/cost from this loop; see §8.
 
 `executeTool(request)`:
 ```
@@ -203,11 +228,16 @@ LLM message. If a tool is silently "not working," check the final model reply te
 have thrown exactly as designed and the model just didn't surface that clearly in its final
 answer.
 
-**Known limitation (by design, not yet a bug to fix):** this loop only executes **one round**
-of tool calls. If the model's first response asks for tool A, and it would need tool B's
-result to decide on a next step, that second round never happens — the loop always ends after
-one "call tools, then answer" cycle. A prompt like *"clone the repo, then list its files"*
-will typically only execute the clone.
+**Formerly a known limitation, now fixed:** this loop used to execute only one round of tool
+calls, so a prompt like *"clone the repo, then list its files"* would only execute the clone.
+It's now bounded-multi-round (`MAX_TOOL_ROUNDS = 6`) specifically to support sequences like
+that. The remaining reason a multi-step prompt might still only do the first step: the model
+itself decides not to continue (e.g. it hedges after the first tool result instead of pushing
+forward) — that's a prompt-engineering question, not a loop-mechanics one anymore. If you're
+debugging "it stopped after one tool call," check whether `aiMessage.hasToolExecutionRequests()`
+was actually false on round 2 (the model chose to answer) versus the round cap being hit (6
+rounds of genuine back-and-forth is a lot for most tasks — hitting it usually means the model is
+stuck in some kind of retry loop, worth looking at directly).
 
 ---
 
@@ -248,14 +278,22 @@ AbstractSandboxedTool.execute(context, arguments)      // final, not overridable
      │  spec = SandboxSpec(tenantId, executionId, credentials, maxLifetime=3min, maxOutputBytes=64KB)
      │
      │  result = withSandbox(spec, handle -> sandboxClient.runCommand(handle, command, timeout=60s))
+     │       │  NOTE: `sandboxClient` here is a SandboxSession, not SandboxClientHttpImpl
+     │       │  directly -- GitCloneTool has no idea, and doesn't need to (see AbstractSandboxedTool's
+     │       │  javadoc / SandboxSession's own javadoc).
      │       │
      │       └─ SandboxRunner.withSandbox(spec, work)
-     │            handle = sandboxClient.create(spec)
-     │                 -> SandboxClientHttpImpl.create()
-     │                    -> POST http://<sidecar>/sandboxes  {tenantId, executionId, credentials, maxLifetimeSeconds, maxOutputBytes}
-     │                    -> sidecar: Sandbox.create({apiKey: E2B_API_KEY, envVars: credentials, timeoutMs, metadata})
-     │                       -> REAL E2B API CALL -- a real Firecracker microVM boots here
-     │                    <- {sandboxId}
+     │            handle = sandboxClient.create(spec)      // = SandboxSession.create(spec) -- spec here is IGNORED
+     │                 IF this is the first sandboxed tool call in this execution:
+     │                     -> delegate.create(session's OWN spec, built by AgentPromptRunner.buildSessionSpec --
+     │                                         NOT the spec GitCloneTool just built two lines up)
+     │                        -> SandboxClientHttpImpl.create()
+     │                           -> POST http://<sidecar>/sandboxes  {tenantId, executionId, credentials, maxLifetimeSeconds, maxOutputBytes}
+     │                           -> sidecar: Sandbox.create({apiKey: E2B_API_KEY, envVars: credentials, timeoutMs, metadata})
+     │                              -> REAL E2B API CALL -- a real Firecracker microVM boots here
+     │                           <- {sandboxId}
+     │                 ELSE (a RunShellCommandTool/ReadFileTool/etc. call already created one this execution):
+     │                     -> returns the SAME cached handle, no HTTP call, no new sandbox
      │            try:
      │                result = work.apply(handle)   // = sandboxClient.runCommand(handle, command, 60s)
      │                    -> SandboxClientHttpImpl.runCommand()
@@ -268,16 +306,22 @@ AbstractSandboxedTool.execute(context, arguments)      // final, not overridable
      │                             (this was bug #1 found via live testing -- see README)
      │                       <- {exitCode, stdout, stderr, truncated, durationMs}
      │            finally:
-     │                sandboxClient.destroy(handle)
-     │                    -> SandboxClientHttpImpl.destroy()
-     │                       -> DELETE http://<sidecar>/sandboxes/{id}
-     │                       -> sidecar: entry.sandbox.kill()  (idempotent, never throws to the caller)
+     │                sandboxClient.destroy(handle)   // = SandboxSession.destroy(handle) -- a NO-OP
+     │                    -- the real DELETE http://<sidecar>/sandboxes/{id} does NOT happen here
+     │                    -- SandboxRunner (and every tool) thinks it just cleaned up after itself,
+     │                    -- but the session is still alive for the next tool call in this execution.
+     │                    -- The REAL destroy happens exactly once, in AgentPromptRunner's finally
+     │                    -- block, via session.endSession(), after the whole multi-round loop (§4)
+     │                    -- has completely finished -- see §3's step-by-step.
      │
      └─ formatResult(result) -> "exit_code: 0\nRepository cloned to /tmp/workspace/repo.\nstdout:\n..."
 ```
 
 The formatted string above is exactly what gets fed back into `ToolCallingChatEngine`'s
-second `chatModel.generate()` call as the tool's result.
+next `chatModel.generate()` call as the tool's result — which, per §4, might trigger another
+round of tool calls (e.g. `read_file` or `run_shell_command` next) rather than a final answer.
+Those calls go through this exact same stack, hitting the "already created, return cached
+handle" branch instead of provisioning a second sandbox.
 
 ---
 
@@ -285,9 +329,10 @@ second `chatModel.generate()` call as the tool's result.
 
 Everything in §3-§5 above is the **synchronous spike** (`/agents/ping-with-tools`) — it blocks
 the HTTP thread for the whole run and persists nothing if the app crashes mid-request. This is
-the actual job-queue path (Weeks 9-10), and it reuses `AgentPromptRunner` (§3's step 3b/4/5 —
-tool assembly, `SharedExecutionContext`, the tool-calling loop) for the real work; what's
-different here is everything *around* that call.
+the actual job-queue path (Weeks 9-10), and it reuses the ENTIRE `AgentPromptRunner.run()` call
+from §3 (session creation, tool assembly, `SharedExecutionContext`, the multi-round loop, and
+`endSession()`) unchanged for the real work; what's different here is everything *around* that
+one call.
 
 **6a. The enqueue request returns immediately, before any LLM call happens**
 
@@ -339,10 +384,11 @@ pollAndProcessOne()                                    // fires every app.job-wo
       TenantContext.set(job.getTenantId().toString())   // <-- switches OFF the sentinel, onto the
       try:                                                //     job's REAL tenant, before anything else runs
           result = AgentPromptRunner.run(job.tenantId, job.id.toString(), job.prompt)
-               -- IDENTICAL to §3 step 3b/§4's tool-calling loop -- resolves this tenant's
-               -- Anthropic credential (RLS-scoped, now correctly, since TenantContext is the
-               -- real tenant), builds the same 3-tool list, runs chat() to completion,
-               -- including any sandboxed tool execution and its own audit logging.
+               -- IDENTICAL to §3's full run() breakdown -- resolves this tenant's Anthropic
+               -- credential (RLS-scoped, now correctly, since TenantContext is the real tenant),
+               -- builds a fresh SandboxSession + all five tools, runs chat()'s multi-round loop
+               -- to completion (§4), including any sandboxed tool execution and its own audit
+               -- logging, and tears the session down in its own finally block.
           AgentExecutionService.complete(job.id, result.reply(), result.toolWasUsed())
                -- sets status="SUCCEEDED", reply, toolWasUsed, completedAt -- RLS-scoped UPDATE,
                -- correctly scoped because TenantContext is still the real tenant here.
@@ -386,12 +432,23 @@ LOCKED`) or increasing the scheduler's thread pool, neither of which has been do
 | "Execution jumps straight to FAILED with a credential error" | That's `AgentPromptRunner.resolveApiKey()` throwing inside `AgentJobWorker.runClaimedJob()` — check `errorMessage` on the row (`GET /agents/executions/{id}`); "No active ANTHROPIC credential..." means exactly what it says, `PUT /vendor-credentials` for that tenant first. This is expected, correct behavior, not a bug — see the live-verification note in the README. |
 | "Two workers claimed the same job" / "a job got processed twice" | Should be structurally impossible — `claimNextQueued()`'s `FOR UPDATE SKIP LOCKED` guarantees only one transaction can hold a given row. If you see this, check whether `AgentExecutionService.claimNext()` is being called **outside** a real `@Transactional` context (e.g. a test double or a refactor that lost the annotation) — without an active transaction, the `FOR UPDATE` lock isn't actually held. |
 | "Worker query sees nothing even though rows are QUEUED" | Check `TenantContext.get()` at the moment `claimNextQueued()` runs — it must be exactly `TenantContext.SYSTEM_WORKER_TENANT_ID`. If `AgentJobWorker.claimNext()`'s `TenantContext.set(...)` call was ever removed, refactored away, or reordered after the repository call, the RLS policy's sentinel OR-clause won't match and the query returns nothing for every tenant, silently. |
+| "A tool that ran later can't see what an earlier tool did" (e.g. `read_file` says the file doesn't exist right after `git_clone`) | Check that ALL sandboxed tools in that execution were constructed against the SAME `SandboxSession` instance in `AgentPromptRunner.run()` — if a future change constructs one tool with the raw `sandboxClient` instead of `session`, that tool gets its own private, empty sandbox instead of sharing the real one. Also check `Workspace.ROOT` is the same literal in every tool (`GitCloneTool`, `RunShellCommandTool`, `WorkspacePath`) — a typo'd path would make them technically share a sandbox but still miss each other's files. |
+| "A tool needing a credential doesn't get one, even though it's configured" | Check `AgentPromptRunner.buildSessionSpec()` — it must resolve that credential kind BEFORE the session's sandbox is created. A credential kind added later (e.g. a future `GITHUB` PAT for a "open a PR" tool) that isn't added to `buildSessionSpec` will silently never make it into the sandbox's env, no matter how correctly the tool itself calls `CredentialResolver` — see SandboxSession's javadoc for why this can't be fixed lazily per-tool-call. |
+| "Sandbox lives way longer / shorter than expected" | Check `AgentPromptRunner.SESSION_MAX_LIFETIME` (10 min, session-wide) — NOT the `maxLifetime` field on the `SandboxSpec` an individual tool builds for itself, which `SandboxSession.create()` ignores entirely once a sandbox already exists for this execution (see §5's trace). |
+| "Multi-step prompt only did the first step" | First check whether the model actually requested a second tool call at all — `ToolCallingChatEngine`'s loop is bounded but genuinely multi-round now (§4); if round 2's `aiMessage.hasToolExecutionRequests()` was false, the model chose to stop, which is a prompt-engineering problem, not a loop bug. If it's hitting `MAX_TOOL_ROUNDS`, that usually means the model is stuck retrying something, not that the cap is too low. |
 
 ---
 
-## 8. Quick reference: the two Anthropic API calls per `ping-with-tools` request
+## 8. Quick reference: API call cost per round, and per-execution sandbox cost
 
-Easy to forget when reading logs/costs: a single `/agents/ping-with-tools` call that ends up
-using a tool makes **two** real calls to Anthropic, not one — one to decide whether/which
-tool to call, one to produce the final answer after seeing the tool's result. A request that
-doesn't need a tool makes only the first.
+Easy to forget when reading logs/costs: **every round** of `ToolCallingChatEngine`'s loop
+(§4) is a real call to Anthropic — a 3-round exchange (e.g. clone → read → final answer) is 3
+API calls, not 2, and a prompt that never needs a tool still makes exactly 1. Multiply rounds
+by however many tool calls happened in each round if you're estimating total request volume.
+
+Separately: since `SandboxSession` (§5/§6) keeps one sandbox alive for the WHOLE execution now
+(up to `SESSION_MAX_LIFETIME`, 10 minutes) instead of one sandbox per tool call lasting a few
+minutes each, a multi-tool-call execution's E2B bill is roughly "however long the whole
+execution actually took," not "sum of each tool's own short-lived sandbox." A stuck or slow
+execution now has a correspondingly larger cost exposure than before this change — worth
+knowing if you're watching E2B usage.

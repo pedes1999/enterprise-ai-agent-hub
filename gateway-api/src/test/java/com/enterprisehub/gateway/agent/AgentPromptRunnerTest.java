@@ -4,7 +4,6 @@ import com.enterprisehub.core.SharedExecutionContext;
 import com.enterprisehub.core.SharedExecutionContextFactory;
 import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
-import com.enterprisehub.gateway.agent.tools.CurrentDateTimeTool;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
@@ -21,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -38,6 +38,8 @@ class AgentPromptRunnerTest {
     private SharedExecutionContextFactory sharedExecutionContextFactory;
     private ChatLanguageModel chatLanguageModel;
     private AgentPromptRunner runner;
+    private CredentialResolver credentialResolver;
+    private SandboxClient sandboxClient;
     private final UUID tenantId = UUID.randomUUID();
 
     @BeforeEach
@@ -47,9 +49,13 @@ class AgentPromptRunnerTest {
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
         LlmProperties properties = new LlmProperties("claude-3-5-sonnet-20240620");
-        SandboxClient sandboxClient = mock(SandboxClient.class);
+        sandboxClient = mock(SandboxClient.class);
         ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
-        CredentialResolver credentialResolver = mock(CredentialResolver.class);
+        credentialResolver = mock(CredentialResolver.class);
+        // buildSessionSpec() resolves GIT credentials up front for every
+        // run() call now (see AgentPromptRunner's javadoc on why) -- Map.of()
+        // by default, same as JpaCredentialResolver's real "nothing configured" behavior.
+        when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
         runner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
                 sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver);
     }
@@ -71,12 +77,21 @@ class AgentPromptRunnerTest {
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
     }
 
+    /**
+     * Builds the SharedExecutionContext from whatever REAL tools list
+     * AgentPromptRunner.run() actually assembled and passed in (captured
+     * via the mock, not a hand-rolled stand-in) -- so tests that exercise
+     * git_clone/run_shell_command exercise the real session-wired tool
+     * instances, not a fake with only CurrentDateTimeTool.
+     */
     private void stubContextFactory(String executionId) {
-        SharedExecutionContext context = new SharedExecutionContext(
-                tenantId.toString(), executionId, chatLanguageModel, List.of(new CurrentDateTimeTool()));
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(executionId), eq(LlmProvider.ANTHROPIC),
                 eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any()))
-                .thenReturn(context);
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
+                    return new SharedExecutionContext(tenantId.toString(), executionId, chatLanguageModel, tools);
+                });
     }
 
     @Test
@@ -112,6 +127,48 @@ class AgentPromptRunnerTest {
         assertThat(result.toolWasUsed()).isTrue();
         assertThat(result.reply()).contains("2026-01-01");
         verify(chatLanguageModel, times(2)).generate(anyList(), anyList());
+    }
+
+    @Test
+    void run_multipleSandboxedToolCallsInOneRun_shareOneSandbox_destroyedOnce() {
+        stubCredentialResolution();
+        stubContextFactory("exec-shared");
+
+        ToolExecutionRequest cloneRequest = ToolExecutionRequest.builder()
+                .id("call-1").name("git_clone").arguments("{\"repositoryUrl\":\"https://github.com/org/repo.git\"}").build();
+        ToolExecutionRequest shellRequest = ToolExecutionRequest.builder()
+                .id("call-2").name("run_shell_command").arguments("{\"command\":\"ls\"}").build();
+
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(cloneRequest))))
+                .thenReturn(Response.from(AiMessage.from(List.of(shellRequest))))
+                .thenReturn(Response.from(AiMessage.from("Cloned and listed files")));
+
+        com.enterprisehub.runtime.sandbox.SandboxHandle handle = new com.enterprisehub.runtime.sandbox.SandboxHandle("shared-1");
+        when(sandboxClient.create(any())).thenReturn(handle);
+        when(sandboxClient.runCommand(any(), any(), any()))
+                .thenReturn(new com.enterprisehub.runtime.sandbox.CommandResult(0, "ok", "", false, java.time.Duration.ZERO));
+
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-shared", "clone then list files");
+
+        assertThat(result.toolWasUsed()).isTrue();
+        // Two sandboxed tool calls happened, but only ONE real sandbox was
+        // ever provisioned and destroyed -- this is SandboxSession's whole
+        // point (see AgentPromptRunner's javadoc).
+        verify(sandboxClient, times(1)).create(any());
+        verify(sandboxClient, times(1)).destroy(handle);
+    }
+
+    @Test
+    void run_sandboxNeverTouched_endSessionStillSafe_noDestroyCall() {
+        stubCredentialResolution();
+        stubContextFactory("exec-notools");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("no tool needed")));
+
+        runner.run(tenantId, "exec-notools", "just answer directly");
+
+        verifyNoInteractions(sandboxClient);
     }
 
     @Test

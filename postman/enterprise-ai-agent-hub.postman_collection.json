@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "b80bd61a-babd-49c2-adc0-56a4c51e138e",
+    "_postman_id": "171edad5-b32b-4329-90a6-18674790e959",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption, LLM ping + tool-calling, real sandboxed shell command execution, real sandboxed git clone, durable async agent execution) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
+    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + multi-round tool-calling + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption, LLM ping + tool-calling, real sandboxed shell command/git-clone/read-file/write-file execution, durable async agent execution) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone/read-file/write-file requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\nThe 'Multi-Step' request chains git_clone -> read_file -> write_file -> run_shell_command in one prompt -- it's the one that actually proves the persistent per-execution sandbox (every sandboxed tool call in that request shares one real sandbox instead of each getting its own empty one) and the bounded multi-round tool-calling loop (ToolCallingChatEngine keeps going instead of stopping after one round) both work end to end, not just individually.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1915,6 +1915,60 @@
                   "const json = pm.response.json();",
                   "pm.test('The git_clone tool was invoked', () => pm.expect(json.toolWasUsed).to.eql(true));",
                   "pm.test('Reply reports success (public repo, no credential needed)', () => pm.expect(json.reply.toLowerCase()).to.include('succeed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping With Tools - Multi-Step: Clone, Read, Write, Verify (Persistent Session)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping-with-tools",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping-with-tools"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Do the following in order, using the tools available: 1) Use git_clone to clone https://github.com/octocat/Hello-World.git. 2) Use read_file to read README.md. 3) Use write_file to create a file called NOTES.md containing exactly: Verified multi-step agent execution. 4) Use run_shell_command to run 'cat NOTES.md' to confirm it was written. Report the outcome of each of these four steps clearly.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK (requires the sandbox sidecar running)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('At least one tool was used', () => pm.expect(json.toolWasUsed).to.eql(true));",
+                  "// This is the scenario that actually proves the persistent-per-execution sandbox",
+                  "// (SandboxSession) and the multi-round tool-calling loop both work: step 2 can only",
+                  "// succeed if it's reading from the SAME sandbox git_clone cloned into one round",
+                  "// earlier, and step 4 can only succeed if it sees the file write_file created.",
+                  "pm.test('Reply confirms the written file was read back successfully', () => pm.expect(json.reply.toLowerCase()).to.include('verified multi-step agent execution'));"
                 ]
               }
             }

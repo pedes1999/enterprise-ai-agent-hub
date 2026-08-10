@@ -10,10 +10,15 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * The first real (sandboxed) tool. Every invocation gets a fresh, empty
- * sandbox with no credentials injected -- this tool doesn't need any (it
- * has no notion of "which repo"); a future git-aware tool is where
- * CredentialResolver actually gets used.
+ * The first real (sandboxed) tool. Runs from the shared Workspace.ROOT
+ * directory (created first if missing, so this works whether or not
+ * GitCloneTool has run yet in this execution) -- when a SandboxSession
+ * makes the sandbox persist across the whole execution (see its javadoc),
+ * this is what lets a command like "mvn test" or "ls" naturally see
+ * whatever GitCloneTool cloned earlier in the same run. Without
+ * SandboxSession (e.g. this tool used standalone), each invocation still
+ * gets its own fresh sandbox as before -- only the working directory
+ * changed, not the tool's own lifecycle.
  */
 public class RunShellCommandTool extends AbstractSandboxedTool {
 
@@ -32,9 +37,10 @@ public class RunShellCommandTool extends AbstractSandboxedTool {
 
     @Override
     public String description() {
-        return "Runs a single shell command inside an isolated, ephemeral sandbox and returns its exit code, "
-                + "stdout, and stderr. Use for inspecting a repository, running a build, or any other terminal "
-                + "operation. Every invocation gets a fresh sandbox that is destroyed immediately after.";
+        return "Runs a single shell command inside an isolated sandbox, from the shared workspace directory "
+                + "(the same one git_clone clones into, if it's been used earlier in this run), and returns its "
+                + "exit code, stdout, and stderr. Use for inspecting a repository, running a build, or any other "
+                + "terminal operation.";
     }
 
     @Override
@@ -53,7 +59,8 @@ public class RunShellCommandTool extends AbstractSandboxedTool {
                 context.tenantId(), context.executionId(),
                 Map.of(), SANDBOX_MAX_LIFETIME, MAX_OUTPUT_BYTES);
 
-        CommandResult result = withSandbox(spec, handle -> sandboxClient.runCommand(handle, command, COMMAND_TIMEOUT));
+        String commandInWorkspace = "mkdir -p " + Workspace.ROOT + " && cd " + Workspace.ROOT + " && " + command;
+        CommandResult result = withSandbox(spec, handle -> sandboxClient.runCommand(handle, commandInWorkspace, COMMAND_TIMEOUT));
 
         return formatResult(result);
     }

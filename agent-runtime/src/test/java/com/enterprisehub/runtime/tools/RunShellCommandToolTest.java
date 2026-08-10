@@ -39,7 +39,7 @@ class RunShellCommandToolTest {
     void execute_runsCommandInAFreshSandbox_andDestroysIt() {
         SandboxHandle handle = new SandboxHandle("sandbox-1");
         when(sandboxClient.create(any())).thenReturn(handle);
-        when(sandboxClient.runCommand(eq(handle), eq("ls -la"), any()))
+        when(sandboxClient.runCommand(eq(handle), any(), any()))
                 .thenReturn(new CommandResult(0, "file1\nfile2", "", false, Duration.ofMillis(200)));
 
         String result = tool.execute(CONTEXT, Map.of("command", "ls -la"));
@@ -47,6 +47,22 @@ class RunShellCommandToolTest {
         assertThat(result).contains("exit_code: 0").contains("file1\nfile2");
         verify(sandboxClient).create(any());
         verify(sandboxClient).destroy(handle);
+    }
+
+    @Test
+    void execute_runsFromTheSharedWorkspaceDirectory() {
+        when(sandboxClient.create(any())).thenReturn(new SandboxHandle("s1"));
+        when(sandboxClient.runCommand(any(), any(), any()))
+                .thenReturn(new CommandResult(0, "", "", false, Duration.ZERO));
+
+        tool.execute(CONTEXT, Map.of("command", "ls -la"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getValue())
+                .contains("mkdir -p /tmp/workspace/repo")
+                .contains("cd /tmp/workspace/repo")
+                .endsWith("ls -la");
     }
 
     @Test

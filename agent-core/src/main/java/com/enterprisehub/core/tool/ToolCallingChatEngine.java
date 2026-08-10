@@ -18,17 +18,30 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A minimal, single-round tool-calling loop: send the user's message plus
- * every available tool's specification, and if the model asks to call one
- * or more tools, execute them and send the results back for a final
- * answer. Deliberately not a multi-round agent loop (no repeated
- * tool-call-then-reconsider cycles) -- that's a Week 6+ concern once
- * agent-runtime's real tools (which can fail, need retries, etc.) exist.
- * This proves the wiring: AgentTool -> ToolSpecification -> model decides
- * to call it -> arguments parsed -> tool runs -> result fed back -> final
- * answer.
+ * A bounded, multi-round tool-calling loop: send the user's message plus
+ * every available tool's specification; each round, if the model asks to
+ * call one or more tools, execute them and send the results back, then let
+ * the model decide again -- clone, then read a file, then edit it, then
+ * run tests is a real shape this needs to support (agent-runtime's
+ * sandboxed tools now share one persistent workspace across a whole
+ * execution, via SandboxSession -- see its javadoc -- specifically so a
+ * multi-round sequence like that can actually see its own earlier steps).
+ * Capped at MAX_TOOL_ROUNDS so a model that never settles on a final
+ * answer can't loop (and rack up API cost) forever; if the cap is hit, one
+ * last call is made with no tool specifications at all, forcing a text
+ * answer instead of yet another tool request.
  */
 public class ToolCallingChatEngine {
+
+    /**
+     * How many rounds of "model requests tools -> we run them -> feed
+     * results back" this allows before forcing a final text-only answer.
+     * A simple single-step tool use (e.g. "what time is it") finishes in
+     * round 1; a real coding task (clone, read, edit, verify) needs
+     * several. Chosen as a cost/safety bound, not a measured requirement --
+     * revisit if real tasks start hitting it.
+     */
+    static final int MAX_TOOL_ROUNDS = 6;
 
     private final ChatLanguageModel chatModel;
     private final Map<String, AgentTool> toolsByName;
@@ -44,26 +57,32 @@ public class ToolCallingChatEngine {
         this.executionContext = executionContext;
     }
 
-    /** Returns the final text answer, and whether a tool was actually invoked along the way. */
+    /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
     public ToolChatResult chat(String userMessage) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new UserMessage(userMessage));
+        boolean toolWasUsed = false;
 
-        Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
-        AiMessage aiMessage = response.content();
+        for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
+            AiMessage aiMessage = response.content();
 
-        if (!aiMessage.hasToolExecutionRequests()) {
-            return new ToolChatResult(aiMessage.text(), false);
+            if (!aiMessage.hasToolExecutionRequests()) {
+                return new ToolChatResult(aiMessage.text(), toolWasUsed);
+            }
+
+            toolWasUsed = true;
+            messages.add(aiMessage);
+            for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
+                String result = executeTool(request);
+                messages.add(ToolExecutionResultMessage.from(request, result));
+            }
         }
 
-        messages.add(aiMessage);
-        for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
-            String result = executeTool(request);
-            messages.add(ToolExecutionResultMessage.from(request, result));
-        }
-
-        Response<AiMessage> finalResponse = chatModel.generate(messages, toolSpecifications);
-        return new ToolChatResult(finalResponse.content().text(), true);
+        // Round cap hit -- force a text answer instead of letting the model
+        // request yet another round it won't get to use.
+        Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
+        return new ToolChatResult(finalResponse.content().text(), toolWasUsed);
     }
 
     private String executeTool(ToolExecutionRequest request) {

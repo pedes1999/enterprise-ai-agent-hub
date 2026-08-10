@@ -5,10 +5,13 @@ user stories with acceptance criteria. Intended for stakeholders, prospective cu
 partners evaluating the product — it describes *what the system does and for whom*, not how
 it is implemented.
 
-**Status:** covers everything shipped through Weeks 1–10 of the build plan (multi-tenant
-foundation, auth & roles, encrypted credential management, LLM integration, sandboxed agent
-tool execution, and durable async job execution). CLI/webhook triggers and the first fully
-autonomous agent are on the roadmap but not yet built (see the last section).
+**Status:** covers everything shipped through Weeks 1–10 of the build plan, plus the
+multi-step single-agent execution depth built on top (multi-tenant foundation, auth & roles,
+encrypted credential management, LLM integration, multi-round sandboxed agent tool execution
+with a persistent per-task workspace, and durable async job execution). This depth work is a
+deliberate step toward the platform's actual end goal — a multi-agent "Ticket → PR" pipeline —
+which, along with CLI/webhook triggers and the first fully autonomous agent, is on the roadmap
+but not yet built (see the last section).
 
 ---
 
@@ -147,14 +150,19 @@ back, so that I can validate my credential and model configuration work correctl
 
 ## Epic 5 — Agent Tool Use (Sandboxed Execution)
 
-### US-5.1 — Let the model use tools to answer a request
-*As a Developer, I want an agent to be able to decide, on its own, whether a task needs a
-tool (running a command, cloning a repository, checking the date/time) and to use it
-automatically, so that I don't have to manually orchestrate every step.*
+### US-5.1 — Let the model use tools, across several steps, to answer a request
+*As a Developer, I want an agent to be able to decide, on its own, whether a task needs one or
+more tools (running a command, cloning a repository, reading or writing a file, checking the
+date/time) and to use them automatically across as many steps as the task genuinely needs, so
+that I don't have to manually orchestrate a multi-step task myself.*
 
 **Acceptance criteria**
-- The agent is given a set of tools it's allowed to use and decides for itself whether any
-  are needed to answer the prompt.
+- The agent is given a set of tools it's allowed to use and decides for itself whether any are
+  needed to answer the prompt, and whether it needs to use more than one in sequence (e.g.
+  clone a repository, then read a file from it, then act on what it read).
+- A task requiring several sequential tool uses is capped at a bounded number of steps, so a
+  request can never loop indefinitely — if that cap is reached, the agent is asked to give its
+  best answer with what it has rather than continuing forever.
 - The final response indicates whether a tool was actually used, for transparency.
 
 ### US-5.2 — Run arbitrary shell commands safely
@@ -163,10 +171,12 @@ inspect output) without that command ever touching my own infrastructure, so tha
 even malicious command can't damage anything real.*
 
 **Acceptance criteria**
-- Every command runs inside a freshly created, fully isolated, disposable virtual machine
-  that is destroyed immediately after the command finishes.
-- Nothing about one execution (files written, environment state) is visible to the next —
-  each run starts from a clean slate.
+- Every command runs inside an isolated, disposable virtual machine.
+- Within one triggered task, an agent's own earlier actions in that same task (a repository it
+  cloned, a file it wrote) are visible to its later steps — a multi-step task like "clone,
+  then inspect, then edit" genuinely works. Between two different triggered tasks, there is no
+  shared state whatsoever: each starts from a completely clean slate, and the disposable
+  environment is destroyed once the whole task finishes.
 - A command that takes too long is automatically stopped; output is capped so a runaway
   command can't flood the response.
 
@@ -182,10 +192,25 @@ one, using my stored credential — so that it can inspect or act on real code.*
 - If cloning fails (bad URL, missing repository, auth failure), the agent is told why, in a
   form it can reason about or relay back to the user, rather than the request silently
   erroring out.
-- Cloning happens inside the same disposable sandbox as shell commands — a repository's
-  contents, however untrusted, never touch platform infrastructure directly.
+- Cloning happens inside the same disposable environment as every other action in that task —
+  a repository's contents, however untrusted, never touch platform infrastructure directly.
 
-### US-5.4 — Full audit trail of every tool action
+### US-5.4 — Read and write files in a cloned repository
+*As a Developer, I want an agent to be able to read a specific file's contents and to create
+or modify a file, so that it can actually inspect and change code, not just run commands
+against it.*
+
+**Acceptance criteria**
+- A file can be read by a path relative to the repository, and its contents are returned to
+  the agent to reason about.
+- A file can be written (created, or overwritten if it already exists), with any necessary
+  containing folders created automatically.
+- An agent cannot read or write anything outside the task's own working area, regardless of
+  what path it's given.
+- An oversized file (read or written) is rejected or trimmed rather than silently accepted
+  without limit.
+
+### US-5.5 — Full audit trail of every tool action
 *As an Admin, I want a complete, tamper-evident record of every tool an agent has run on my
 tenant's behalf — what ran, when, how long it took, and whether it succeeded — so that I can
 review agent activity for security and compliance purposes.*
@@ -240,16 +265,21 @@ depends on the server staying up the whole time.*
 
 ## Roadmap (not yet built)
 
-The following are on the plan but intentionally out of scope for what's described above:
+The following are on the plan but intentionally out of scope for what's described above. The
+long-term product direction is a **multi-agent "Ticket → PR" pipeline** — a sequence of agent
+runs (e.g. a planning step, a coding step, a review step) that together take a task description
+and produce a real, working pull request. Everything below the pipeline item itself is being
+built as a deliberate prerequisite toward that, not as a detour from it — a reliable multi-step
+single agent (Epic 5) is what a multi-agent pipeline is actually built out of.
 
-- **Multi-round agent reasoning** — the current tool-calling loop resolves one round of tool
-  calls per request; chaining multiple dependent tool calls in a single agent turn (e.g.
-  "clone, then list files, then summarize") is planned.
 - **CLI client, GitHub Actions integration, and webhook triggers** for kicking off agent runs
   from outside the platform's own API.
 - **The first purpose-built agent**: automated security patching — detect a vulnerability,
   have an agent produce and verify a fix, and open a pull request.
-- **Filesystem tools** (read/write specific files within a cloned repository) beyond the
-  current shell-command and git-clone tools.
+- **A tool that opens a pull request**, using the same encrypted-credential pattern already
+  built for git access, so an agent's final step can be a real GitHub action, not just a local
+  change.
 - **Additional LLM providers** (OpenAI, Gemini) behind the existing provider-agnostic
   interface.
+- **The multi-agent "Ticket → PR" pipeline itself**: chaining several agent runs together with
+  different roles/responsibilities and passing structured output from one stage into the next.

@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class ToolCallingChatEngineTest {
@@ -210,6 +211,56 @@ class ToolCallingChatEngineTest {
         assertThat(spec.name()).isEqualTo("echo");
         assertThat(spec.description()).isEqualTo("Echoes back the given message");
         assertThat(spec.parameters().properties()).containsKey("message");
+    }
+
+    @Test
+    void chat_threeRoundsOfToolCalls_allExecuted_finalAnswerAfterThirdRound() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest request1 = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"one\"}").build();
+        ToolExecutionRequest request2 = ToolExecutionRequest.builder().id("2").name("echo").arguments("{\"message\":\"two\"}").build();
+        ToolExecutionRequest request3 = ToolExecutionRequest.builder().id("3").name("echo").arguments("{\"message\":\"three\"}").build();
+
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request1))))
+                .thenReturn(Response.from(AiMessage.from(List.of(request2))))
+                .thenReturn(Response.from(AiMessage.from(List.of(request3))))
+                .thenReturn(Response.from(AiMessage.from("Done after three rounds")));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("do three things");
+
+        assertThat(result.toolWasUsed()).isTrue();
+        assertThat(result.reply()).isEqualTo("Done after three rounds");
+        verify(model, times(4)).generate(anyList(), anyList());
+    }
+
+    @Test
+    void chat_modelNeverStopsRequestingTools_stopsAtMaxRoundsAndForcesTextAnswer() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest infiniteRequest = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"again\"}").build();
+
+        // Always offers another tool call -- never settles on a text answer by itself.
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from(List.of(infiniteRequest))));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
+
+        // MAX_TOOL_ROUNDS rounds of tool-offering calls, plus one final forced call.
+        verify(model, times(ToolCallingChatEngine.MAX_TOOL_ROUNDS + 1)).generate(anyList(), anyList());
+        assertThat(result.toolWasUsed()).isTrue();
+    }
+
+    @Test
+    void chat_atMaxRounds_finalForcedCall_passesNoToolSpecifications() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest infiniteRequest = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"again\"}").build();
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from(List.of(infiniteRequest))));
+        when(model.generate(anyList(), eq(List.of()))).thenReturn(Response.from(AiMessage.from("forced final answer")));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
+
+        assertThat(result.reply()).isEqualTo("forced final answer");
     }
 
     @Test
