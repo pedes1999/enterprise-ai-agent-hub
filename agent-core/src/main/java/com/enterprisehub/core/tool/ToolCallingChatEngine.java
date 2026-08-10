@@ -7,6 +7,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -47,19 +48,35 @@ public class ToolCallingChatEngine {
     private final Map<String, AgentTool> toolsByName;
     private final List<ToolSpecification> toolSpecifications;
     private final ToolExecutionContext executionContext;
+    private final String systemPrompt;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
+        this(chatModel, tools, executionContext, null);
+    }
+
+    /**
+     * systemPrompt is an AgentDefinition's persona/instructions (see
+     * gateway-api) -- nullable/blank for callers that don't have one (or
+     * still use the 3-arg constructor above), in which case the model just
+     * sees the user message with no system message at all, same as before
+     * this existed.
+     */
+    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext, String systemPrompt) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
         this.toolSpecifications = tools.stream().map(ToolCallingChatEngine::toSpecification).toList();
         this.executionContext = executionContext;
+        this.systemPrompt = systemPrompt;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
     public ToolChatResult chat(String userMessage) {
         List<ChatMessage> messages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            messages.add(new SystemMessage(systemPrompt));
+        }
         messages.add(new UserMessage(userMessage));
         boolean toolWasUsed = false;
 

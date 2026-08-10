@@ -147,32 +147,54 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_delegatesToRunner_returnsItsResult() {
-        when(agentPromptRunner.run(eq(tenantId), any(), eq("Hello")))
+        when(agentPromptRunner.run(eq(tenantId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", false));
 
-        AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello");
+        AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello", null);
 
         assertThat(result.reply()).isEqualTo("Hi there!");
         assertThat(result.toolWasUsed()).isFalse();
         assertThat(result.provider()).isEqualTo("ANTHROPIC");
         assertThat(result.modelName()).isEqualTo("claude-3-5-sonnet-20240620");
+        assertThat(result.agentSlug()).isEqualTo(AgentPromptRunner.DEFAULT_AGENT_SLUG);
+    }
+
+    @Test
+    void pingWithTools_explicitAgentSlug_passedThroughToRunner() {
+        when(agentPromptRunner.run(eq(tenantId), any(), eq("coding-agent"), eq("Hello")))
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", true));
+
+        AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello", "coding-agent");
+
+        assertThat(result.agentSlug()).isEqualTo("coding-agent");
     }
 
     @Test
     void pingWithTools_blankPrompt_rejectedBeforeDelegating() {
-        assertThatThrownBy(() -> service.pingWithTools(tenantId, " "))
+        assertThatThrownBy(() -> service.pingWithTools(tenantId, " ", null))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(agentPromptRunner);
     }
 
     @Test
-    void pingWithTools_runnerThrows_mapsTo502BadGateway() {
-        when(agentPromptRunner.run(eq(tenantId), any(), eq("Hello")))
+    void pingWithTools_runnerThrowsGenericRuntimeException_mapsTo502BadGateway() {
+        when(agentPromptRunner.run(eq(tenantId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
                 .thenThrow(new RuntimeException("timeout"));
 
-        assertThatThrownBy(() -> service.pingWithTools(tenantId, "Hello"))
+        assertThatThrownBy(() -> service.pingWithTools(tenantId, "Hello", null))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
+    }
+
+    @Test
+    void pingWithTools_runnerThrowsAgentException_statusPreserved_notRelabeledAs502() {
+        when(agentPromptRunner.run(eq(tenantId), any(), eq("unknown-agent"), eq("Hello")))
+                .thenThrow(new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: unknown-agent"));
+
+        assertThatThrownBy(() -> service.pingWithTools(tenantId, "Hello", "unknown-agent"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("Unknown or inactive agent")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 }

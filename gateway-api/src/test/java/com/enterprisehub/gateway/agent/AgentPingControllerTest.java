@@ -88,8 +88,8 @@ class AgentPingControllerTest {
 
     @Test
     void pingWithTools_returns200WithReplyAndToolUsageFlag() throws Exception {
-        when(agentPingService.pingWithTools(eq(tenantId), eq("What time is it?"))).thenReturn(
-                new AgentToolPingResponse("ANTHROPIC", "claude-3-5-sonnet-20240620", "It is noon", true));
+        when(agentPingService.pingWithTools(eq(tenantId), eq("What time is it?"), any())).thenReturn(
+                new AgentToolPingResponse("ANTHROPIC", "claude-3-5-sonnet-20240620", "It is noon", true, "general-assistant"));
 
         mockMvc.perform(post("/agents/ping-with-tools")
                         .contentType("application/json")
@@ -102,7 +102,7 @@ class AgentPingControllerTest {
 
     @Test
     void pingWithTools_noCredential_returns400() throws Exception {
-        when(agentPingService.pingWithTools(any(), any())).thenThrow(
+        when(agentPingService.pingWithTools(any(), any(), any())).thenThrow(
                 new AgentException(HttpStatus.BAD_REQUEST, "No active ANTHROPIC credential configured for this tenant -- PUT /vendor-credentials first"));
 
         mockMvc.perform(post("/agents/ping-with-tools")

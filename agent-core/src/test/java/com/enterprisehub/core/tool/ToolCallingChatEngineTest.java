@@ -264,6 +264,48 @@ class ToolCallingChatEngineTest {
     }
 
     @Test
+    void chat_withSystemPrompt_prependsSystemMessage() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, "You are a coding agent.").chat("hi");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);
+        verify(model).generate(captor.capture(), anyList());
+        assertThat(captor.getValue()).hasSize(2);
+        assertThat(captor.getValue().get(0)).isInstanceOf(dev.langchain4j.data.message.SystemMessage.class);
+        assertThat(((dev.langchain4j.data.message.SystemMessage) captor.getValue().get(0)).text()).isEqualTo("You are a coding agent.");
+        assertThat(captor.getValue().get(1)).isInstanceOf(UserMessage.class);
+    }
+
+    @Test
+    void chat_noSystemPrompt_3argConstructor_onlySendsUserMessage() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("hi");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);
+        verify(model).generate(captor.capture(), anyList());
+        assertThat(captor.getValue()).hasSize(1);
+    }
+
+    @Test
+    void chat_blankSystemPrompt_treatedAsNoSystemPrompt() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, "   ").chat("hi");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);
+        verify(model).generate(captor.capture(), anyList());
+        assertThat(captor.getValue()).hasSize(1);
+    }
+
+    @Test
     void chat_firstCall_sendsOnlyTheUserMessage() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));

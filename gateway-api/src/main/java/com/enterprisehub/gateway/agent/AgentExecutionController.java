@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.agent;
 
+import com.enterprisehub.dto.AgentDefinitionSummary;
 import com.enterprisehub.dto.AgentExecutionAccepted;
 import com.enterprisehub.dto.AgentExecutionStatusResponse;
 import com.enterprisehub.dto.TriggerAgentExecutionRequest;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -23,17 +25,21 @@ import java.util.UUID;
  * AgentPingController's synchronous spike endpoints. Same role gate
  * (ADMIN, DEVELOPER can trigger; READONLY cannot -- see the role matrix in
  * USER_STORIES.md). POST returns immediately with a QUEUED execution id;
- * AgentJobWorker picks it up separately. GET is how a caller finds out
- * what happened -- there is deliberately no push/webhook notification yet.
+ * AgentJobWorker picks it up separately. GET .../executions/{id} is how a
+ * caller finds out what happened -- there is deliberately no push/webhook
+ * notification yet. GET .../definitions is the browsable catalog a caller
+ * picks an agentSlug from -- see AgentDefinition.
  */
 @RestController
 @RequestMapping("/agents")
 public class AgentExecutionController {
 
     private final AgentExecutionService executionService;
+    private final AgentDefinitionService agentDefinitionService;
 
-    public AgentExecutionController(AgentExecutionService executionService) {
+    public AgentExecutionController(AgentExecutionService executionService, AgentDefinitionService agentDefinitionService) {
         this.executionService = executionService;
+        this.agentDefinitionService = agentDefinitionService;
     }
 
     @PostMapping("/execute")
@@ -43,7 +49,9 @@ public class AgentExecutionController {
         if (request.prompt() == null || request.prompt().isBlank()) {
             throw new AgentException(HttpStatus.BAD_REQUEST, "prompt is required");
         }
-        AgentExecution execution = executionService.enqueue(UUID.fromString(principal.tenantId()), request.prompt());
+        String agentSlug = (request.agentSlug() == null || request.agentSlug().isBlank())
+                ? AgentPromptRunner.DEFAULT_AGENT_SLUG : request.agentSlug();
+        AgentExecution execution = executionService.enqueue(UUID.fromString(principal.tenantId()), request.prompt(), agentSlug);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new AgentExecutionAccepted(execution.getId(), execution.getStatus()));
     }
@@ -57,9 +65,15 @@ public class AgentExecutionController {
         return ResponseEntity.ok(toResponse(execution));
     }
 
+    @GetMapping("/definitions")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<List<AgentDefinitionSummary>> listDefinitions() {
+        return ResponseEntity.ok(agentDefinitionService.listActive());
+    }
+
     private AgentExecutionStatusResponse toResponse(AgentExecution execution) {
         return new AgentExecutionStatusResponse(
-                execution.getId(), execution.getStatus(), execution.getLlmProvider(), execution.getPrompt(),
+                execution.getId(), execution.getStatus(), execution.getLlmProvider(), execution.getAgentType(), execution.getPrompt(),
                 execution.getReply(), execution.getToolWasUsed(), execution.getErrorMessage(),
                 execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt());
     }

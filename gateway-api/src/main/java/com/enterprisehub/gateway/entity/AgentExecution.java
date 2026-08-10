@@ -36,8 +36,12 @@ public class AgentExecution {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
+    // Repurposed from its original Week 1 meaning (a category like
+    // SECURITY_PATCH) -- now holds the resolved AgentDefinition.slug this
+    // execution ran with (e.g. "coding-agent"), set by
+    // AgentExecutionService.enqueue(). See V6__agent_definitions.sql.
     @Column(name = "agent_type", nullable = false)
-    private String agentType; // SECURITY_PATCH, CROSS_STACK_ALIGNMENT, ...
+    private String agentType;
 
     @Column(name = "trigger_source", nullable = false)
     private String triggerSource; // CI_CD, WEBHOOK, CLI, DASHBOARD

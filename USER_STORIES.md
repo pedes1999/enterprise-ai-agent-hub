@@ -6,12 +6,13 @@ partners evaluating the product — it describes *what the system does and for w
 it is implemented.
 
 **Status:** covers everything shipped through Weeks 1–10 of the build plan, plus the
-multi-step single-agent execution depth built on top (multi-tenant foundation, auth & roles,
-encrypted credential management, LLM integration, multi-round sandboxed agent tool execution
-with a persistent per-task workspace, and durable async job execution). This depth work is a
-deliberate step toward the platform's actual end goal — a multi-agent "Ticket → PR" pipeline —
-which, along with CLI/webhook triggers and the first fully autonomous agent, is on the roadmap
-but not yet built (see the last section).
+multi-step single-agent execution depth and the agent/tool catalog built on top (multi-tenant
+foundation, auth & roles, encrypted credential management, LLM integration, multi-round
+sandboxed agent tool execution with a persistent per-task workspace, durable async job
+execution, and a browsable library of named agents each with their own capabilities). This is
+a deliberate step toward the platform's actual end goal — a multi-agent "Ticket → PR" pipeline
+— which, along with CLI/webhook triggers and the first fully autonomous agent, is on the
+roadmap but not yet built (see the last section).
 
 ---
 
@@ -235,6 +236,8 @@ triggering an agent is fast and doesn't depend on how long the underlying work t
   it does not wait for the LLM or any tool to complete.
 - The run is picked up and processed automatically, without any further action from the
   caller.
+- Which agent to run can be specified explicitly (see Epic 7); if omitted, a sensible
+  general-purpose default is used.
 
 ### US-6.2 — Check on a run's status and result
 *As a Developer, I want to check on a previously triggered agent run — whether it's still in
@@ -263,6 +266,38 @@ depends on the server staying up the whole time.*
 
 ---
 
+## Epic 7 — A Library of Agents and Tools
+
+### US-7.1 — Different agents for different jobs, from one shared catalog
+*As a Developer, I want to choose which agent handles my task — a general-purpose one, or a
+specialized one with access to repository tools — from a catalog the platform maintains, so
+that I'm not stuck with one fixed set of capabilities for every request.*
+
+**Acceptance criteria**
+- Every tenant selects from the same shared catalog of agents (a platform-maintained library,
+  not something each tenant builds themselves).
+- Each agent in the catalog has its own persona/instructions and its own specific set of
+  capabilities (tools) — one agent might only be able to answer questions, another might be
+  able to clone a repository and edit files.
+- An agent only ever has access to the capabilities explicitly granted to it — asking a
+  general-purpose agent to do something outside its granted tools results in it correctly
+  reporting that it can't, not a silent failure or a capability it was never meant to have.
+- Requesting an agent that doesn't exist (or is no longer available) is rejected clearly,
+  before any work begins.
+
+### US-7.2 — Discover what agents are available
+*As a Developer, I want to see the full list of agents I can choose from — what each one does
+and what it's capable of — so that I can pick the right one for my task without reading
+source code or guessing.*
+
+**Acceptance criteria**
+- A caller can retrieve the current catalog: every available agent's name, description, and
+  the capabilities (tools) it has access to.
+- Read-only users can browse the catalog (consistent with other "view" access), the same as
+  Admins and Developers.
+
+---
+
 ## Roadmap (not yet built)
 
 The following are on the plan but intentionally out of scope for what's described above. The
@@ -270,8 +305,12 @@ long-term product direction is a **multi-agent "Ticket → PR" pipeline** — a 
 runs (e.g. a planning step, a coding step, a review step) that together take a task description
 and produce a real, working pull request. Everything below the pipeline item itself is being
 built as a deliberate prerequisite toward that, not as a detour from it — a reliable multi-step
-single agent (Epic 5) is what a multi-agent pipeline is actually built out of.
+single agent with a real catalog behind it (Epics 5 and 7) is what a multi-agent pipeline is
+actually built out of.
 
+- **Self-service agent authoring** — today the catalog (Epic 7) is maintained by the platform
+  team, not editable by tenants themselves; a management interface for creating/editing agents
+  without a deployment is a natural later addition.
 - **CLI client, GitHub Actions integration, and webhook triggers** for kicking off agent runs
   from outside the platform's own API.
 - **The first purpose-built agent**: automated security patching — detect a vulnerability,

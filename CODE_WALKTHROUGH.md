@@ -91,15 +91,24 @@ controller method body.
 | `audit.JpaToolExecutionListener` | Implements `ToolExecutionListener`. Persists a `ToolExecution` entity via `ToolExecutionRepository.save`. Runs synchronously on whichever thread calls it — for `/agents/ping-with-tools` that's the request thread; for `POST /agents/execute` (async, see §8) it's `AgentJobWorker`'s poll thread, which is fine **only because** `AgentJobWorker` explicitly sets `TenantContext` to the job's real tenant before running anything — this listener itself has no idea which thread it's on. |
 | `config.SandboxConfig` / `SandboxProperties` | Wires the `SandboxClientHttpImpl` bean from `app.sandbox.sidecar-url`. |
 
+### Agent catalog (gateway-api) -- what "a library of hundreds of agents and tools" is actually built on
+
+| Class | Responsibility |
+|---|---|
+| `entity.AgentDefinition` / `repository.AgentDefinitionRepository` | A platform-wide (no `tenant_id`, no RLS -- every tenant picks from the same catalog), named agent: `slug`, `name`, `description`, `systemPrompt`, `toolNames` (a Postgres `text[]`, mapped via Hibernate's `@JdbcTypeCode(SqlTypes.ARRAY)`). Added via migration (`V6__agent_definitions.sql`), no admin CRUD API yet. `findBySlugAndActiveTrue` is the one lookup that matters at runtime. |
+| `agent.catalog.ToolFactory` | One `@Component` bean per `AgentTool` (`toolName()`, `category()`, `create(session, listener, credentialResolver)`). The seam that lets the tool side of the catalog self-assemble -- adding tool #101 means one new `AgentTool` + one new `ToolFactory`, nothing else changes. Five real implementations today: `CurrentDateTimeToolFactory`, `RunShellCommandToolFactory`, `GitCloneToolFactory`, `ReadFileToolFactory`, `WriteFileToolFactory` -- each a few lines wrapping one tool's constructor. |
+| `agent.catalog.ToolCatalog` | Collects every `ToolFactory` Spring finds (`List<ToolFactory>` constructor injection -- no hardcoded names anywhere in this class) into a `Map<toolName, factory>`. `instantiate(toolNames, session, listener, credentialResolver)` builds the live `AgentTool` list for one `AgentDefinition`, all wired to the SAME `SandboxSession`. Throws `AgentException(500)` if a definition references a tool name with no matching factory -- a data-integrity problem between the DB row and the deployed code, not a caller error. |
+| `agent.AgentDefinitionService` | Thin read-only wrapper (`listActive()`) behind `GET /agents/definitions` -- maps `AgentDefinition` entities to the public `AgentDefinitionSummary` DTO (never exposes the entity or its `systemPrompt` directly... actually it does expose name/description/toolNames but keeps the entity itself out of the HTTP layer). |
+
 ### Agent-facing controllers/services
 
 | Class | Responsibility |
 |---|---|
 | `agent.AgentPingController` | `POST /agents/ping` and `POST /agents/ping-with-tools`. `@PreAuthorize("hasAnyRole('ADMIN','DEVELOPER')")`. Pulls `tenantId` off the authenticated `PlatformPrincipal` — **never** trusts a tenant id in the request body. The **synchronous spike** path. |
-| `agent.AgentPingService` | Thin orchestration behind both spike endpoints; delegates the actual tool-calling work to `AgentPromptRunner`. See §3 for the full call sequence. |
-| `agent.AgentPromptRunner` | The real "run this prompt with tools for this tenant" logic — extracted so both `AgentPingService` (sync) and `AgentJobWorker` (async) share one implementation instead of two that could drift apart. `run()`: resolve the LLM credential, resolve every OTHER credential kind a tool might need up front (`buildSessionSpec` — today just `GIT`) and build one `SandboxSession` from it, construct all five tools wired to that shared session, build `SharedExecutionContext`, call `chat()`, and `session.endSession()` in a `finally` block regardless of outcome. See §3/§6. |
+| `agent.AgentPingService` | Thin orchestration behind both spike endpoints; delegates the actual tool-calling work to `AgentPromptRunner`. `pingWithTools` defaults a missing/blank `agentSlug` to `AgentPromptRunner.DEFAULT_AGENT_SLUG` ("general-assistant") and re-throws an `AgentException` from the runner AS-IS (not relabeled as a 502) -- see §3. |
+| `agent.AgentPromptRunner` | The real "run this NAMED agent's prompt, with its own tools, for this tenant" logic — extracted so both `AgentPingService` (sync) and `AgentJobWorker` (async) share one implementation instead of two that could drift apart. `run(tenantId, executionId, agentSlug, prompt)`: resolve the `AgentDefinition` by slug (400 if unknown/inactive), resolve the LLM credential, resolve only the credential kinds a tool actually IN that definition's `toolNames` might need (`buildSessionSpec` — today just `GIT`, gated on `"git_clone"` being present) and build one `SandboxSession` from it, build that definition's tools via `ToolCatalog.instantiate`, build `SharedExecutionContext` with the definition's `systemPrompt`, call `chat()`, and `session.endSession()` in a `finally` block regardless of outcome. See §3/§6. |
 | `agent.tools.CurrentDateTimeTool` | Trivial, non-sandboxed `AgentTool` used to prove the tool-calling wiring works independent of the sandbox infrastructure. |
-| `agent.AgentExecutionController` | `POST /agents/execute` (ADMIN/DEVELOPER) and `GET /agents/executions/{id}` (ADMIN/DEVELOPER/READONLY) — the **real, durable, async** path. See §8. |
+| `agent.AgentExecutionController` | `POST /agents/execute` (ADMIN/DEVELOPER), `GET /agents/executions/{id}` (ADMIN/DEVELOPER/READONLY) — the **real, durable, async** path, see §8 — and `GET /agents/definitions` (ADMIN/DEVELOPER/READONLY), the catalog listing. |
 | `agent.AgentExecutionService` | Every state transition of an `agent_executions` row: `enqueue()`, `claimNext()` (flips `QUEUED`→`RUNNING`), `complete()`/`fail()`, `findForTenant()`. Each is its own short `@Transactional` method — `claimNext()` in particular must commit fast so its row lock isn't held for the whole agent run that follows. |
 | `agent.AgentJobWorker` | `@Scheduled` poll loop (`app.job-worker.poll-interval-ms`, default 2000ms). The only place `TenantContext.SYSTEM_WORKER_TENANT_ID` is ever set. See §8. Absent as a bean entirely (not just inert) when `app.job-worker.enabled=false` — set in `application-test.yml` so integration tests don't race it. |
 
@@ -130,23 +139,30 @@ Authorization: Bearer <jwt>
 
 **2. Controller**
 - `AgentPingController.pingWithTools(principal, request)`
-  → `agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt())`
-  — note: tenant id comes from the **validated JWT principal**, never from the request body
+  → `agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt(), request.agentSlug())`
+  — note: tenant id comes from the **validated JWT principal**, never from the request body; `agentSlug` is caller-supplied and validated downstream (unknown slug -> 400, see 3d)
 
 **3. Service orchestration — `AgentPingService.pingWithTools()` → `AgentPromptRunner.run()`**
 ```java
 // AgentPingService.pingWithTools() -- thin wrapper
 validatePrompt(prompt)                     // rejects null/blank
+resolvedSlug = agentSlug ?? "general-assistant"     // AgentPromptRunner.DEFAULT_AGENT_SLUG
 String executionId = UUID.randomUUID()...  // synthetic -- no agent_executions row for this spike endpoint
-ToolChatResult result = agentPromptRunner.run(tenantId, executionId, prompt)   // everything below
+try {
+    ToolChatResult result = agentPromptRunner.run(tenantId, executionId, resolvedSlug, prompt)   // everything below
+} catch (AgentException e) {
+    throw e;   // preserve its real status (e.g. 400 unknown agent) -- don't relabel as 502
+} catch (RuntimeException e) {
+    throw new AgentException(502, "Anthropic API call failed: " + e.getMessage());
+}
 
 // AgentPromptRunner.run() -- the actual work
+AgentDefinition definition = resolveAgentDefinition(agentSlug)   // see 3d -- FIRST, before touching credentials at all
 String apiKey = resolveApiKey(tenantId)             // see 3a below -- same as before
-SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId))  // see 3c
+SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId, definition))  // see 3c
 try {
-    List<AgentTool> tools = [CurrentDateTimeTool, RunShellCommandTool(session,...), GitCloneTool(session,...),
-                              ReadFileTool(session,...), WriteFileTool(session,...)]
-    SharedExecutionContext context = sharedExecutionContextFactory.create(...)   // see 3b
+    List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, listener, credentialResolver)
+    SharedExecutionContext context = sharedExecutionContextFactory.create(..., tools, definition.getSystemPrompt())   // see 3b
     return context.chat(prompt)                                                  // see §4 (the multi-round loop)
 } finally {
     session.endSession()   // real sandbox teardown, exactly once, regardless of how many tool calls happened
@@ -162,13 +178,18 @@ try {
 
 **3b. `sharedExecutionContextFactory.create(...)`**
 - `LlmEngineFactory.create(ANTHROPIC, apiKey, modelName)` → `AnthropicChatModel.builder()...build()` — a real, ready-to-call LangChain4j client
-- `new SharedExecutionContext(tenantId, executionId, chatModel, tools)`
-  → internally builds `new ToolCallingChatEngine(chatModel, tools, new ToolExecutionContext(tenantId, executionId))` — this is where the explicit context object gets created and frozen for the whole request
+- `new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt)`
+  → internally builds `new ToolCallingChatEngine(chatModel, tools, new ToolExecutionContext(tenantId, executionId), systemPrompt)` — this is where the explicit context object gets created and frozen for the whole request. `systemPrompt` (the `AgentDefinition`'s persona) becomes a `SystemMessage` prepended in `chat()` — see §4.
 
-**3c. `buildSessionSpec(tenantId, executionId)` — the credential-merging step SandboxSession needs**
-- `credentialResolver.resolve(tenantId, "GIT")` — resolved HERE, before any tool runs, not lazily inside `GitCloneTool` the way it used to be the only place this happened
+**3c. `buildSessionSpec(tenantId, executionId, definition)` — the credential-merging step SandboxSession needs**
+- `if definition.getToolNames().contains("git_clone")`: `credentialResolver.resolve(tenantId, "GIT")` — resolved HERE, before any tool runs, not lazily inside `GitCloneTool` the way it used to be the only place this happened, and ONLY if this definition's tool list actually includes `git_clone` (a `general-assistant` run never touches `CredentialResolver` at all — see §7's symptom table if you're debugging why a credential lookup didn't happen)
 - why up front: E2B only accepts env vars at sandbox **creation** time. If the session's sandbox got created by whichever tool happens to run first — say `RunShellCommandTool`, which asks for no credentials — a `GitCloneTool` call two rounds later would find no `GIT_TOKEN` in the already-running sandbox, silently. Resolving every known credential kind before the session even exists sidesteps that ordering trap entirely.
 - `GitCloneTool` still calls `credentialResolver.resolve()` itself too, redundantly — not to get the token into the sandbox (already done here), but to decide whether to add the `http.extraHeader` flag to its `git clone` command at all.
+
+**3d. `resolveAgentDefinition(agentSlug)` — the catalog lookup**
+- `agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)` — `agent_definitions` has no RLS (platform-wide catalog, not tenant data), so this isn't scoped by `TenantContext` at all
+- if absent → throws `AgentException(400, "Unknown or inactive agent: " + agentSlug)` — deliberately BEFORE `resolveApiKey`, so a bad agent slug fails fast without even checking whether the tenant has an LLM credential configured
+- `POST /agents/execute`'s path validates this even earlier — `AgentExecutionService.enqueue()` does the same lookup before persisting a row at all, so an unknown agent never even reaches `QUEUED` (see §6)
 
 ---
 
@@ -337,13 +358,21 @@ one call.
 **6a. The enqueue request returns immediately, before any LLM call happens**
 
 ```
-POST /agents/execute  { "prompt": "..." }
+POST /agents/execute  { "prompt": "...", "agentSlug": "coding-agent" }
  -> JwtAuthFilter / TenantResolvingFilter (same as any request, see §3 step 1)
  -> AgentExecutionController.execute(principal, request)
       validates prompt is non-blank
-      -> AgentExecutionService.enqueue(tenantId, prompt)
-           new AgentExecution(tenantId, agentType="PROMPT_WITH_TOOLS", triggerSource="API",
+      resolvedSlug = request.agentSlug() ?? "general-assistant"
+      -> AgentExecutionService.enqueue(tenantId, prompt, resolvedSlug)
+           agentDefinitionRepository.findBySlugAndActiveTrue(resolvedSlug)
+                .orElseThrow(-> AgentException(400, "Unknown or inactive agent: ..."))
+                -- validated BEFORE persisting anything -- an unknown agent never
+                -- becomes a QUEUED row AgentJobWorker would only discover was
+                -- doomed once it claimed it
+           new AgentExecution(tenantId, agentType=resolvedSlug, triggerSource="API",
                                llmProvider="ANTHROPIC", prompt, status="QUEUED")
+                -- agentType now holds the resolved AgentDefinition slug, repurposed
+                -- from its original Week 1 meaning -- see AgentExecution's javadoc
            -> repository.save(...)   // RLS-scoped INSERT, ordinary tenant context, nothing special here
       <- 202 Accepted  { executionId, status: "QUEUED" }
 ```
@@ -383,7 +412,11 @@ pollAndProcessOne()                                    // fires every app.job-wo
  └─ runClaimedJob(job)
       TenantContext.set(job.getTenantId().toString())   // <-- switches OFF the sentinel, onto the
       try:                                                //     job's REAL tenant, before anything else runs
-          result = AgentPromptRunner.run(job.tenantId, job.id.toString(), job.prompt)
+          result = AgentPromptRunner.run(job.tenantId, job.id.toString(), job.agentType, job.prompt)
+               -- job.agentType is the resolved agent slug set at enqueue time (see 6a) --
+               -- already validated to exist, so resolveAgentDefinition() inside run() below
+               -- will succeed (barring a race where the definition was deactivated between
+               -- enqueue and claim, which would surface as a normal FAILED status here)
                -- IDENTICAL to §3's full run() breakdown -- resolves this tenant's Anthropic
                -- credential (RLS-scoped, now correctly, since TenantContext is the real tenant),
                -- builds a fresh SandboxSession + all five tools, runs chat()'s multi-round loop
@@ -435,7 +468,10 @@ LOCKED`) or increasing the scheduler's thread pool, neither of which has been do
 | "A tool that ran later can't see what an earlier tool did" (e.g. `read_file` says the file doesn't exist right after `git_clone`) | Check that ALL sandboxed tools in that execution were constructed against the SAME `SandboxSession` instance in `AgentPromptRunner.run()` — if a future change constructs one tool with the raw `sandboxClient` instead of `session`, that tool gets its own private, empty sandbox instead of sharing the real one. Also check `Workspace.ROOT` is the same literal in every tool (`GitCloneTool`, `RunShellCommandTool`, `WorkspacePath`) — a typo'd path would make them technically share a sandbox but still miss each other's files. |
 | "A tool needing a credential doesn't get one, even though it's configured" | Check `AgentPromptRunner.buildSessionSpec()` — it must resolve that credential kind BEFORE the session's sandbox is created. A credential kind added later (e.g. a future `GITHUB` PAT for a "open a PR" tool) that isn't added to `buildSessionSpec` will silently never make it into the sandbox's env, no matter how correctly the tool itself calls `CredentialResolver` — see SandboxSession's javadoc for why this can't be fixed lazily per-tool-call. |
 | "Sandbox lives way longer / shorter than expected" | Check `AgentPromptRunner.SESSION_MAX_LIFETIME` (10 min, session-wide) — NOT the `maxLifetime` field on the `SandboxSpec` an individual tool builds for itself, which `SandboxSession.create()` ignores entirely once a sandbox already exists for this execution (see §5's trace). |
-| "Multi-step prompt only did the first step" | First check whether the model actually requested a second tool call at all — `ToolCallingChatEngine`'s loop is bounded but genuinely multi-round now (§4); if round 2's `aiMessage.hasToolExecutionRequests()` was false, the model chose to stop, which is a prompt-engineering problem, not a loop bug. If it's hitting `MAX_TOOL_ROUNDS`, that usually means the model is stuck retrying something, not that the cap is too low. |
+| "Multi-step prompt only did the first step" | First check whether the model actually requested a second tool call at all — `ToolCallingChatEngine`'s loop is bounded but genuinely multi-round now (§4); if round 2's `aiMessage.hasToolExecutionRequests()` was false, the model chose to stop, which is a prompt-engineering problem, not a loop bug (this happens for real -- the model narrates "now let me..." without actually attaching a tool call that turn). If it's hitting `MAX_TOOL_ROUNDS`, that usually means the model is stuck retrying something, not that the cap is too low. |
+| "Model says it doesn't have a tool I expect it to have" | Check which `agentSlug` was actually used (defaults to `general-assistant` if omitted, which only has `get_current_date_time`) — `GET /agents/definitions` shows every active definition's real `toolNames`. This is very likely correct behavior, not a bug: the whole point of the catalog is that different agents genuinely have different tool access. |
+| "Unknown or inactive agent" error for a slug you're sure exists | Check `is_active` on that `agent_definitions` row, and that the slug match is exact (case-sensitive) -- `findBySlugAndActiveTrue` is a straight equality lookup, no normalization. Also check you're hitting the same database you seeded (`agent_hub` for `mvn spring-boot:run`, `agent_hub_test` for `mvn test` -- V6's seed rows are inserted by the same migration in both). |
+| "Agent definition references a tool that doesn't exist" (500 from `ToolCatalog`) | A data-integrity problem, not a caller error -- either a typo in that `agent_definitions.tool_names` row, or a `ToolFactory` bean got removed/renamed without updating the rows that reference it. Check `ToolCatalog.all()` (or the exception message, which names the missing tool) against the definition's actual `tool_names` array. |
 
 ---
 

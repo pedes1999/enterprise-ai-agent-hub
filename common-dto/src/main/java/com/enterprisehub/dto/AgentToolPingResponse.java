@@ -4,6 +4,7 @@ public record AgentToolPingResponse(
         String provider,
         String modelName,
         String reply,
-        boolean toolWasUsed
+        boolean toolWasUsed,
+        String agentSlug
 ) {
 }

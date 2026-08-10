@@ -11,6 +11,7 @@ public record AgentExecutionStatusResponse(
         UUID id,
         String status,
         String llmProvider,
+        String agentSlug,
         String prompt,
         String reply,
         Boolean toolWasUsed,

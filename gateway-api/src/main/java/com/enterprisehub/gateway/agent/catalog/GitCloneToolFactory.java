@@ -1,0 +1,27 @@
+package com.enterprisehub.gateway.agent.catalog;
+
+import com.enterprisehub.core.tool.AgentTool;
+import com.enterprisehub.runtime.audit.ToolExecutionListener;
+import com.enterprisehub.runtime.credential.CredentialResolver;
+import com.enterprisehub.runtime.sandbox.SandboxSession;
+import com.enterprisehub.runtime.tools.GitCloneTool;
+import org.springframework.stereotype.Component;
+
+@Component
+public class GitCloneToolFactory implements ToolFactory {
+
+    @Override
+    public String toolName() {
+        return "git_clone";
+    }
+
+    @Override
+    public String category() {
+        return "git";
+    }
+
+    @Override
+    public AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver) {
+        return new GitCloneTool(session, listener, credentialResolver);
+    }
+}

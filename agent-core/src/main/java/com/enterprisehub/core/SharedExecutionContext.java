@@ -28,11 +28,16 @@ public class SharedExecutionContext {
     private final ToolCallingChatEngine chatEngine;
 
     public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools) {
+        this(tenantId, executionId, chatModel, tools, null);
+    }
+
+    /** systemPrompt: see ToolCallingChatEngine's javadoc -- an AgentDefinition's persona/instructions, nullable. */
+    public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools, String systemPrompt) {
         this.tenantId = tenantId;
         this.executionId = executionId;
         this.chatModel = chatModel;
         this.tools = List.copyOf(tools);
-        this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId));
+        this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId), systemPrompt);
     }
 
     public String tenantId() {

@@ -4,9 +4,17 @@ import com.enterprisehub.core.SharedExecutionContext;
 import com.enterprisehub.core.SharedExecutionContextFactory;
 import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
+import com.enterprisehub.gateway.agent.catalog.CurrentDateTimeToolFactory;
+import com.enterprisehub.gateway.agent.catalog.GitCloneToolFactory;
+import com.enterprisehub.gateway.agent.catalog.ReadFileToolFactory;
+import com.enterprisehub.gateway.agent.catalog.RunShellCommandToolFactory;
+import com.enterprisehub.gateway.agent.catalog.ToolCatalog;
+import com.enterprisehub.gateway.agent.catalog.WriteFileToolFactory;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
+import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.VendorCredential;
+import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
@@ -33,6 +41,8 @@ import static org.mockito.Mockito.*;
 
 class AgentPromptRunnerTest {
 
+    private static final String AGENT_SLUG = "test-agent";
+
     private VendorCredentialRepository vendorCredentialRepository;
     private VendorCredentialService vendorCredentialService;
     private SharedExecutionContextFactory sharedExecutionContextFactory;
@@ -40,6 +50,7 @@ class AgentPromptRunnerTest {
     private AgentPromptRunner runner;
     private CredentialResolver credentialResolver;
     private SandboxClient sandboxClient;
+    private AgentDefinitionRepository agentDefinitionRepository;
     private final UUID tenantId = UUID.randomUUID();
 
     @BeforeEach
@@ -52,12 +63,31 @@ class AgentPromptRunnerTest {
         sandboxClient = mock(SandboxClient.class);
         ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
         credentialResolver = mock(CredentialResolver.class);
+        agentDefinitionRepository = mock(AgentDefinitionRepository.class);
         // buildSessionSpec() resolves GIT credentials up front for every
         // run() call now (see AgentPromptRunner's javadoc on why) -- Map.of()
         // by default, same as JpaCredentialResolver's real "nothing configured" behavior.
         when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
+        // Default stub: a definition with every tool a test might need --
+        // individual tests override this only when testing a different agent.
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(any())).thenReturn(Optional.of(testDefinition(
+                "get_current_date_time", "git_clone", "run_shell_command", "read_file", "write_file")));
+        ToolCatalog toolCatalog = new ToolCatalog(List.of(
+                new CurrentDateTimeToolFactory(), new RunShellCommandToolFactory(),
+                new GitCloneToolFactory(), new ReadFileToolFactory(), new WriteFileToolFactory()));
         runner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
-                sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver);
+                sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver,
+                agentDefinitionRepository, toolCatalog);
+    }
+
+    private AgentDefinition testDefinition(String... toolNames) {
+        AgentDefinition definition = new AgentDefinition();
+        definition.setSlug(AGENT_SLUG);
+        definition.setName("Test Agent");
+        definition.setDescription("used only in tests");
+        definition.setSystemPrompt("You are a test agent.");
+        definition.setToolNames(List.of(toolNames));
+        return definition;
     }
 
     private VendorCredential activeCredential() {
@@ -86,11 +116,12 @@ class AgentPromptRunnerTest {
      */
     private void stubContextFactory(String executionId) {
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(executionId), eq(LlmProvider.ANTHROPIC),
-                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any()))
+                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
-                    return new SharedExecutionContext(tenantId.toString(), executionId, chatLanguageModel, tools);
+                    String systemPrompt = invocation.getArgument(6);
+                    return new SharedExecutionContext(tenantId.toString(), executionId, chatLanguageModel, tools, systemPrompt);
                 });
     }
 
@@ -101,7 +132,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.generate(anyList(), anyList()))
                 .thenReturn(Response.from(AiMessage.from("Hi there!")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-1", "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-1", AGENT_SLUG, "Hello");
 
         assertThat(result.reply()).isEqualTo("Hi there!");
         assertThat(result.toolWasUsed()).isFalse();
@@ -122,7 +153,7 @@ class AgentPromptRunnerTest {
                 .thenReturn(Response.from(AiMessage.from(List.of(toolRequest))))
                 .thenReturn(Response.from(AiMessage.from("It is currently 2026-01-01T00:00:00Z")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-2", "What time is it in UTC?");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-2", AGENT_SLUG, "What time is it in UTC?");
 
         assertThat(result.toolWasUsed()).isTrue();
         assertThat(result.reply()).contains("2026-01-01");
@@ -149,7 +180,7 @@ class AgentPromptRunnerTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(new com.enterprisehub.runtime.sandbox.CommandResult(0, "ok", "", false, java.time.Duration.ZERO));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-shared", "clone then list files");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-shared", AGENT_SLUG, "clone then list files");
 
         assertThat(result.toolWasUsed()).isTrue();
         // Two sandboxed tool calls happened, but only ONE real sandbox was
@@ -166,7 +197,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.generate(anyList(), anyList()))
                 .thenReturn(Response.from(AiMessage.from("no tool needed")));
 
-        runner.run(tenantId, "exec-notools", "just answer directly");
+        runner.run(tenantId, "exec-notools", AGENT_SLUG, "just answer directly");
 
         verifyNoInteractions(sandboxClient);
     }
@@ -175,10 +206,66 @@ class AgentPromptRunnerTest {
     void run_noCredentialConfigured_throwsBadRequest() {
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> runner.run(tenantId, "exec-3", "Hello"))
+        assertThatThrownBy(() -> runner.run(tenantId, "exec-3", AGENT_SLUG, "Hello"))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(sharedExecutionContextFactory);
+    }
+
+    @Test
+    void run_unknownAgentSlug_throwsBadRequest_neverResolvesCredential() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("does-not-exist")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> runner.run(tenantId, "exec-unknown", "does-not-exist", "Hello"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("does-not-exist")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(vendorCredentialRepository);
+    }
+
+    @Test
+    void run_definitionWithoutGitClone_neverResolvesGitCredential() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinition("get_current_date_time")));
+        stubCredentialResolution();
+        stubContextFactory("exec-no-git");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-no-git", AGENT_SLUG, "Hello");
+
+        verifyNoInteractions(credentialResolver);
+    }
+
+    @Test
+    void run_definitionWithGitClone_resolvesGitCredentialUpFront() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinition("git_clone")));
+        stubCredentialResolution();
+        stubContextFactory("exec-with-git");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-with-git", AGENT_SLUG, "Hello");
+
+        verify(credentialResolver).resolve(tenantId.toString(), "GIT");
+    }
+
+    @Test
+    void run_passesDefinitionsSystemPromptThrough() {
+        stubCredentialResolution();
+        stubContextFactory("exec-sysprompt");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-sysprompt", AGENT_SLUG, "Hello");
+
+        org.mockito.ArgumentCaptor<List<dev.langchain4j.data.message.ChatMessage>> captor =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(chatLanguageModel).generate(captor.capture(), anyList());
+        assertThat(captor.getValue().get(0)).isInstanceOf(dev.langchain4j.data.message.SystemMessage.class);
+        assertThat(((dev.langchain4j.data.message.SystemMessage) captor.getValue().get(0)).text())
+                .isEqualTo("You are a test agent.");
     }
 
     @Test
@@ -187,7 +274,7 @@ class AgentPromptRunnerTest {
         stubContextFactory("exec-4");
         when(chatLanguageModel.generate(anyList(), anyList())).thenThrow(new RuntimeException("timeout"));
 
-        assertThatThrownBy(() -> runner.run(tenantId, "exec-4", "Hello"))
+        assertThatThrownBy(() -> runner.run(tenantId, "exec-4", AGENT_SLUG, "Hello"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("timeout");
     }

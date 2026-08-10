@@ -70,9 +70,10 @@ class AgentJobWorkerTest {
         job.setId(executionId);
         job.setTenantId(tenantId);
         job.setPrompt("list files");
+        job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
 
-        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("list files")))
+        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("coding-agent"), eq("list files")))
                 .thenAnswer(invocation -> {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
@@ -95,8 +96,9 @@ class AgentJobWorkerTest {
         job.setId(executionId);
         job.setTenantId(tenantId);
         job.setPrompt("do something");
+        job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any())).thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
+        when(agentPromptRunner.run(any(), any(), any(), any())).thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
 
         worker.pollAndProcessOne(); // must not throw out of the scheduled method
 

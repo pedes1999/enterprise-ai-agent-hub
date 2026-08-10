@@ -28,13 +28,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AgentExecutionControllerTest {
 
     private AgentExecutionService executionService;
+    private AgentDefinitionService agentDefinitionService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         executionService = mock(AgentExecutionService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new AgentExecutionController(executionService))
+        agentDefinitionService = mock(AgentDefinitionService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new AgentExecutionController(executionService, agentDefinitionService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -54,7 +56,7 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("list files"))).thenReturn(queued);
+        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG))).thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
                         .contentType("application/json")
@@ -63,6 +65,20 @@ class AgentExecutionControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("QUEUED"))
                 .andExpect(jsonPath("$.executionId").value(queued.getId().toString()));
+    }
+
+    @Test
+    void execute_explicitAgentSlug_passedThrough() throws Exception {
+        AgentExecution queued = new AgentExecution();
+        queued.setId(UUID.randomUUID());
+        queued.setStatus("QUEUED");
+        when(executionService.enqueue(eq(tenantId), eq("build a feature"), eq("coding-agent"))).thenReturn(queued);
+
+        mockMvc.perform(post("/agents/execute")
+                        .contentType("application/json")
+                        .content("""
+                                {"prompt":"build a feature","agentSlug":"coding-agent"}"""))
+                .andExpect(status().isAccepted());
     }
 
     @Test
@@ -102,5 +118,17 @@ class AgentExecutionControllerTest {
 
         mockMvc.perform(get("/agents/executions/" + id))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listDefinitions_returnsCatalogFromService() throws Exception {
+        when(agentDefinitionService.listActive()).thenReturn(List.of(
+                new com.enterprisehub.dto.AgentDefinitionSummary("coding-agent", "Coding Agent", "desc",
+                        List.of("git_clone", "read_file", "write_file", "run_shell_command"))));
+
+        mockMvc.perform(get("/agents/definitions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].slug").value("coding-agent"))
+                .andExpect(jsonPath("$[0].toolNames[0]").value("git_clone"));
     }
 }

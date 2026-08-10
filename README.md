@@ -75,6 +75,27 @@ at the database layer (Postgres RLS), not just in application code.
   Verified live: clone → read a file → write a new file → shell-`cat` that
   file back, all in one prompt, each step correctly seeing the previous
   step's filesystem state.
+- **Agents come from a catalog, not a hardcoded list** — the actual
+  mechanism behind "a library of hundreds of agents and tools." An
+  `AgentDefinition` (`agent_definitions` table, platform-wide, not
+  tenant-scoped) is a named persona: a system prompt plus a curated
+  `tool_names` list. `ToolCatalog` (gateway-api) is the tool-side registry
+  it references — every `AgentTool` gets one `@Component ToolFactory` bean
+  (`toolName()` + `create(session, listener, credentialResolver)`), and
+  `ToolCatalog` self-assembles from whatever `ToolFactory` beans Spring
+  finds. Adding tool #101 means one new `AgentTool` + one new
+  `ToolFactory`; adding agent #101 means one new `agent_definitions` row
+  (via migration for now — no admin CRUD API yet). `AgentPromptRunner`
+  resolves a definition by slug, builds only ITS tools via the catalog,
+  and only resolves credentials for kinds a tool it's actually using might
+  need (e.g. `GIT`, only if `git_clone` is in that definition's tool
+  list). `GET /agents/definitions` lists the current catalog. Two seeded
+  definitions exist today: `general-assistant` (no repo access) and
+  `coding-agent` (all four sandboxed tools). Verified live: the same
+  clone → read prompt behaves completely differently depending on which
+  agent it's sent to — `general-assistant` correctly reports it has no
+  cloning capability at all, `coding-agent` clones and quotes the real
+  file content back.
 - **Sandboxed tool execution is vendor-neutral at the API boundary**:
   `SandboxClient` (`agent-runtime`) knows nothing about E2B specifically —
   `SandboxClientHttpImpl` calls an internal HTTP sidecar
@@ -201,9 +222,10 @@ in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterpris
 | `PUT /vendor-credentials` · `GET /vendor-credentials` · `DELETE /vendor-credentials/{provider}` | ADMIN | Store/rotate/remove encrypted LLM vendor credentials |
 | `PUT /tool-credentials` · `GET /tool-credentials` · `DELETE /tool-credentials/{credentialKind}` | ADMIN | Store/rotate/remove encrypted credentials sandboxed tools need (e.g. a git PAT) |
 | `POST /agents/ping` | ADMIN, DEVELOPER | Spike endpoint: real round-trip to the tenant's configured LLM, proves the credential → LangChain4j → provider chain works. Not the real agent execution model. |
-| `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: through `SharedExecutionContext` with `CurrentDateTimeTool` (trivial demo) and four real, sandboxed tools (`RunShellCommandTool`, `GitCloneTool`, `ReadFileTool`, `WriteFileTool`, all sharing one persistent sandbox via `SandboxSession`) registered — proves the full multi-round tool-calling loop, including real sandbox execution and audit logging, works end to end. A prompt that chains several steps (e.g. "clone, then read the README, then write a new file, then cat it") works in one request now. |
-| `POST /agents/execute` | ADMIN, DEVELOPER | The real (durable, async) execution model: enqueues an `agent_executions` row (`QUEUED`) and returns its id immediately — `202 Accepted` — without waiting for the LLM or any tool. `AgentJobWorker` picks it up separately. |
+| `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: runs a named `AgentDefinition` (`agentSlug` in the body, defaults to `general-assistant`) synchronously through `SharedExecutionContext` — proves the full multi-round tool-calling loop, real sandbox execution (via `SandboxSession` and whichever tools that agent's definition includes), and audit logging all work end to end. A prompt that chains several steps (e.g. "clone, then read the README, then write a new file, then cat it") works in one request now, as long as the chosen agent's tool list includes what it needs. |
+| `POST /agents/execute` | ADMIN, DEVELOPER | The real (durable, async) execution model: enqueues an `agent_executions` row (`QUEUED`, tagged with the resolved `agentSlug`) and returns its id immediately — `202 Accepted` — without waiting for the LLM or any tool. `AgentJobWorker` picks it up separately. Rejects an unknown/inactive `agentSlug` immediately (400), before persisting anything. |
 | `GET /agents/executions/{id}` | ADMIN, DEVELOPER, READONLY | Poll a queued/running/finished execution's current status, and once `SUCCEEDED`/`FAILED`, its reply/error. Tenant-isolated the same way as everything else (RLS + an explicit `tenant_id` filter). |
+| `GET /agents/definitions` | ADMIN, DEVELOPER, READONLY | The browsable agent catalog — slug, name, description, and tool list for every active `AgentDefinition`. This is how a caller discovers what `agentSlug` values are valid. |
 | `GET /actuator/health` | none | Health check |
 
 ## Test
@@ -217,8 +239,8 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-280 automated tests as of the last update (17 `agent-core` + 71
-`agent-runtime` + 192 `gateway-api`) — unit tests (mocked) for every
+296 automated tests as of the last update (20 `agent-core` + 71
+`agent-runtime` + 205 `gateway-api`) — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
@@ -230,7 +252,10 @@ and `GET /agents/executions/{id}`'s tenant isolation — all against real
 Postgres, not mocks. `SandboxSessionTest` and `AgentPromptRunnerTest`'s
 `run_multipleSandboxedToolCallsInOneRun_shareOneSandbox_destroyedOnce`
 cover the persistent-sandbox behavior; `ToolCallingChatEngineTest` covers
-the multi-round loop, including the max-rounds cap.
+the multi-round loop, including the max-rounds cap; `ToolCatalogTest` and
+`AgentPromptRunnerTest`'s definition-resolution cases (unknown slug
+rejected, credentials only resolved for tools actually in the
+definition, system prompt passed through) cover the agent catalog.
 
 Two additional manual integration tests exist for `agent-runtime`
 (`*ManualIT` naming — excluded from `mvn test` by Surefire's default
@@ -255,9 +280,10 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **Weeks 6–8 (started)** — `SandboxClient` abstraction, E2B-backed sidecar (verified against real infra, Node-direct and Dockerized), `RunShellCommandTool` + `GitCloneTool` reachable end to end (`/agents/ping-with-tools` → real E2B sandbox → audited to `tool_executions`, RLS-scoped). Dedicated `tool_credentials` table + `CredentialResolver` real implementation for tool-specific credentials (git PAT). Filesystem tools not started.
 - [x] **Weeks 9–10** — Durable job orchestration: `POST /agents/execute` / `GET /agents/executions/{id}`, backed by a DB-polling queue (`AgentJobWorker` + `SELECT ... FOR UPDATE SKIP LOCKED` against `agent_executions`, no message broker needed at this scale — see the architecture notes above for the RLS worker-sentinel design). Verified live against the real dev DB: a queued job was picked up and completed by the background poller with no manual trigger involved.
 - [x] **Single-agent execution depth** (groundwork for the planned multi-agent "Ticket → PR" pipeline — see below) — `SandboxSession` gives one execution a persistent sandbox instead of a fresh one per tool call, `ToolCallingChatEngine` is now a bounded multi-round loop instead of one shot, and `ReadFileTool`/`WriteFileTool` round out the tool set alongside `RunShellCommandTool`/`GitCloneTool`. Verified live: clone → read → write → shell-verify, all in one prompt, each step seeing the last one's state.
+- [x] **Agent catalog** (the substrate "a library of hundreds of agents and tools" is built on) — `AgentDefinition` (platform-wide, named persona + curated tool list) and `ToolCatalog` (self-assembling `ToolFactory` registry) replace the hardcoded tool list `AgentPromptRunner` used to build every time. Two seeded agents (`general-assistant`, `coding-agent`), `GET /agents/definitions` to browse them, `agentSlug` on both trigger endpoints. Verified live: the identical clone+read prompt behaves correctly differently depending on which agent it's sent to. No admin CRUD API yet — new agents are added via migration, same as new tools are added via code.
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)
-- [ ] Multi-agent "Ticket → PR" pipeline — the actual end product this is building toward: a Planner/Coder/Reviewer sequence of agent executions per ticket, using `agent_executions.agent_type` to distinguish stages and a "open a PR" tool (reusing the `tool_credentials` pattern with a new `GITHUB` kind) as the final step. Not started — the single-agent depth work above is a deliberate prerequisite, not a detour.
+- [ ] Multi-agent "Ticket → PR" pipeline — the actual end product this is building toward: a Planner/Coder/Reviewer sequence of agent executions per ticket (each a named `AgentDefinition` from the catalog above), using `agent_executions.agent_type` to distinguish stages and a "open a PR" tool (reusing the `tool_credentials` pattern with a new `GITHUB` kind) as the final step. Not started.
 
 Also worth knowing if you're reading the history: two real bugs were found
 and fixed after the fact — `platform_api_keys`' RLS policy originally

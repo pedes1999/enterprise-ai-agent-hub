@@ -74,7 +74,7 @@ public class AgentJobWorker {
         TenantContext.set(job.getTenantId().toString());
         try {
             ToolCallingChatEngine.ToolChatResult result =
-                    agentPromptRunner.run(job.getTenantId(), job.getId().toString(), job.getPrompt());
+                    agentPromptRunner.run(job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt());
             executionService.complete(job.getId(), result.reply(), result.toolWasUsed());
         } catch (RuntimeException e) {
             log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);

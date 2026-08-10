@@ -39,7 +39,7 @@ public class AgentPingController {
     @PostMapping("/ping-with-tools")
     public ResponseEntity<AgentToolPingResponse> pingWithTools(@AuthenticationPrincipal PlatformPrincipal principal,
                                                                   @RequestBody AgentPingRequest request) {
-        var response = agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt());
+        var response = agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt(), request.agentSlug());
         return ResponseEntity.ok(response);
     }
 }

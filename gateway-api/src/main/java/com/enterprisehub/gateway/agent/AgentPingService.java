@@ -64,8 +64,9 @@ public class AgentPingService {
         return new AgentPingResponse(LlmProvider.ANTHROPIC.name(), modelName, reply);
     }
 
-    public AgentToolPingResponse pingWithTools(UUID tenantId, String prompt) {
+    public AgentToolPingResponse pingWithTools(UUID tenantId, String prompt, String agentSlug) {
         validatePrompt(prompt);
+        String resolvedSlug = (agentSlug == null || agentSlug.isBlank()) ? AgentPromptRunner.DEFAULT_AGENT_SLUG : agentSlug;
 
         // Synthetic id -- this spike endpoint still doesn't create a real
         // agent_executions row; it stays purely synchronous. Once you want
@@ -75,12 +76,14 @@ public class AgentPingService {
 
         ToolCallingChatEngine.ToolChatResult result;
         try {
-            result = agentPromptRunner.run(tenantId, executionId, prompt);
+            result = agentPromptRunner.run(tenantId, executionId, resolvedSlug, prompt);
+        } catch (AgentException e) {
+            throw e; // already the right status (e.g. unknown agent, no credential) -- don't relabel it as a provider failure
         } catch (RuntimeException e) {
             throw new AgentException(HttpStatus.BAD_GATEWAY, "Anthropic API call failed: " + e.getMessage());
         }
 
-        return new AgentToolPingResponse(LlmProvider.ANTHROPIC.name(), agentPromptRunner.modelName(), result.reply(), result.toolWasUsed());
+        return new AgentToolPingResponse(LlmProvider.ANTHROPIC.name(), agentPromptRunner.modelName(), result.reply(), result.toolWasUsed(), resolvedSlug);
     }
 
     private void validatePrompt(String prompt) {
