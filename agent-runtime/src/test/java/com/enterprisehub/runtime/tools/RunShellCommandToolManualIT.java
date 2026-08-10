@@ -25,10 +25,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * Requires, separately from this test:
  *   1. agent-runtime/sidecar running locally (`npm start`, with a real
- *      E2B_API_KEY set) -- see that directory's README. Not yet verified to
- *      even start, since no Node runtime was available when this was written.
+ *      E2B_API_KEY set) -- see that directory's README.
  *   2. SANDBOX_SIDECAR_URL pointing at it, e.g.:
  *      SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=RunShellCommandToolManualIT
+ *
+ * Verified passing against a real E2B account, both running the sidecar
+ * directly (`node --env-file=.env server.js`) and containerized via its
+ * Dockerfile -- see the sidecar's own README for both confirmed runs.
  */
 @EnabledIfEnvironmentVariable(named = "SANDBOX_SIDECAR_URL", matches = ".+")
 class RunShellCommandToolManualIT {

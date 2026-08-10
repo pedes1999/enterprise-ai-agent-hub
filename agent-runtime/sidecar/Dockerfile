@@ -1,7 +1,7 @@
-# Untested -- no Docker available in the environment this was written in.
-# Build/run once you have Docker + an E2B API key:
+# Verified: built and run against a real E2B account
+# (RunShellCommandToolManualIT passed through this exact container).
 #   docker build -t agent-hub-sandbox-sidecar .
-#   docker run -p 8090:8090 -e E2B_API_KEY=... agent-hub-sandbox-sidecar
+#   docker run -p 8090:8090 --env-file .env agent-hub-sandbox-sidecar
 FROM node:20-slim
 WORKDIR /app
 COPY package.json .
