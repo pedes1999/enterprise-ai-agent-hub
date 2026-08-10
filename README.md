@@ -12,7 +12,7 @@ at the database layer (Postgres RLS), not just in application code.
 |---|---|
 | `common-dto` | Shared request/response contracts. No framework dependency. |
 | `agent-core` | Provider-agnostic LLM abstraction (LangChain4j). Framework-light — no Spring dependency. |
-| `agent-runtime` | Sandboxed tool execution — filesystem, terminal, git. *(not started)* |
+| `agent-runtime` | Sandboxed tool execution via E2B microVMs (through an internal sidecar — see below). One real tool so far: `RunShellCommandTool`. Filesystem/git tools not started. |
 | `gateway-api` | Spring Boot app: auth, tenant/user/credential management, agent invocation. |
 
 ## Architecture notes
@@ -41,11 +41,28 @@ at the database layer (Postgres RLS), not just in application code.
   far.
 - **Tools are our own interface** (`AgentTool`), not LangChain4j's
   reflection-based `@Tool` annotation — `agent-core` is the only module that
-  knows LangChain4j exists; `agent-runtime`'s eventual filesystem/terminal/
-  git tools (Weeks 6–8) implement `AgentTool` directly, no LangChain4j
-  import needed. `ToolCallingChatEngine` handles the actual tool-calling
-  round trip, and `SharedExecutionContext` is the object (tenant + LLM
-  client + available tools) threaded through a single agent invocation.
+  knows LangChain4j exists; `agent-runtime`'s filesystem/terminal/git tools
+  implement `AgentTool` directly, no LangChain4j import needed.
+  `ToolCallingChatEngine` handles the actual tool-calling round trip, and
+  `SharedExecutionContext` is the object (tenant + LLM client + available
+  tools) threaded through a single agent invocation. `AgentTool.execute()`
+  takes an explicit `ToolExecutionContext` (tenantId, executionId) rather
+  than a ThreadLocal — sandboxed execution goes over HTTP to a sidecar, and
+  ThreadLocals don't survive a thread hop (the same bug class fixed in
+  `TenantAwareDataSource`, this time for credential/compute access instead
+  of a DB insert).
+- **Sandboxed tool execution is vendor-neutral at the API boundary**:
+  `SandboxClient` (`agent-runtime`) knows nothing about E2B specifically —
+  `SandboxClientHttpImpl` calls an internal HTTP sidecar
+  (`agent-runtime/sidecar/`, Node + E2B's official JS SDK, since E2B has no
+  official Java SDK and its gRPC data-plane protocol isn't a documented
+  external contract) rather than a hand-rolled Java gRPC client. Every
+  execution gets a fresh, ephemeral sandbox (verified: state from one
+  execution is genuinely invisible to the next), with an enforced timeout,
+  output-size cap, and a scoped credential injected only where needed.
+  Every sandboxed tool call is audited to `tool_executions`
+  (`AbstractSandboxedTool` → `ToolExecutionListener` SPI →
+  `JpaToolExecutionListener`), RLS-scoped like everything else.
 
 ## Setup
 
@@ -63,6 +80,15 @@ Override `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` (see `application.yml`) if
 you're not using these exact local defaults. `JWT_SECRET` and
 `CREDENTIAL_LOCAL_KEY` also have dev-only defaults baked in — override both
 in any shared/production environment.
+
+For sandboxed tool execution (`RunShellCommandTool`, reached via
+`/agents/ping-with-tools`), the sidecar also needs to be running — see
+[`agent-runtime/sidecar/README.md`](agent-runtime/sidecar/README.md).
+Quick version: `cd agent-runtime/sidecar`, set a real `E2B_API_KEY` in
+`.env`, `npm start` (or `docker build`/`docker run` — both verified
+working). Without it, `/agents/ping-with-tools` still works for prompts
+that don't need the shell command tool; it only fails (502) if the model
+tries to use it.
 
 ## Build
 
@@ -101,7 +127,7 @@ in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterpris
 | `POST /api-keys` · `GET /api-keys` · `DELETE /api-keys/{id}` | ADMIN | Issue/revoke platform API keys (for future CI/CD & webhook triggers) |
 | `PUT /vendor-credentials` · `GET /vendor-credentials` · `DELETE /vendor-credentials/{provider}` | ADMIN | Store/rotate/remove encrypted LLM vendor credentials |
 | `POST /agents/ping` | ADMIN, DEVELOPER | Spike endpoint: real round-trip to the tenant's configured LLM, proves the credential → LangChain4j → provider chain works. Not the real agent execution model. |
-| `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: same as above, but through `SharedExecutionContext` with one demo tool registered — proves the tool-calling loop (model decides to call a tool, tool runs, result folded into a final answer) works end to end. |
+| `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: through `SharedExecutionContext` with `CurrentDateTimeTool` (trivial demo) and `RunShellCommandTool` (real, sandboxed, via E2B) registered — proves the full tool-calling loop, including real sandbox execution and audit logging, works end to end. |
 | `GET /actuator/health` | none | Health check |
 
 ## Test
@@ -115,11 +141,22 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-136 tests as of the last update — unit tests (mocked) for every
+188 automated tests as of the last update (14 `agent-core` + 33
+`agent-runtime` + 141 `gateway-api`) — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
-and the RLS-enforcement bugs described below).
+audit-table RLS, and the RLS-enforcement bugs described below).
+
+Two additional manual integration tests exist for `agent-runtime`
+(`*ManualIT` naming — excluded from `mvn test` by Surefire's default
+pattern, gated behind `SANDBOX_SIDECAR_URL` besides), verified passing
+against a real E2B account both via a directly-run sidecar and the
+Dockerized one:
+
+```bash
+SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=RunShellCommandToolManualIT
+```
 
 ## Status
 
@@ -130,7 +167,7 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **Week 3** — Role-based `@PreAuthorize`, KMS-style (local AES-GCM) credential encryption
 - [x] **Week 4** — `LlmEngineFactory` + real Anthropic round-trip proof (`/agents/ping`)
 - [x] **Week 5** — `SharedExecutionContext`, `AgentTool` interface, tool-calling loop proven live (`/agents/ping-with-tools`)
-- [ ] Weeks 6–8 — Sandboxed tool execution (filesystem/terminal/git) implementing `AgentTool` for real
+- [x] **Weeks 6–8 (started)** — `SandboxClient` abstraction, E2B-backed sidecar (verified against real infra, Node-direct and Dockerized), `RunShellCommandTool` reachable end to end (`/agents/ping-with-tools` → real E2B sandbox → audited to `tool_executions`, RLS-scoped). Filesystem and git tools not started.
 - [ ] Weeks 9–10 — Job orchestration (message queue, durable execution tracking)
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)

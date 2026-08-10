@@ -11,6 +11,8 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.runtime.audit.ToolExecutionListener;
+import com.enterprisehub.runtime.sandbox.SandboxClient;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -48,8 +50,10 @@ class AgentPingServiceTest {
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
         LlmProperties properties = new LlmProperties("claude-3-5-sonnet-20240620");
+        SandboxClient sandboxClient = mock(SandboxClient.class);
+        ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
         service = new AgentPingService(vendorCredentialRepository, vendorCredentialService, llmEngineFactory,
-                sharedExecutionContextFactory, properties);
+                sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener);
     }
 
     private VendorCredential activeCredential() {

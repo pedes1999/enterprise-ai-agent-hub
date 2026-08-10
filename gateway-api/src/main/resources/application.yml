@@ -53,6 +53,11 @@ app:
     # LlmProperties javadoc. Override via env var as Anthropic ships newer
     # models; the API accepts any valid model id string.
     anthropic-model-name: ${ANTHROPIC_MODEL_NAME:claude-sonnet-4-5-20250929}
+  sandbox:
+    # Points at agent-runtime/sidecar (see its README) -- must be running
+    # separately (node --env-file=.env server.js, or the Dockerfile) for
+    # any sandboxed AgentTool (e.g. RunShellCommandTool) to work.
+    sidecar-url: ${SANDBOX_SIDECAR_URL:http://localhost:8090/}
 
 logging:
   level:

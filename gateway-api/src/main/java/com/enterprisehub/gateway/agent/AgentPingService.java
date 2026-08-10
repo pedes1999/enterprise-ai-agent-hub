@@ -4,6 +4,7 @@ import com.enterprisehub.core.SharedExecutionContext;
 import com.enterprisehub.core.SharedExecutionContextFactory;
 import com.enterprisehub.core.llm.LlmEngineFactory;
 import com.enterprisehub.core.llm.LlmProvider;
+import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.dto.AgentPingResponse;
 import com.enterprisehub.dto.AgentToolPingResponse;
@@ -12,6 +13,9 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.runtime.audit.ToolExecutionListener;
+import com.enterprisehub.runtime.sandbox.SandboxClient;
+import com.enterprisehub.runtime.tools.RunShellCommandTool;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -20,15 +24,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Week 4 spike (ping) + Week 5 spike (pingWithTools): proves the full chain
- * end to end -- encrypted vendor credential in Postgres -> decrypted at
- * request time -> real LangChain4j client -> real Anthropic API call ->
+ * Week 4 spike (ping) + Week 5-6 spike (pingWithTools): proves the full
+ * chain end to end -- encrypted vendor credential in Postgres -> decrypted
+ * at request time -> real LangChain4j client -> real Anthropic API call ->
  * response back to the caller, and now also -> SharedExecutionContext ->
- * tool-calling loop -> a real tool actually invoked. This is deliberately
- * NOT the real agent execution model (no async job, nothing persisted to
- * agent_executions, no repository/workspace context); it exists to
+ * tool-calling loop -> a real tool actually invoked, including a real
+ * sandboxed one (RunShellCommandTool, via agent-runtime's SandboxClient ->
+ * sidecar -> E2B). Every tool call is audited to tool_executions
+ * regardless (JpaToolExecutionListener), but this is still deliberately
+ * NOT the real agent execution model: no async job, nothing persisted to
+ * agent_executions itself, no repository/workspace context. It exists to
  * validate the shape of each new piece against one working provider before
- * building it out for real.
+ * building the real thing.
  */
 @Service
 public class AgentPingService {
@@ -38,17 +45,23 @@ public class AgentPingService {
     private final LlmEngineFactory llmEngineFactory;
     private final SharedExecutionContextFactory sharedExecutionContextFactory;
     private final LlmProperties llmProperties;
+    private final SandboxClient sandboxClient;
+    private final ToolExecutionListener toolExecutionListener;
 
     public AgentPingService(VendorCredentialRepository vendorCredentialRepository,
                              VendorCredentialService vendorCredentialService,
                              LlmEngineFactory llmEngineFactory,
                              SharedExecutionContextFactory sharedExecutionContextFactory,
-                             LlmProperties llmProperties) {
+                             LlmProperties llmProperties,
+                             SandboxClient sandboxClient,
+                             ToolExecutionListener toolExecutionListener) {
         this.vendorCredentialRepository = vendorCredentialRepository;
         this.vendorCredentialService = vendorCredentialService;
         this.llmEngineFactory = llmEngineFactory;
         this.sharedExecutionContextFactory = sharedExecutionContextFactory;
         this.llmProperties = llmProperties;
+        this.sandboxClient = sandboxClient;
+        this.toolExecutionListener = toolExecutionListener;
     }
 
     public AgentPingResponse ping(UUID tenantId, String prompt) {
@@ -76,9 +89,11 @@ public class AgentPingService {
         // agent_executions row (see the class javadoc). Once real agent
         // orchestration exists (Weeks 9-10), this becomes that row's id.
         String executionId = UUID.randomUUID().toString();
+        List<AgentTool> tools = List.of(
+                new CurrentDateTimeTool(),
+                new RunShellCommandTool(sandboxClient, toolExecutionListener));
         SharedExecutionContext context = sharedExecutionContextFactory.create(
-                tenantId.toString(), executionId, LlmProvider.ANTHROPIC, apiKey, modelName,
-                List.of(new CurrentDateTimeTool()));
+                tenantId.toString(), executionId, LlmProvider.ANTHROPIC, apiKey, modelName, tools);
 
         ToolCallingChatEngine.ToolChatResult result;
         try {

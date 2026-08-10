@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "a2325036-bfc6-432d-be5a-6c5100d44291",
+    "_postman_id": "eba2f972-87f1-46b8-b6b1-103940792bfa",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through Week 5 (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, LLM ping + tool-calling spikes) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API and costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502 (which is itself a valid, testable outcome).",
+    "description": "Covers every endpoint built through the agent-runtime sandbox integration (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, LLM ping + tool-calling, real sandboxed shell command execution) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command request will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1496,6 +1496,56 @@
                   "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
                   "const json = pm.response.json();",
                   "pm.test('The tool was NOT invoked for an unrelated prompt', () => pm.expect(json.toolWasUsed).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ping With Tools - Runs A Real Sandboxed Shell Command",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/ping-with-tools",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "ping-with-tools"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Run the shell command 'whoami && uname -a' using the shell command tool and tell me exactly what it printed.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK (requires the sandbox sidecar running -- see agent-runtime/sidecar/README.md)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('The shell command tool was invoked', () => pm.expect(json.toolWasUsed).to.eql(true));",
+                  "pm.test('Reply reflects a real sandboxed command result', () => pm.expect(json.reply.toLowerCase()).to.include('linux'));"
                 ]
               }
             }
