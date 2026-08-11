@@ -56,7 +56,8 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG))).thenReturn(queued);
+        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null)))
+                .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
                         .contentType("application/json")
@@ -72,12 +73,31 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("build a feature"), eq("coding-agent"))).thenReturn(queued);
+        when(executionService.enqueue(eq(tenantId), eq("build a feature"), eq("coding-agent"), eq(null), eq(null)))
+                .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
                         .contentType("application/json")
                         .content("""
                                 {"prompt":"build a feature","agentSlug":"coding-agent"}"""))
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void execute_repositoryUrlAndInputParameters_passedThrough() throws Exception {
+        AgentExecution queued = new AgentExecution();
+        queued.setId(UUID.randomUUID());
+        queued.setStatus("QUEUED");
+        when(executionService.enqueue(eq(tenantId), eq("also check the auth module"), eq("coding-agent"),
+                eq("https://github.com/org/repo.git"), eq(java.util.Map.of("text", "Ticket: fix the bug"))))
+                .thenReturn(queued);
+
+        mockMvc.perform(post("/agents/execute")
+                        .contentType("application/json")
+                        .content("""
+                                {"prompt":"also check the auth module","agentSlug":"coding-agent",
+                                 "repositoryUrl":"https://github.com/org/repo.git",
+                                 "inputParameters":{"text":"Ticket: fix the bug"}}"""))
                 .andExpect(status().isAccepted());
     }
 

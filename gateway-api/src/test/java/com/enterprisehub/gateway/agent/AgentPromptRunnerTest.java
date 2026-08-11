@@ -11,6 +11,8 @@ import com.enterprisehub.gateway.agent.catalog.ReadFileToolFactory;
 import com.enterprisehub.gateway.agent.catalog.RunShellCommandToolFactory;
 import com.enterprisehub.gateway.agent.catalog.ToolCatalog;
 import com.enterprisehub.gateway.agent.catalog.WriteFileToolFactory;
+import com.enterprisehub.gateway.agent.input.InputSourceResolverRegistry;
+import com.enterprisehub.gateway.agent.input.ManualTextInputResolver;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.AgentDefinition;
@@ -77,9 +79,10 @@ class AgentPromptRunnerTest {
                 new CurrentDateTimeToolFactory(), new RunShellCommandToolFactory(),
                 new GitCloneToolFactory(), new ReadFileToolFactory(), new WriteFileToolFactory(),
                 new OpenPullRequestToolFactory()));
+        InputSourceResolverRegistry inputSourceResolverRegistry = new InputSourceResolverRegistry(List.of(new ManualTextInputResolver()));
         runner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
                 sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver,
-                agentDefinitionRepository, toolCatalog);
+                agentDefinitionRepository, toolCatalog, inputSourceResolverRegistry);
     }
 
     private AgentDefinition testDefinition(String... toolNames) {
@@ -90,6 +93,20 @@ class AgentPromptRunnerTest {
         definition.setSystemPrompt("You are a test agent.");
         definition.setToolNames(List.of(toolNames));
         return definition;
+    }
+
+    private AgentDefinition testDefinitionWithInputSource(String inputSourceType, String... toolNames) {
+        AgentDefinition definition = testDefinition(toolNames);
+        definition.setInputSourceType(inputSourceType);
+        return definition;
+    }
+
+    /** Captures the actual UserMessage text sent to the model -- index 1 because every test agent here has a non-null systemPrompt (index 0). */
+    private String capturedUserMessageText() {
+        org.mockito.ArgumentCaptor<List<dev.langchain4j.data.message.ChatMessage>> captor =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(chatLanguageModel).generate(captor.capture(), anyList());
+        return ((dev.langchain4j.data.message.UserMessage) captor.getValue().get(1)).singleText();
     }
 
     private VendorCredential activeCredential() {
@@ -297,6 +314,53 @@ class AgentPromptRunnerTest {
         assertThat(captor.getValue().get(0)).isInstanceOf(dev.langchain4j.data.message.SystemMessage.class);
         assertThat(((dev.langchain4j.data.message.SystemMessage) captor.getValue().get(0)).text())
                 .isEqualTo("You are a test agent.");
+    }
+
+    @Test
+    void run_noRepositoryUrlNoInputParameters_promptIsByteIdenticalToTodaysBehavior() {
+        // Regression guard for general-assistant-style agents: no
+        // inputSourceType configured, repositoryUrl/inputParameters both
+        // null -- assemblePrompt() must reduce to EXACTLY `prompt`, no
+        // stray "Repository: " prefix, no leftover blank lines.
+        stubCredentialResolution();
+        stubContextFactory("exec-noop-input");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-noop-input", AGENT_SLUG, "Hello", null, null);
+
+        assertThat(capturedUserMessageText()).isEqualTo("Hello");
+    }
+
+    @Test
+    void run_ticketStyleInput_repositoryAndResolvedBlobAndPrompt_allAppearInOrder() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinitionWithInputSource("MANUAL_TEXT", "get_current_date_time")));
+        stubCredentialResolution();
+        stubContextFactory("exec-ticket-style");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-ticket-style", AGENT_SLUG, "Also check the auth module",
+                "https://github.com/org/repo.git", Map.of("text", "Ticket: fix the login bug"));
+
+        assertThat(capturedUserMessageText()).isEqualTo(
+                "Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug\n\nAlso check the auth module");
+    }
+
+    @Test
+    void run_ticketStyleInput_blankPrompt_noTrailingEmptySection() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinitionWithInputSource("MANUAL_TEXT", "get_current_date_time")));
+        stubCredentialResolution();
+        stubContextFactory("exec-ticket-noprompt");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-ticket-noprompt", AGENT_SLUG, "",
+                "https://github.com/org/repo.git", Map.of("text", "Ticket: fix the login bug"));
+
+        assertThat(capturedUserMessageText()).isEqualTo("Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug");
     }
 
     @Test

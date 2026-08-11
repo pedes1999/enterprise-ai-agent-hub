@@ -1,0 +1,11 @@
+-- V8__agent_definition_input_source.sql
+--
+-- Lets an AgentDefinition declare what kind of input it expects (a Jira
+-- ticket, raw pasted text, an uploaded file reference, ...) instead of
+-- every triggerable agent needing bespoke input plumbing. Nullable and
+-- unset for every existing row on purpose: a definition with no
+-- input_source_type (general-assistant, coding-agent today) is unaffected
+-- -- it keeps working exactly as a free-text `prompt` chat agent, no
+-- resolver involved at all. See InputSourceResolver's javadoc for the
+-- resolution mechanism this feeds.
+ALTER TABLE agent_definitions ADD COLUMN input_source_type VARCHAR(50);

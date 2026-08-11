@@ -18,9 +18,11 @@ import java.util.UUID;
  * that lets the worker find jobs across every tenant.
  *
  * prompt/reply/toolWasUsed back the current prompt-plus-tools flow
- * (AgentPromptRunner); repository_url/agent_type/trigger_source are the
- * original Week 1 columns for a future repository-driven agent and are
- * either unused or given a fixed placeholder value by that flow today.
+ * (AgentPromptRunner); repository_url is the original Week 1 column for a
+ * future repository-driven agent, now genuinely used by the
+ * InputSourceResolver-driven prompt-assembly path (see AgentPromptRunner);
+ * input_parameters is that same path's source-specific parameters, JSON-
+ * serialized (see V9); trigger_source is still a fixed placeholder value.
  */
 @Entity
 @Table(name = "agent_executions")
@@ -48,6 +50,11 @@ public class AgentExecution {
 
     @Column(name = "repository_url")
     private String repositoryUrl;
+
+    // JSON-serialized Map<String, String> -- see V9's rationale. Null for
+    // every execution whose AgentDefinition has no input_source_type.
+    @Column(name = "input_parameters", columnDefinition = "TEXT")
+    private String inputParameters;
 
     @Column(nullable = false)
     private String status = "QUEUED";

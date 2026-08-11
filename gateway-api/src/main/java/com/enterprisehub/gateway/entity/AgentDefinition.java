@@ -52,6 +52,14 @@ public class AgentDefinition {
     @Column(name = "llm_provider", nullable = false)
     private String llmProvider = "ANTHROPIC";
 
+    // Null (the default for every existing row) means this definition takes
+    // plain free-text `prompt` only -- no InputSourceResolver runs, no
+    // resolved blob gets prepended. Set it (e.g. "MANUAL_TEXT") to have
+    // AgentPromptRunner resolve TriggerAgentExecutionRequest.inputParameters
+    // through the matching InputSourceResolver before assembling the prompt.
+    @Column(name = "input_source_type")
+    private String inputSourceType;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 

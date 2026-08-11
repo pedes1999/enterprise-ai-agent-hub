@@ -2611,6 +2611,60 @@
           ]
         },
         {
+          "name": "Enqueue Agent Execution With Repository Reference (Input Source Abstraction)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/execute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "execute"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"List the files in the current directory.\",\n  \"agentSlug\": \"coding-agent\",\n  \"repositoryUrl\": \"https://github.com/octocat/Hello-World.git\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Demonstrates the additive repositoryUrl field (InputSourceResolver work): assembled into the prompt as \"Repository: {url}\" ahead of the free-text prompt, regardless of whether the agent has an inputSourceType configured -- coding-agent doesn't, so this only exercises the repositoryUrl half. Exercising the inputParameters/MANUAL_TEXT resolver half needs an AgentDefinition with input_source_type='MANUAL_TEXT', which isn't seeded by any migration yet (no second real agent has been built on top of the abstraction yet -- see README's Status section)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 202', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "pm.test('Response has executionId', function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.executionId).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Get Execution Status",
           "request": {
             "method": "GET",

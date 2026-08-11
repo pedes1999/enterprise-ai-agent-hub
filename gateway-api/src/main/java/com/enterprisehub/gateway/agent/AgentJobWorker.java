@@ -73,8 +73,9 @@ public class AgentJobWorker {
         // view, which only ever applies to the claim query above.
         TenantContext.set(job.getTenantId().toString());
         try {
-            ToolCallingChatEngine.ToolChatResult result =
-                    agentPromptRunner.run(job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt());
+            ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
+                    job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt(),
+                    job.getRepositoryUrl(), executionService.deserializeInputParameters(job));
             executionService.complete(job.getId(), result.reply(), result.toolWasUsed());
         } catch (RuntimeException e) {
             log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);

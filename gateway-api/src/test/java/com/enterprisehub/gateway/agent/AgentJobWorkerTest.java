@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,6 +27,9 @@ class AgentJobWorkerTest {
         executionService = mock(AgentExecutionService.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
         worker = new AgentJobWorker(executionService, agentPromptRunner);
+        // Every AgentExecution mocked in this test file leaves inputParameters
+        // unset -- matches AgentExecutionService's own real "none stored" contract.
+        when(executionService.deserializeInputParameters(any())).thenReturn(Map.of());
     }
 
     @AfterEach
@@ -73,7 +77,7 @@ class AgentJobWorkerTest {
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
 
-        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("coding-agent"), eq("list files")))
+        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("coding-agent"), eq("list files"), eq(null), eq(Map.of())))
                 .thenAnswer(invocation -> {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
@@ -98,7 +102,8 @@ class AgentJobWorkerTest {
         job.setPrompt("do something");
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any())).thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
 
         worker.pollAndProcessOne(); // must not throw out of the scheduled method
 

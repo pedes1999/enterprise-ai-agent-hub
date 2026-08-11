@@ -6,6 +6,7 @@ import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.gateway.agent.catalog.ToolCatalog;
+import com.enterprisehub.gateway.agent.input.InputSourceResolverRegistry;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.AgentDefinition;
@@ -21,6 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +74,7 @@ public class AgentPromptRunner {
     private final CredentialResolver credentialResolver;
     private final AgentDefinitionRepository agentDefinitionRepository;
     private final ToolCatalog toolCatalog;
+    private final InputSourceResolverRegistry inputSourceResolverRegistry;
 
     public AgentPromptRunner(VendorCredentialRepository vendorCredentialRepository,
                               VendorCredentialService vendorCredentialService,
@@ -81,7 +84,8 @@ public class AgentPromptRunner {
                               ToolExecutionListener toolExecutionListener,
                               CredentialResolver credentialResolver,
                               AgentDefinitionRepository agentDefinitionRepository,
-                              ToolCatalog toolCatalog) {
+                              ToolCatalog toolCatalog,
+                              InputSourceResolverRegistry inputSourceResolverRegistry) {
         this.vendorCredentialRepository = vendorCredentialRepository;
         this.vendorCredentialService = vendorCredentialService;
         this.sharedExecutionContextFactory = sharedExecutionContextFactory;
@@ -91,6 +95,7 @@ public class AgentPromptRunner {
         this.credentialResolver = credentialResolver;
         this.agentDefinitionRepository = agentDefinitionRepository;
         this.toolCatalog = toolCatalog;
+        this.inputSourceResolverRegistry = inputSourceResolverRegistry;
     }
 
     public String modelName() {
@@ -107,9 +112,23 @@ public class AgentPromptRunner {
      * row for the async worker).
      */
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt) {
+        return run(tenantId, executionId, agentSlug, prompt, null, null);
+    }
+
+    /**
+     * repositoryUrl/inputParameters are both optional and additive -- see
+     * TriggerAgentExecutionRequest's javadoc. An AgentDefinition with no
+     * inputSourceType (general-assistant, coding-agent today) ignores them
+     * entirely: assemblePrompt() reduces to exactly `prompt`, byte-identical
+     * to this method's behavior before either parameter existed.
+     */
+    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
+                                                      String repositoryUrl, Map<String, String> inputParameters) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         String apiKey = resolveApiKey(tenantId);
         String modelName = llmProperties.anthropicModelName();
+        String resolvedInput = resolveInput(definition, tenantId, inputParameters);
+        String assembledPrompt = assemblePrompt(repositoryUrl, resolvedInput, prompt);
 
         SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId, definition));
         try {
@@ -117,13 +136,45 @@ public class AgentPromptRunner {
             SharedExecutionContext context = sharedExecutionContextFactory.create(
                     tenantId.toString(), executionId, LlmProvider.ANTHROPIC, apiKey, modelName, tools, definition.getSystemPrompt());
 
-            return context.chat(prompt);
+            return context.chat(assembledPrompt);
         } finally {
             // Runs exactly once per execution, regardless of how many tool
             // calls happened (or none at all -- endSession() no-ops if the
             // session's sandbox was never actually provisioned).
             session.endSession();
         }
+    }
+
+    /** Empty (not null) when this definition has no inputSourceType configured -- assemblePrompt() then drops this section entirely. */
+    private String resolveInput(AgentDefinition definition, UUID tenantId, Map<String, String> inputParameters) {
+        String inputSourceType = definition.getInputSourceType();
+        if (inputSourceType == null || inputSourceType.isBlank()) {
+            return "";
+        }
+        return inputSourceResolverRegistry.resolve(inputSourceType, tenantId, inputParameters);
+    }
+
+    /**
+     * Joins whichever of "Repository: {url}", the resolved input blob, and
+     * the free-text prompt are actually non-blank, in that order, with a
+     * blank line between sections -- never a leftover "Repository: " with
+     * nothing after it, never a trailing blank line from a skipped section.
+     * When repositoryUrl/resolvedInput are both blank (no inputSourceType,
+     * no repo given), this reduces to exactly `prompt` -- the pre-existing
+     * behavior for general-assistant-style agents is untouched.
+     */
+    private String assemblePrompt(String repositoryUrl, String resolvedInput, String prompt) {
+        List<String> sections = new ArrayList<>();
+        if (repositoryUrl != null && !repositoryUrl.isBlank()) {
+            sections.add("Repository: " + repositoryUrl);
+        }
+        if (resolvedInput != null && !resolvedInput.isBlank()) {
+            sections.add(resolvedInput);
+        }
+        if (prompt != null && !prompt.isBlank()) {
+            sections.add(prompt);
+        }
+        return String.join("\n\n", sections);
     }
 
     private AgentDefinition resolveAgentDefinition(String agentSlug) {

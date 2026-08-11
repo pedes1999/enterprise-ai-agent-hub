@@ -1,0 +1,13 @@
+-- V9__agent_execution_input_parameters.sql
+--
+-- Carries a queued execution's source-specific input parameters (e.g.
+-- {"text": "..."} for MANUAL_TEXT) from AgentExecutionController through
+-- to AgentJobWorker/AgentPromptRunner, the same way `prompt` and
+-- `repository_url` already do. Stored as a JSON-serialized TEXT blob
+-- rather than jsonb -- this project has no other jsonb column yet and a
+-- flat string map doesn't need real JSON querying, just round-tripping
+-- (see AgentExecutionService for the (de)serialization, done the same
+-- way OpenPullRequestTool already builds JSON payloads with ObjectMapper).
+-- Nullable: most executions (no input_source_type on their AgentDefinition)
+-- never set this at all.
+ALTER TABLE agent_executions ADD COLUMN input_parameters TEXT;

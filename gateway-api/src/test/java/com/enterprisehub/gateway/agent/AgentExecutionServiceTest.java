@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,7 +36,7 @@ class AgentExecutionServiceTest {
 
     @Test
     void enqueue_createsQueuedRowWithPromptAndTenantAndAgentSlug() {
-        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent");
+        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null);
 
         assertThat(saved.getTenantId()).isEqualTo(tenantId);
         assertThat(saved.getPrompt()).isEqualTo("list files");
@@ -46,10 +47,34 @@ class AgentExecutionServiceTest {
     }
 
     @Test
+    void enqueue_repositoryUrlAndInputParameters_persistedOnTheRow() {
+        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent",
+                "https://github.com/org/repo.git", Map.of("text", "Ticket: fix the bug"));
+
+        assertThat(saved.getRepositoryUrl()).isEqualTo("https://github.com/org/repo.git");
+        assertThat(saved.getInputParameters()).contains("\"text\"").contains("Ticket: fix the bug");
+    }
+
+    @Test
+    void deserializeInputParameters_roundTripsWhatEnqueueSerialized() {
+        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent",
+                "https://github.com/org/repo.git", Map.of("text", "Ticket: fix the bug"));
+
+        assertThat(service.deserializeInputParameters(saved)).isEqualTo(Map.of("text", "Ticket: fix the bug"));
+    }
+
+    @Test
+    void deserializeInputParameters_noneStored_returnsEmptyMapNotNull() {
+        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null);
+
+        assertThat(service.deserializeInputParameters(saved)).isEmpty();
+    }
+
+    @Test
     void enqueue_unknownAgentSlug_rejectedBeforePersisting() {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("does-not-exist")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "does-not-exist"))
+        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "does-not-exist", null, null))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("does-not-exist")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));

@@ -4,11 +4,14 @@ import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.AgentExecutionRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -32,6 +35,7 @@ public class AgentExecutionService {
 
     private final AgentExecutionRepository repository;
     private final AgentDefinitionRepository agentDefinitionRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository) {
         this.repository = repository;
@@ -42,9 +46,13 @@ public class AgentExecutionService {
      * Validates the agent slug BEFORE persisting a row -- rejecting an
      * unknown/inactive agent with 400 here is better than silently queuing
      * a job AgentJobWorker can only discover is doomed once it claims it.
+     * repositoryUrl/inputParameters are both optional (see
+     * TriggerAgentExecutionRequest's javadoc) -- inputParameters is
+     * JSON-serialized for storage (see V9__agent_execution_input_parameters.sql),
+     * round-tripped by AgentJobWorker via deserializeInputParameters().
      */
     @Transactional
-    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug) {
+    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, Map<String, String> inputParameters) {
         agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
 
@@ -54,8 +62,36 @@ public class AgentExecutionService {
         execution.setTriggerSource("API");
         execution.setLlmProvider(LlmProvider.ANTHROPIC.name());
         execution.setPrompt(prompt);
+        execution.setRepositoryUrl(repositoryUrl);
+        execution.setInputParameters(serializeInputParameters(inputParameters));
         execution.setStatus("QUEUED");
         return repository.save(execution);
+    }
+
+    private String serializeInputParameters(Map<String, String> inputParameters) {
+        if (inputParameters == null || inputParameters.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(inputParameters);
+        } catch (Exception e) {
+            throw new AgentException(HttpStatus.BAD_REQUEST, "inputParameters could not be serialized: " + e.getMessage());
+        }
+    }
+
+    /** Deserializes a persisted execution's inputParameters back into a map -- empty (not null) if none were given. */
+    public Map<String, String> deserializeInputParameters(AgentExecution execution) {
+        String json = execution.getInputParameters();
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
+            });
+        } catch (Exception e) {
+            throw new AgentException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Stored inputParameters for execution " + execution.getId() + " could not be parsed: " + e.getMessage());
+        }
     }
 
     /**

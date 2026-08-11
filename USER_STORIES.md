@@ -330,6 +330,34 @@ not "the agent said it was probably fine."*
 
 ---
 
+## Epic 9 — Feeding an Agent a Ticket, Not Just a Prompt
+
+### US-9.1 — Triggering an agent doesn't require hand-writing its whole prompt
+*As a Developer, I want to trigger an agent with a reference to its real input (a ticket, a
+pasted log, eventually a Jira key) instead of typing the whole task out as free text every time,
+so that agents can be triggered from the systems that actually generate the work (a ticket
+tracker, a monitoring alert) without a human retyping it first.*
+
+**Acceptance criteria**
+- A trigger request can supply source-specific parameters (e.g. raw pasted text today) instead
+  of, or in addition to, a free-text prompt.
+- Which kind of input an agent expects is a property of the agent itself, not something the
+  caller has to know how to format by hand.
+- An agent with no configured input source behaves exactly as before — this is additive, not a
+  breaking change to how simpler agents are triggered.
+
+### US-9.2 — A repository reference travels with the task, not buried in prose
+*As a Developer, I want to tell an agent which repository a task is about as a first-class part
+of the trigger request, so the agent doesn't have to infer it from free text (or be told
+incorrectly) before it can act.*
+
+**Acceptance criteria**
+- A trigger request can carry a repository reference alongside its input.
+- That reference is assembled into the agent's actual prompt in a predictable, consistent place.
+- Omitting it doesn't break anything for an agent that doesn't need one.
+
+---
+
 ## Roadmap (not yet built)
 
 The following are on the plan but intentionally out of scope for what's described above. The
