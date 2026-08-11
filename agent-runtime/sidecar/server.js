@@ -1,10 +1,8 @@
-// UNVERIFIED: written to E2B's documented JS SDK shape (Sandbox.create /
-// sandbox.commands.run / sandbox.files.write / sandbox.files.read /
-// sandbox.kill) as of this writing, but has not been run against a real
-// E2B account or Node runtime in this environment. Before trusting this in
-// anything real: `npm install`, set E2B_API_KEY, run it, and confirm the
-// SDK call shapes below still match https://e2b.dev/docs's current JS SDK
-// reference -- these APIs are young and can change between versions.
+// Verified live against a real E2B account (e2b@1.13.2): sandbox creation,
+// command execution, file read/write, and destroy all confirmed working.
+// One real bug found this way and fixed: Sandbox.create's env var option is
+// named `envs`, not `envVars` -- the latter is silently ignored by the SDK,
+// which meant every credentialed tool got an empty environment.
 
 import express from 'express';
 import { Sandbox } from 'e2b';
@@ -57,7 +55,16 @@ app.post('/sandboxes', async (req, res) => {
   try {
     const sandbox = await Sandbox.create({
       apiKey: E2B_API_KEY,
-      envVars: credentials || {},
+      // envs, not envVars -- confirmed against the actually-installed e2b
+      // SDK's own type definitions (node_modules/e2b/dist/index.d.ts,
+      // SandboxOpts). envVars is silently ignored (not a recognized
+      // option), which is why every credentialed tool (GitCloneTool,
+      // OpenPullRequestTool) failed identically regardless of which git
+      // auth mechanism was used: the token never reached the sandbox's
+      // environment at all. Found by creating a sandbox directly against
+      // this sidecar with a known test var and confirming it read back
+      // empty inside the sandbox.
+      envs: credentials || {},
       timeoutMs: lifetimeSeconds * 1000,
       // Visible in E2B's own dashboard for audit/debugging only -- never
       // used for access control. tenantId here is whatever the caller
