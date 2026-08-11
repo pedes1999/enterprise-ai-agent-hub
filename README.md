@@ -301,7 +301,7 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **Weeks 9–10** — Durable job orchestration: `POST /agents/execute` / `GET /agents/executions/{id}`, backed by a DB-polling queue (`AgentJobWorker` + `SELECT ... FOR UPDATE SKIP LOCKED` against `agent_executions`, no message broker needed at this scale — see the architecture notes above for the RLS worker-sentinel design). Verified live against the real dev DB: a queued job was picked up and completed by the background poller with no manual trigger involved.
 - [x] **Single-agent execution depth** (groundwork for the planned multi-agent "Ticket → PR" pipeline — see below) — `SandboxSession` gives one execution a persistent sandbox instead of a fresh one per tool call, `ToolCallingChatEngine` is now a bounded multi-round loop instead of one shot, and `ReadFileTool`/`WriteFileTool` round out the tool set alongside `RunShellCommandTool`/`GitCloneTool`. Verified live: clone → read → write → shell-verify, all in one prompt, each step seeing the last one's state.
 - [x] **Agent catalog** (the substrate "a library of hundreds of agents and tools" is built on) — `AgentDefinition` (platform-wide, named persona + curated tool list) and `ToolCatalog` (self-assembling `ToolFactory` registry) replace the hardcoded tool list `AgentPromptRunner` used to build every time. Two seeded agents (`general-assistant`, `coding-agent`), `GET /agents/definitions` to browse them, `agentSlug` on both trigger endpoints. Verified live: the identical clone+read prompt behaves correctly differently depending on which agent it's sent to. No admin CRUD API yet — new agents are added via migration, same as new tools are added via code.
-- [x] **The Ticket-to-PR loop closes**: `OpenPullRequestTool` — commit, push, open a real GitHub pull request, gated on its own `testCommand` argument being mandatory and independently re-verified inside the sandbox (never trusts the model's say-so that it tested anything). New `GITHUB` `tool_credentials` kind. `coding-agent`'s tool list and system prompt updated (migration `V7`) to actually use it. Not yet live-verified against a real GitHub repo (needs the account owner's own PAT and explicit go-ahead — unit/mocked coverage only so far).
+- [x] **The Ticket-to-PR loop closes**: `OpenPullRequestTool` — commit, push, open a real GitHub pull request, gated on its own `testCommand` argument being mandatory and independently re-verified inside the sandbox (never trusts the model's say-so that it tested anything). New `GITHUB` `tool_credentials` kind. `coding-agent`'s tool list and system prompt updated (migration `V7`) to actually use it. **Live-verified end to end** against a real private GitHub repo: `git_clone` → `write_file` → `open_pull_request` → a real pull request opened via the GitHub REST API. Getting there surfaced a real sidecar bug — see the history note below.
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)
 - [ ] Multi-agent "Ticket → PR" pipeline — the actual end product this is building toward: a Planner/Coder/Reviewer sequence of agent executions per ticket (each a named `AgentDefinition` from the catalog above), using `agent_executions.agent_type` to distinguish stages, ending with the now-real `OpenPullRequestTool` step. Not started.
@@ -314,3 +314,17 @@ owners from their own RLS policies by default; fixed by adding
 `FORCE ROW LEVEL SECURITY`, which then surfaced a second bug in how the
 tenant session variable was being set — see `TenantAwareDataSource`'s
 javadoc for the full story).
+
+A third real bug, found while live-verifying `OpenPullRequestTool` against
+a real private repo: `agent-runtime/sidecar/server.js`'s call to E2B's
+`Sandbox.create()` passed credentials as `envVars`, but the installed SDK
+(`e2b@1.13.2`) only recognizes `envs` — the option name was silently
+ignored, so no sandboxed tool ever actually received a credential as an
+environment variable, no matter which git auth mechanism was tried. Two
+plausible-looking auth fixes (`http.extraHeader` → `credential.helper` →
+URL-embedded Basic auth) were tried and each genuinely improved something,
+but none of them could have fixed this, because the token never reached
+the sandbox at all in any of them. Found by bypassing gateway-api
+entirely and hitting the sidecar directly with a known test env var, and
+confirmed against the SDK's own shipped type definitions. See
+`CODE_WALKTHROUGH.md`'s symptom table for the full diagnostic trail.
