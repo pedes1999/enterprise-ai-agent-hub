@@ -98,18 +98,19 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
                 context.tenantId(), context.executionId(), credentials, SANDBOX_MAX_LIFETIME, MAX_OUTPUT_BYTES);
 
         return withSandbox(spec, handle ->
-                runPipeline(handle, testCommand, branchName, title, body, ownerAndRepo, finalBaseBranch));
+                runPipeline(handle, testCommand, branchName, title, body, repositoryUrl, ownerAndRepo, finalBaseBranch));
     }
 
     private String runPipeline(SandboxHandle handle, String testCommand, String branchName, String title,
-                                String body, String[] ownerAndRepo, String baseBranch) {
+                                String body, String repositoryUrl, String[] ownerAndRepo, String baseBranch) {
         CommandResult testResult = sandboxClient.runCommand(handle, buildTestCommand(testCommand), COMMAND_TIMEOUT);
         if (!testResult.succeeded()) {
             return "Tests FAILED -- pull request was NOT opened. Nothing was committed or pushed.\n"
                     + formatCommandResult(testResult);
         }
 
-        CommandResult pushResult = sandboxClient.runCommand(handle, buildPushCommand(branchName, title), COMMAND_TIMEOUT);
+        CommandResult pushResult = sandboxClient.runCommand(
+                handle, buildPushCommand(branchName, title, repositoryUrl), COMMAND_TIMEOUT);
         if (!pushResult.succeeded()) {
             return "Tests passed, but committing/pushing the branch failed -- pull request was NOT opened.\n"
                     + formatCommandResult(pushResult);
@@ -124,24 +125,21 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
         return "cd " + Workspace.ROOT + " && (" + testCommand + ")";
     }
 
-    private String buildPushCommand(String branchName, String title) {
+    private String buildPushCommand(String branchName, String title, String repositoryUrl) {
+        // Pushes straight to an authenticated URL rather than `origin` --
+        // see AuthenticatedGitUrl's javadoc for why (replaced an earlier
+        // `-c credential.helper=...` that looked correct but silently
+        // failed to deliver the password through to git in this sandbox).
+        // A URL-target push never touches .git/config at all, so there's
+        // nothing to scrub afterward.
+        String authenticatedUrl = AuthenticatedGitUrl.build(repositoryUrl, GITHUB_TOKEN_ENV_VAR);
         return "cd " + Workspace.ROOT + " && "
                 + "git checkout -b " + ShellQuoting.quote(branchName) + " && "
                 + "git add -A && "
                 + "git -c user.email=" + ShellQuoting.quote(COMMIT_AUTHOR_EMAIL)
                 + " -c user.name=" + ShellQuoting.quote(COMMIT_AUTHOR_NAME)
                 + " commit -m " + ShellQuoting.quote(title) + " && "
-                // Inline credential helper, not http.extraHeader -- see
-                // GitCloneTool.gitTokenCredentialHelper()'s javadoc for why
-                // (found live: extraHeader alone doesn't reliably suppress
-                // git's own interactive credential prompt on every
-                // git/curl version). Applies to this push only, never
-                // written into the repo's own .git/config.
-                + "git -c " + githubTokenCredentialHelper() + " push origin " + ShellQuoting.quote(branchName);
-    }
-
-    private static String githubTokenCredentialHelper() {
-        return "credential.helper='!f() { echo username=x-access-token; echo password=$" + GITHUB_TOKEN_ENV_VAR + "; }; f'";
+                + "git push " + authenticatedUrl + " " + ShellQuoting.quote(branchName);
     }
 
     private String buildOpenPrCommand(String[] ownerAndRepo, String branchName, String title, String body, String baseBranch) {

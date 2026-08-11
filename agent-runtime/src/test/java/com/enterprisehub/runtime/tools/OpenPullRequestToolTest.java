@@ -129,7 +129,7 @@ class OpenPullRequestToolTest {
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(sandboxClient, times(3)).runCommand(any(), commandCaptor.capture(), any());
         String pushCommand = commandCaptor.getAllValues().get(1);
-        assertThat(pushCommand).contains("credential.helper").contains("$GITHUB_TOKEN").doesNotContain("ghp_secret");
+        assertThat(pushCommand).contains("x-access-token:$GITHUB_TOKEN@").contains("git push").doesNotContain("ghp_secret");
     }
 
     @Test

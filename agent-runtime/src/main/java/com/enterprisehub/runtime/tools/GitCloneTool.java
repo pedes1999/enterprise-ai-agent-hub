@@ -94,29 +94,22 @@ public class GitCloneTool extends AbstractSandboxedTool {
         String mkdirPrefix = "mkdir -p " + ShellQuoting.quote(parentDirOf(CLONE_TARGET_DIR)) + " && ";
         String quotedUrl = ShellQuoting.quote(repositoryUrl);
         if (hasCredential) {
-            // -c credential.helper=... on the command line applies to this
-            // invocation only -- unlike embedding a token directly in the
-            // clone URL, it is NOT written into the cloned repo's own
-            // .git/config. The sandbox is destroyed right after this one
-            // tool call regardless, but this avoids the credential
-            // persisting on disk for even that short window.
-            //
-            // Deliberately NOT `-c http.extraHeader=...` -- found via live
-            // testing that some git/curl combinations still fall through to
-            // interactive username/password negotiation ("could not read
-            // Username for 'https://github.com'") even with a valid
-            // Authorization header supplied via extraHeader, because
-            // extraHeader doesn't hook into git's own credential subsystem.
-            // An inline credential helper does: git calls it directly
-            // whenever the server actually challenges for auth.
-            return mkdirPrefix + "git -c " + gitTokenCredentialHelper() + " clone " + quotedUrl + " " + CLONE_TARGET_DIR;
+            // Token embedded in the clone URL as Basic-auth userinfo, then
+            // the clone's own origin remote is immediately rewritten back
+            // to the plain URL in the SAME command chain -- see
+            // AuthenticatedGitUrl's javadoc for why this replaced an
+            // earlier `-c credential.helper=...` attempt (found via live
+            // testing to silently fail to deliver the password through to
+            // git in this sandbox). Nothing here persists the token on
+            // disk: if `git clone` fails the `&&` chain short-circuits
+            // before `remote set-url` ever runs, and if it succeeds the
+            // credential-bearing URL is gone from .git/config before this
+            // command even returns.
+            String authenticatedUrl = AuthenticatedGitUrl.build(repositoryUrl, GIT_TOKEN_ENV_VAR);
+            return mkdirPrefix + "git clone " + authenticatedUrl + " " + CLONE_TARGET_DIR
+                    + " && git -C " + CLONE_TARGET_DIR + " remote set-url origin " + quotedUrl;
         }
         return mkdirPrefix + "git clone " + quotedUrl + " " + CLONE_TARGET_DIR;
-    }
-
-    /** Inline credential helper reading the token from the sandbox's own GIT_TOKEN env var -- never written to disk. */
-    static String gitTokenCredentialHelper() {
-        return "credential.helper='!f() { echo username=x-access-token; echo password=$" + GIT_TOKEN_ENV_VAR + "; }; f'";
     }
 
     private String parentDirOf(String path) {

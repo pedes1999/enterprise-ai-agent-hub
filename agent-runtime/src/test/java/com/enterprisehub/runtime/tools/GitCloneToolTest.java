@@ -71,11 +71,11 @@ class GitCloneToolTest {
         assertThat(result).contains("exit_code: 0").contains("Repository cloned to /tmp/workspace/repo");
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
-        assertThat(commandCaptor.getValue()).doesNotContain("credential.helper").contains("git clone");
+        assertThat(commandCaptor.getValue()).doesNotContain("x-access-token").contains("git clone");
     }
 
     @Test
-    void execute_withGitCredential_addsCredentialHelper_neverEmbedsRawTokenInCommand() {
+    void execute_withGitCredential_embedsTokenRefInUrl_neverEmbedsRawTokenInCommand_thenScrubsOrigin() {
         when(credentialResolver.resolve("tenant-1", "GIT")).thenReturn(Map.of("GIT_TOKEN", "ghp_supersecrettoken"));
         stubSandbox(new CommandResult(0, "Cloning into 'repo'...", "", false, Duration.ofSeconds(1)));
 
@@ -84,10 +84,16 @@ class GitCloneToolTest {
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
         String command = commandCaptor.getValue();
-        // credential.helper, not http.extraHeader -- see buildCloneCommand's
-        // javadoc for why extraHeader alone isn't reliable across git/curl
-        // versions (found via live testing against a real private repo).
-        assertThat(command).contains("credential.helper").contains("$GIT_TOKEN").contains("x-access-token");
+        // URL-embedded Basic auth, not credential.helper -- see
+        // AuthenticatedGitUrl's javadoc for why credential.helper was
+        // dropped (found via live testing to silently fail to deliver the
+        // password through to git in this sandbox).
+        assertThat(command).contains("x-access-token:$GIT_TOKEN@").contains("git clone");
+        // The clone's own origin remote must be rewritten back to the
+        // plain (credential-free) URL in the same command chain, so
+        // nothing -- not even a later `cat .git/config` -- can read the
+        // token back out.
+        assertThat(command).contains("remote set-url origin 'https://github.com/org/repo.git'");
         // The raw secret value must never appear in the command text itself --
         // only the sandbox's own env var reference ($GIT_TOKEN) does. The
         // actual value flows through SandboxSpec.credentials -> the sidecar's
