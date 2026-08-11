@@ -112,6 +112,19 @@ class AgentExecutionControllerTest {
     }
 
     @Test
+    void execute_tenantAtConcurrencyLimit_returns429() throws Exception {
+        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null)))
+                .thenThrow(new AgentException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                        "This tenant already has 5 agent executions in progress (limit 5) -- wait for one to finish before starting another."));
+
+        mockMvc.perform(post("/agents/execute")
+                        .contentType("application/json")
+                        .content("""
+                                {"prompt":"list files"}"""))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
     void getExecution_found_returnsFullStatus() throws Exception {
         UUID id = UUID.randomUUID();
         AgentExecution execution = new AgentExecution();

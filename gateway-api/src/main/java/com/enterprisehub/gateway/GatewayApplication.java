@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway;
 
 import com.enterprisehub.gateway.config.CredentialsProperties;
+import com.enterprisehub.gateway.config.ExecutionLimitProperties;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.config.SandboxProperties;
 import com.enterprisehub.gateway.config.SecurityProperties;
@@ -19,15 +20,18 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *
  * @EnableScheduling drives AgentJobWorker's poll loop (Weeks 9-10 job
  * orchestration -- DB-backed, see V5__agent_execution_queue.sql).
- * @EnableAsync predates that decision and nothing uses it yet (app.execution's
- * thread-pool properties are still just a placeholder) -- kept for now
- * since removing it isn't part of this change, but it is not what
- * AgentJobWorker is built on.
+ * @EnableAsync predates that decision and nothing uses it yet -- kept for
+ * now since removing it isn't part of this change, but it is not what
+ * AgentJobWorker is built on. app.execution's core-pool-size/max-pool-size/
+ * queue-capacity keys are that same unused leftover; max-concurrent-per-tenant
+ * under the same prefix (see ExecutionLimitProperties) is the one key in
+ * that namespace actually bound to anything today.
  */
 @SpringBootApplication(scanBasePackages = "com.enterprisehub")
 @EnableAsync
 @EnableScheduling
-@EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class, LlmProperties.class, SandboxProperties.class})
+@EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class, LlmProperties.class,
+        SandboxProperties.class, ExecutionLimitProperties.class})
 public class GatewayApplication {
 
     public static void main(String[] args) {

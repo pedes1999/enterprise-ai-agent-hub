@@ -33,12 +33,18 @@ app:
     jwt-secret: ${JWT_SECRET:REPLACE_ME_WITH_A_STRONG_SECRET_FROM_VAULT}
     jwt-expiration-minutes: 60
   execution:
-    # Thread pool backing @Async agent execution triggers.
-    # This is a starting point — Phase 3 replaces this with a proper job queue (RabbitMQ/SQS)
-    # for durability across restarts and horizontal scaling.
+    # Thread pool backing @Async agent execution triggers -- unused
+    # placeholder, see GatewayApplication's javadoc. Real job orchestration
+    # is AgentJobWorker's DB-backed poll loop, not this.
     core-pool-size: 4
     max-pool-size: 16
     queue-capacity: 100
+    # Per-tenant concurrency cap: AgentExecutionService.enqueue() rejects
+    # (429, not a silent queue) once a tenant already has this many
+    # QUEUED+RUNNING executions. Protects a metered E2B/Anthropic account
+    # from a bug, a misbehaving agent loop, or repeated clicking -- not a
+    # tenant-tier setting yet, just a single low default everyone shares.
+    max-concurrent-per-tenant: ${MAX_CONCURRENT_EXECUTIONS_PER_TENANT:5}
   credentials:
     # Placeholder for the encryption key used to encrypt vendor API tokens at rest.
     # In production this comes from AWS KMS / HashiCorp Vault, never from application.yml directly.

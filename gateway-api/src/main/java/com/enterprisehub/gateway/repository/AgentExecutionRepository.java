@@ -4,12 +4,16 @@ import com.enterprisehub.gateway.entity.AgentExecution;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface AgentExecutionRepository extends JpaRepository<AgentExecution, UUID> {
 
     Optional<AgentExecution> findByIdAndTenantId(UUID id, UUID tenantId);
+
+    /** Backs the per-tenant concurrency cap -- see AgentExecutionService.enqueue(). Normal RLS applies (no worker-sentinel involved). */
+    long countByTenantIdAndStatusIn(UUID tenantId, Collection<String> statuses);
 
     /**
      * Atomically claims the oldest still-QUEUED job across every tenant.

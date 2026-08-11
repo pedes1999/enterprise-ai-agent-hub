@@ -1,16 +1,20 @@
 package com.enterprisehub.gateway.agent;
 
 import com.enterprisehub.core.llm.LlmProvider;
+import com.enterprisehub.gateway.config.ExecutionLimitProperties;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.AgentExecutionRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,13 +37,21 @@ import java.util.UUID;
 @Service
 public class AgentExecutionService {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentExecutionService.class);
+
+    /** The only two statuses that count against a tenant's concurrency cap -- SUCCEEDED/FAILED rows don't hold anything open. */
+    private static final List<String> ACTIVE_STATUSES = List.of("QUEUED", "RUNNING");
+
     private final AgentExecutionRepository repository;
     private final AgentDefinitionRepository agentDefinitionRepository;
+    private final ExecutionLimitProperties executionLimitProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository) {
+    public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository,
+                                  ExecutionLimitProperties executionLimitProperties) {
         this.repository = repository;
         this.agentDefinitionRepository = agentDefinitionRepository;
+        this.executionLimitProperties = executionLimitProperties;
     }
 
     /**
@@ -50,11 +62,28 @@ public class AgentExecutionService {
      * TriggerAgentExecutionRequest's javadoc) -- inputParameters is
      * JSON-serialized for storage (see V9__agent_execution_input_parameters.sql),
      * round-tripped by AgentJobWorker via deserializeInputParameters().
+     *
+     * Also rejects (429, not a silent queue) once this tenant already has
+     * executionLimitProperties.maxConcurrentPerTenant() rows QUEUED or
+     * RUNNING -- protects a metered E2B/Anthropic account from a bug, a
+     * misbehaving agent loop, or a user clicking repeatedly. Logged at WARN
+     * so a tenant that regularly hits the ceiling is visible (a real
+     * product signal -- maybe their limit genuinely needs raising -- not
+     * just an error to swallow).
      */
     @Transactional
     public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, Map<String, String> inputParameters) {
         agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
+
+        long activeCount = repository.countByTenantIdAndStatusIn(tenantId, ACTIVE_STATUSES);
+        int limit = executionLimitProperties.maxConcurrentPerTenant();
+        if (activeCount >= limit) {
+            log.warn("Tenant {} rejected at the concurrency cap ({} active executions, limit {})", tenantId, activeCount, limit);
+            throw new AgentException(HttpStatus.TOO_MANY_REQUESTS,
+                    "This tenant already has " + activeCount + " agent executions in progress (limit " + limit
+                            + ") -- wait for one to finish before starting another.");
+        }
 
         AgentExecution execution = new AgentExecution();
         execution.setTenantId(tenantId);

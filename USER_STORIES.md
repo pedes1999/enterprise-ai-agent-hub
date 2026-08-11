@@ -266,6 +266,18 @@ depends on the server staying up the whole time.*
 - If the application restarts, a run that was queued but not yet started is still queued
   afterward and gets picked up normally.
 
+### US-6.4 — One tenant can't spin up unbounded runs
+*As an Admin, I want a limit on how many runs one tenant can have in flight at once, so that a
+bug, a misbehaving agent loop, or someone clicking repeatedly can't rack up unbounded cost or
+sandbox usage against a metered account.*
+
+**Acceptance criteria**
+- A tenant with too many runs already in progress is rejected with a clear error when trying to
+  trigger another one — not silently queued to run eventually.
+- The limit is configurable, not hardcoded, so it can be tuned per environment.
+- A tenant repeatedly hitting the limit is visible to operators — it's a real signal, not just
+  a swallowed error.
+
 ---
 
 ## Epic 7 — A Library of Agents and Tools

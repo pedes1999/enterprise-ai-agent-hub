@@ -2591,7 +2591,8 @@
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": "\n\nPer-tenant concurrency cap (app.execution.max-concurrent-per-tenant, default 5): once a tenant already has that many executions QUEUED/RUNNING, this request returns 429 instead of enqueueing another one. Not demonstrated as a separate request here since triggering it requires actually queuing several real executions in a row first."
           },
           "response": [],
           "event": [

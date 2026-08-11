@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.agent;
 
+import com.enterprisehub.gateway.config.ExecutionLimitProperties;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,10 +30,13 @@ class AgentExecutionServiceTest {
     void setUp() {
         repository = mock(AgentExecutionRepository.class);
         agentDefinitionRepository = mock(AgentDefinitionRepository.class);
-        service = new AgentExecutionService(repository, agentDefinitionRepository);
+        service = new AgentExecutionService(repository, agentDefinitionRepository, new ExecutionLimitProperties(5));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));
+        // Mockito's default (0) for an unstubbed long-returning method matches
+        // "no active executions yet" -- every existing test below relies on
+        // this being the implicit case unless a test overrides it.
     }
 
     @Test
@@ -79,6 +84,47 @@ class AgentExecutionServiceTest {
                 .hasMessageContaining("does-not-exist")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(repository);
+    }
+
+    @Test
+    void enqueue_atConcurrencyLimit_rejectedWithTooManyRequests_neverPersists() {
+        when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(5L);
+
+        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "coding-agent", null, null))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("5")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void enqueue_belowConcurrencyLimit_succeeds() {
+        when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(4L);
+
+        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null);
+
+        assertThat(saved.getStatus()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void enqueue_overConcurrencyLimit_stillRejected() {
+        when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(9L);
+
+        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "coding-agent", null, null))
+                .isInstanceOf(AgentException.class)
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
+    }
+
+    @Test
+    void enqueue_concurrencyCheck_isScopedToTheCallingTenant_notGlobal() {
+        UUID otherTenant = UUID.randomUUID();
+        when(repository.countByTenantIdAndStatusIn(otherTenant, List.of("QUEUED", "RUNNING"))).thenReturn(5L);
+        // tenantId itself has nothing active (default 0 stub) -- a busy
+        // OTHER tenant must never affect this one.
+
+        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null);
+
+        assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }
 
     @Test
