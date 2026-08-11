@@ -71,11 +71,11 @@ class GitCloneToolTest {
         assertThat(result).contains("exit_code: 0").contains("Repository cloned to /tmp/workspace/repo");
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
-        assertThat(commandCaptor.getValue()).doesNotContain("extraHeader").contains("git clone");
+        assertThat(commandCaptor.getValue()).doesNotContain("credential.helper").contains("git clone");
     }
 
     @Test
-    void execute_withGitCredential_addsAuthHeader_neverEmbedsRawTokenInCommand() {
+    void execute_withGitCredential_addsCredentialHelper_neverEmbedsRawTokenInCommand() {
         when(credentialResolver.resolve("tenant-1", "GIT")).thenReturn(Map.of("GIT_TOKEN", "ghp_supersecrettoken"));
         stubSandbox(new CommandResult(0, "Cloning into 'repo'...", "", false, Duration.ofSeconds(1)));
 
@@ -84,7 +84,10 @@ class GitCloneToolTest {
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
         String command = commandCaptor.getValue();
-        assertThat(command).contains("http.extraHeader").contains("$GIT_TOKEN");
+        // credential.helper, not http.extraHeader -- see buildCloneCommand's
+        // javadoc for why extraHeader alone isn't reliable across git/curl
+        // versions (found via live testing against a real private repo).
+        assertThat(command).contains("credential.helper").contains("$GIT_TOKEN").contains("x-access-token");
         // The raw secret value must never appear in the command text itself --
         // only the sandbox's own env var reference ($GIT_TOKEN) does. The
         // actual value flows through SandboxSpec.credentials -> the sidecar's

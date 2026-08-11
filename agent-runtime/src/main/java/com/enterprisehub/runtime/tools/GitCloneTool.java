@@ -94,16 +94,29 @@ public class GitCloneTool extends AbstractSandboxedTool {
         String mkdirPrefix = "mkdir -p " + ShellQuoting.quote(parentDirOf(CLONE_TARGET_DIR)) + " && ";
         String quotedUrl = ShellQuoting.quote(repositoryUrl);
         if (hasCredential) {
-            // http.extraHeader on the command line applies to this
+            // -c credential.helper=... on the command line applies to this
             // invocation only -- unlike embedding a token directly in the
             // clone URL, it is NOT written into the cloned repo's own
             // .git/config. The sandbox is destroyed right after this one
             // tool call regardless, but this avoids the credential
             // persisting on disk for even that short window.
-            return mkdirPrefix + "git -c http.extraHeader=\"AUTHORIZATION: basic $(printf '%s' \"x-access-token:$" + GIT_TOKEN_ENV_VAR
-                    + "\" | base64 -w0)\" clone " + quotedUrl + " " + CLONE_TARGET_DIR;
+            //
+            // Deliberately NOT `-c http.extraHeader=...` -- found via live
+            // testing that some git/curl combinations still fall through to
+            // interactive username/password negotiation ("could not read
+            // Username for 'https://github.com'") even with a valid
+            // Authorization header supplied via extraHeader, because
+            // extraHeader doesn't hook into git's own credential subsystem.
+            // An inline credential helper does: git calls it directly
+            // whenever the server actually challenges for auth.
+            return mkdirPrefix + "git -c " + gitTokenCredentialHelper() + " clone " + quotedUrl + " " + CLONE_TARGET_DIR;
         }
         return mkdirPrefix + "git clone " + quotedUrl + " " + CLONE_TARGET_DIR;
+    }
+
+    /** Inline credential helper reading the token from the sandbox's own GIT_TOKEN env var -- never written to disk. */
+    static String gitTokenCredentialHelper() {
+        return "credential.helper='!f() { echo username=x-access-token; echo password=$" + GIT_TOKEN_ENV_VAR + "; }; f'";
     }
 
     private String parentDirOf(String path) {

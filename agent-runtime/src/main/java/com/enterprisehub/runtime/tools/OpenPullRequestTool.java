@@ -131,10 +131,17 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
                 + "git -c user.email=" + ShellQuoting.quote(COMMIT_AUTHOR_EMAIL)
                 + " -c user.name=" + ShellQuoting.quote(COMMIT_AUTHOR_NAME)
                 + " commit -m " + ShellQuoting.quote(title) + " && "
-                // Same http.extraHeader pattern as GitCloneTool -- applies to this
-                // push only, never written into the repo's own .git/config.
-                + "git -c http.extraHeader=\"AUTHORIZATION: basic $(printf '%s' \"x-access-token:$" + GITHUB_TOKEN_ENV_VAR
-                + "\" | base64 -w0)\" push origin " + ShellQuoting.quote(branchName);
+                // Inline credential helper, not http.extraHeader -- see
+                // GitCloneTool.gitTokenCredentialHelper()'s javadoc for why
+                // (found live: extraHeader alone doesn't reliably suppress
+                // git's own interactive credential prompt on every
+                // git/curl version). Applies to this push only, never
+                // written into the repo's own .git/config.
+                + "git -c " + githubTokenCredentialHelper() + " push origin " + ShellQuoting.quote(branchName);
+    }
+
+    private static String githubTokenCredentialHelper() {
+        return "credential.helper='!f() { echo username=x-access-token; echo password=$" + GITHUB_TOKEN_ENV_VAR + "; }; f'";
     }
 
     private String buildOpenPrCommand(String[] ownerAndRepo, String branchName, String title, String body, String baseBranch) {
