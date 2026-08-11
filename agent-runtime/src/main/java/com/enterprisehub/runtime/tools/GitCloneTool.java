@@ -91,8 +91,8 @@ public class GitCloneTool extends AbstractSandboxedTool {
         // directories... Permission denied") during live verification, not
         // assumed. mkdir -p first so a real clone failure (bad URL, auth,
         // network) is what surfaces, not a filesystem setup issue.
-        String mkdirPrefix = "mkdir -p " + shellQuote(parentDirOf(CLONE_TARGET_DIR)) + " && ";
-        String quotedUrl = shellQuote(repositoryUrl);
+        String mkdirPrefix = "mkdir -p " + ShellQuoting.quote(parentDirOf(CLONE_TARGET_DIR)) + " && ";
+        String quotedUrl = ShellQuoting.quote(repositoryUrl);
         if (hasCredential) {
             // http.extraHeader on the command line applies to this
             // invocation only -- unlike embedding a token directly in the
@@ -109,11 +109,6 @@ public class GitCloneTool extends AbstractSandboxedTool {
     private String parentDirOf(String path) {
         int lastSlash = path.lastIndexOf('/');
         return lastSlash <= 0 ? "/" : path.substring(0, lastSlash);
-    }
-
-    /** POSIX single-quote shell escaping: wrap in '...', escaping embedded quotes as '\''. */
-    private String shellQuote(String value) {
-        return "'" + value.replace("'", "'\\''") + "'";
     }
 
     private String formatResult(CommandResult result) {

@@ -6,6 +6,7 @@ import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.gateway.agent.catalog.CurrentDateTimeToolFactory;
 import com.enterprisehub.gateway.agent.catalog.GitCloneToolFactory;
+import com.enterprisehub.gateway.agent.catalog.OpenPullRequestToolFactory;
 import com.enterprisehub.gateway.agent.catalog.ReadFileToolFactory;
 import com.enterprisehub.gateway.agent.catalog.RunShellCommandToolFactory;
 import com.enterprisehub.gateway.agent.catalog.ToolCatalog;
@@ -71,10 +72,11 @@ class AgentPromptRunnerTest {
         // Default stub: a definition with every tool a test might need --
         // individual tests override this only when testing a different agent.
         when(agentDefinitionRepository.findBySlugAndActiveTrue(any())).thenReturn(Optional.of(testDefinition(
-                "get_current_date_time", "git_clone", "run_shell_command", "read_file", "write_file")));
+                "get_current_date_time", "git_clone", "run_shell_command", "read_file", "write_file", "open_pull_request")));
         ToolCatalog toolCatalog = new ToolCatalog(List.of(
                 new CurrentDateTimeToolFactory(), new RunShellCommandToolFactory(),
-                new GitCloneToolFactory(), new ReadFileToolFactory(), new WriteFileToolFactory()));
+                new GitCloneToolFactory(), new ReadFileToolFactory(), new WriteFileToolFactory(),
+                new OpenPullRequestToolFactory()));
         runner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
                 sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver,
                 agentDefinitionRepository, toolCatalog);
@@ -249,6 +251,35 @@ class AgentPromptRunnerTest {
         runner.run(tenantId, "exec-with-git", AGENT_SLUG, "Hello");
 
         verify(credentialResolver).resolve(tenantId.toString(), "GIT");
+    }
+
+    @Test
+    void run_definitionWithoutOpenPullRequest_neverResolvesGithubCredential() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinition("get_current_date_time")));
+        stubCredentialResolution();
+        stubContextFactory("exec-no-pr");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-no-pr", AGENT_SLUG, "Hello");
+
+        verifyNoInteractions(credentialResolver);
+    }
+
+    @Test
+    void run_definitionWithOpenPullRequest_resolvesGithubCredentialUpFront() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinition("git_clone", "open_pull_request")));
+        stubCredentialResolution();
+        stubContextFactory("exec-with-pr");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-with-pr", AGENT_SLUG, "Hello");
+
+        verify(credentialResolver).resolve(tenantId.toString(), "GIT");
+        verify(credentialResolver).resolve(tenantId.toString(), "GITHUB");
     }
 
     @Test

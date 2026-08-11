@@ -6,13 +6,15 @@ partners evaluating the product — it describes *what the system does and for w
 it is implemented.
 
 **Status:** covers everything shipped through Weeks 1–10 of the build plan, plus the
-multi-step single-agent execution depth and the agent/tool catalog built on top (multi-tenant
-foundation, auth & roles, encrypted credential management, LLM integration, multi-round
-sandboxed agent tool execution with a persistent per-task workspace, durable async job
-execution, and a browsable library of named agents each with their own capabilities). This is
-a deliberate step toward the platform's actual end goal — a multi-agent "Ticket → PR" pipeline
-— which, along with CLI/webhook triggers and the first fully autonomous agent, is on the
-roadmap but not yet built (see the last section).
+multi-step single-agent execution depth, the agent/tool catalog, and pull-request delivery
+built on top (multi-tenant foundation, auth & roles, encrypted credential management, LLM
+integration, multi-round sandboxed agent tool execution with a persistent per-task workspace,
+durable async job execution, a browsable library of named agents each with their own
+capabilities, and a verified-work-only path to a real pull request). A single agent can now go
+from "here's a task" to "here's a tested, opened pull request" end to end. This is a
+deliberate step toward the platform's actual end goal — a multi-agent "Ticket → PR" pipeline —
+which, along with CLI/webhook triggers and the first fully autonomous agent, is on the roadmap
+but not yet built (see the last section).
 
 ---
 
@@ -298,6 +300,36 @@ source code or guessing.*
 
 ---
 
+## Epic 8 — Delivering a Pull Request
+
+### US-8.1 — An agent's finished work becomes a real pull request
+*As a Developer, I want an agent that's finished a change to commit it, push it, and open an
+actual pull request, so that the output of an agent run is something a human can review and
+merge, not just a description of a change that happened inside a disposable sandbox.*
+
+**Acceptance criteria**
+- Given a repository credential is configured, an agent can commit the current state of its
+  work, push it to a new branch, and open a pull request against a chosen base branch.
+- The pull request has a real, working title and description reflecting what changed.
+- Opening the pull request is the final step of a task, not an intermediate one — the change
+  isn't "in progress" from the platform's point of view once this succeeds.
+
+### US-8.2 — A pull request is never opened on unverified work
+*As an Admin, I want a guarantee that an agent never opens a pull request for a change that
+hasn't actually been tested, so that "there's an open PR" reliably means "this was verified,"
+not "the agent said it was probably fine."*
+
+**Acceptance criteria**
+- Opening a pull request always requires a verification step (e.g. a test suite, a build, a
+  lint check) to be specified.
+- That verification step is independently re-run, for real, immediately before anything is
+  committed or pushed — the agent's own claim that it already verified the work is never
+  trusted on its own.
+- If verification fails, nothing is committed, nothing is pushed, and no pull request is
+  opened — the failure (and why) is reported back instead.
+
+---
+
 ## Roadmap (not yet built)
 
 The following are on the plan but intentionally out of scope for what's described above. The
@@ -305,8 +337,8 @@ long-term product direction is a **multi-agent "Ticket → PR" pipeline** — a 
 runs (e.g. a planning step, a coding step, a review step) that together take a task description
 and produce a real, working pull request. Everything below the pipeline item itself is being
 built as a deliberate prerequisite toward that, not as a detour from it — a reliable multi-step
-single agent with a real catalog behind it (Epics 5 and 7) is what a multi-agent pipeline is
-actually built out of.
+single agent, with a real catalog behind it, that can deliver a verified pull request as its
+final step (Epics 5, 7, and 8) is what a multi-agent pipeline is actually built out of.
 
 - **Self-service agent authoring** — today the catalog (Epic 7) is maintained by the platform
   team, not editable by tenants themselves; a management interface for creating/editing agents
@@ -314,10 +346,9 @@ actually built out of.
 - **CLI client, GitHub Actions integration, and webhook triggers** for kicking off agent runs
   from outside the platform's own API.
 - **The first purpose-built agent**: automated security patching — detect a vulnerability,
-  have an agent produce and verify a fix, and open a pull request.
-- **A tool that opens a pull request**, using the same encrypted-credential pattern already
-  built for git access, so an agent's final step can be a real GitHub action, not just a local
-  change.
+  have an agent produce and verify a fix, and open a pull request (Epic 8 provides the
+  "verify and open a PR" half of this; detecting the vulnerability in the first place is not
+  built).
 - **Additional LLM providers** (OpenAI, Gemini) behind the existing provider-agnostic
   interface.
 - **The multi-agent "Ticket → PR" pipeline itself**: chaining several agent runs together with

@@ -65,15 +65,16 @@ class ToolCatalogTest {
     }
 
     @Test
-    void realFactories_allFiveToolsPresent_noNameCollisions() {
+    void realFactories_allSixToolsPresent_noNameCollisions() {
         ToolCatalog catalog = new ToolCatalog(List.of(
                 new CurrentDateTimeToolFactory(),
                 new RunShellCommandToolFactory(),
                 new GitCloneToolFactory(),
                 new ReadFileToolFactory(),
-                new WriteFileToolFactory()));
+                new WriteFileToolFactory(),
+                new OpenPullRequestToolFactory()));
 
         assertThat(catalog.all().stream().map(ToolFactory::toolName)).containsExactlyInAnyOrder(
-                "get_current_date_time", "run_shell_command", "git_clone", "read_file", "write_file");
+                "get_current_date_time", "run_shell_command", "git_clone", "read_file", "write_file", "open_pull_request");
     }
 }

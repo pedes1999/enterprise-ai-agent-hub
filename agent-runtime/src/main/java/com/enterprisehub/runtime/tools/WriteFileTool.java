@@ -75,6 +75,6 @@ public class WriteFileTool extends AbstractSandboxedTool {
     private void createParentDirectory(SandboxHandle handle, String path) {
         int lastSlash = path.lastIndexOf('/');
         String parentDir = lastSlash <= 0 ? "/" : path.substring(0, lastSlash);
-        sandboxClient.runCommand(handle, "mkdir -p '" + parentDir.replace("'", "'\\''") + "'", COMMAND_TIMEOUT);
+        sandboxClient.runCommand(handle, "mkdir -p " + ShellQuoting.quote(parentDir), COMMAND_TIMEOUT);
     }
 }

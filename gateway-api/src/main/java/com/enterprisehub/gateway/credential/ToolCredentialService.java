@@ -36,7 +36,7 @@ public class ToolCredentialService {
     public ToolCredentialSummary put(UUID tenantId, CreateToolCredentialRequest request) {
         ToolCredentialKind kind = ToolCredentialKind.parse(request.credentialKind())
                 .orElseThrow(() -> new ToolCredentialException(HttpStatus.BAD_REQUEST,
-                        "credentialKind must be one of GIT"));
+                        "credentialKind must be one of GIT, GITHUB"));
 
         if (request.value() == null || request.value().isBlank()) {
             throw new ToolCredentialException(HttpStatus.BAD_REQUEST, "value is required");
@@ -65,7 +65,7 @@ public class ToolCredentialService {
     public void delete(UUID tenantId, String kindValue) {
         ToolCredentialKind kind = ToolCredentialKind.parse(kindValue)
                 .orElseThrow(() -> new ToolCredentialException(HttpStatus.BAD_REQUEST,
-                        "credentialKind must be one of GIT"));
+                        "credentialKind must be one of GIT, GITHUB"));
 
         ToolCredential credential = repository.findByTenantIdAndCredentialKind(tenantId, kind.name())
                 .orElseThrow(() -> new ToolCredentialException(HttpStatus.NOT_FOUND,

@@ -58,6 +58,8 @@ public class AgentPromptRunner {
 
     private static final String GIT_CREDENTIAL_KIND = "GIT";
     private static final String GIT_CLONE_TOOL_NAME = "git_clone";
+    private static final String GITHUB_CREDENTIAL_KIND = "GITHUB";
+    private static final String OPEN_PULL_REQUEST_TOOL_NAME = "open_pull_request";
     private static final Duration SESSION_MAX_LIFETIME = Duration.ofMinutes(10);
     private static final long SESSION_MAX_OUTPUT_BYTES = 64 * 1024;
 
@@ -133,14 +135,17 @@ public class AgentPromptRunner {
      * Every credential kind a tool ACTUALLY IN this definition's tool set
      * might need, resolved up front and merged into ONE spec -- see
      * SandboxSession's javadoc for why this can't happen lazily
-     * per-tool-call the way it used to. Only GIT exists today; a future
-     * credential kind (e.g. GITHUB for a "open a PR" tool) gets added here
-     * the same way, gated on that tool's name being in the definition.
+     * per-tool-call the way it used to. A new credential kind for a new
+     * tool gets added here the same way: gated on that tool's name being
+     * present in the definition, never resolved unconditionally.
      */
     private SandboxSpec buildSessionSpec(UUID tenantId, String executionId, AgentDefinition definition) {
         Map<String, String> credentials = new HashMap<>();
         if (definition.getToolNames().contains(GIT_CLONE_TOOL_NAME)) {
             credentials.putAll(credentialResolver.resolve(tenantId.toString(), GIT_CREDENTIAL_KIND));
+        }
+        if (definition.getToolNames().contains(OPEN_PULL_REQUEST_TOOL_NAME)) {
+            credentials.putAll(credentialResolver.resolve(tenantId.toString(), GITHUB_CREDENTIAL_KIND));
         }
         return new SandboxSpec(tenantId.toString(), executionId, credentials, SESSION_MAX_LIFETIME, SESSION_MAX_OUTPUT_BYTES);
     }

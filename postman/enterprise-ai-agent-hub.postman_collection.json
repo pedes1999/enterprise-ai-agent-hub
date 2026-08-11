@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "8de7aeb6-6d52-492c-b67b-e60581a07c01",
+    "_postman_id": "653a9bdb-2fe6-4878-aadc-13f663481920",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + multi-round tool-calling + agent/tool catalog + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption, LLM ping + tool-calling, real sandboxed shell command/git-clone/read-file/write-file execution, durable async agent execution, the agent catalog) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone/read-file/write-file requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\nAgents are now named entries in a catalog (agentSlug), not a fixed hardcoded tool list -- requests that need real sandboxed tools explicitly pass agentSlug: 'coding-agent' (see 'List Agent Catalog' for the full catalog); requests that omit agentSlug get the default 'general-assistant', which deliberately has NO sandboxed tools at all (see 'General Assistant Correctly Has No Git Access').\n\nThe 'Multi-Step' request chains git_clone -> read_file -> write_file -> run_shell_command in one prompt -- it's the one that actually proves the persistent per-execution sandbox (every sandboxed tool call in that request shares one real sandbox instead of each getting its own empty one) and the bounded multi-round tool-calling loop (ToolCallingChatEngine keeps going instead of stopping after one round) both work end to end, not just individually.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
+    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + multi-round tool-calling + agent/tool catalog + pull-request delivery + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption (GIT + GITHUB kinds), LLM ping + tool-calling, real sandboxed shell command/git-clone/read-file/write-file execution, durable async agent execution, the agent catalog) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone/read-file/write-file requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\ncoding-agent can now also open a real pull request via open_pull_request (commit, push, open a PR -- gated on a mandatory testCommand the tool re-verifies itself before doing anything, see its javadoc). That request is NOT included in this collection since it has a real, visible side effect on an actual GitHub repo and needs a real GITHUB tool credential -- see the 'Store GitHub Credential' request in the Tool Credentials folder for the encrypted-storage half of it, and 'List Agent Catalog' below for confirming coding-agent has the tool available.\n\nAgents are now named entries in a catalog (agentSlug), not a fixed hardcoded tool list -- requests that need real sandboxed tools explicitly pass agentSlug: 'coding-agent' (see 'List Agent Catalog' for the full catalog); requests that omit agentSlug get the default 'general-assistant', which deliberately has NO sandboxed tools at all (see 'General Assistant Correctly Has No Git Access').\n\nThe 'Multi-Step' request chains git_clone -> read_file -> write_file -> run_shell_command in one prompt -- it's the one that actually proves the persistent per-execution sandbox (every sandboxed tool call in that request shares one real sandbox instead of each getting its own empty one) and the bounded multi-round tool-calling loop (ToolCallingChatEngine keeps going instead of stopping after one round) both work end to end, not just individually.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1570,6 +1570,124 @@
               }
             }
           ]
+        },
+        {
+          "name": "Store GitHub Credential (For open_pull_request)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialKind\": \"GITHUB\",\n  \"value\": \"ghp_test_github_pat_12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Kind stored as GITHUB', () => pm.expect(json.credentialKind).to.eql('GITHUB'));",
+                  "pm.test('Response never echoes the raw value back', () => pm.expect(JSON.stringify(json)).to.not.include('ghp_test_github_pat_12345'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Tool Credentials - Now Includes GITHUB",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('GitHub credential is listed', () => pm.expect(json.some(c => c.credentialKind === 'GITHUB')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete GitHub Credential",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials/GITHUB",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials",
+                "GITHUB"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2007,7 +2125,8 @@
                   "const json = pm.response.json();",
                   "pm.test('general-assistant is in the catalog', () => pm.expect(json.some(a => a.slug === 'general-assistant')).to.eql(true));",
                   "const codingAgent = json.find(a => a.slug === 'coding-agent');",
-                  "pm.test('coding-agent is in the catalog with its real tool list', () => pm.expect(codingAgent.toolNames).to.include('git_clone'));"
+                  "pm.test('coding-agent is in the catalog with its real tool list', () => pm.expect(codingAgent.toolNames).to.include('git_clone'));",
+                  "pm.test('coding-agent can open pull requests', () => pm.expect(codingAgent.toolNames).to.include('open_pull_request'));"
                 ]
               }
             }
