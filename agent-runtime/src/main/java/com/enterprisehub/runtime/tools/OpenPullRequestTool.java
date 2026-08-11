@@ -69,7 +69,7 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
         params.put("title", "Pull request title.");
         params.put("body", "Pull request description. May be blank.");
         params.put("testCommand", "Shell command that must exit 0 for this pull request to be opened at all, e.g. 'mvn test' or 'npm test'. Required -- if the repository genuinely has no tests, pass a build or lint command instead.");
-        params.put("baseBranch", "Branch to open the pull request against. Defaults to 'main' if omitted.");
+        params.put("baseBranch", "Branch to open the pull request against. Defaults to the repository's actual default branch (resolved via the GitHub API) if omitted -- do not assume 'main'.");
         return params;
     }
 
@@ -82,11 +82,11 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
         String title = requireArgument(arguments, "title");
         String body = arguments.getOrDefault("body", "");
         String testCommand = requireArgument(arguments, "testCommand");
-        String baseBranch = arguments.getOrDefault("baseBranch", "main");
-        if (baseBranch == null || baseBranch.isBlank()) {
-            baseBranch = "main";
+        String requestedBaseBranch = arguments.get("baseBranch");
+        if (requestedBaseBranch != null && requestedBaseBranch.isBlank()) {
+            requestedBaseBranch = null;
         }
-        final String finalBaseBranch = baseBranch;
+        final String finalRequestedBaseBranch = requestedBaseBranch;
 
         Map<String, String> credentials = credentialResolver.resolve(context.tenantId(), GITHUB_CREDENTIAL_KIND);
         if (!credentials.containsKey(GITHUB_TOKEN_ENV_VAR)) {
@@ -98,11 +98,11 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
                 context.tenantId(), context.executionId(), credentials, SANDBOX_MAX_LIFETIME, MAX_OUTPUT_BYTES);
 
         return withSandbox(spec, handle ->
-                runPipeline(handle, testCommand, branchName, title, body, repositoryUrl, ownerAndRepo, finalBaseBranch));
+                runPipeline(handle, testCommand, branchName, title, body, repositoryUrl, ownerAndRepo, finalRequestedBaseBranch));
     }
 
     private String runPipeline(SandboxHandle handle, String testCommand, String branchName, String title,
-                                String body, String repositoryUrl, String[] ownerAndRepo, String baseBranch) {
+                                String body, String repositoryUrl, String[] ownerAndRepo, String requestedBaseBranch) {
         CommandResult testResult = sandboxClient.runCommand(handle, buildTestCommand(testCommand), COMMAND_TIMEOUT);
         if (!testResult.succeeded()) {
             return "Tests FAILED -- pull request was NOT opened. Nothing was committed or pushed.\n"
@@ -116,9 +116,41 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
                     + formatCommandResult(pushResult);
         }
 
+        String baseBranch = requestedBaseBranch != null
+                ? requestedBaseBranch
+                : resolveDefaultBranch(handle, ownerAndRepo);
+
         CommandResult prResult = sandboxClient.runCommand(
                 handle, buildOpenPrCommand(ownerAndRepo, branchName, title, body, baseBranch), COMMAND_TIMEOUT);
         return formatPullRequestResult(prResult);
+    }
+
+    /**
+     * Only called when the caller didn't pass baseBranch -- asks GitHub
+     * itself rather than assuming 'main' (plenty of repos, including this
+     * one, still default to 'master'). Falls back to 'main' if the lookup
+     * itself fails for any reason (network hiccup, unparseable response);
+     * the PR-open step's own error message will then explain the real
+     * problem rather than this resolution step failing silently.
+     */
+    private String resolveDefaultBranch(SandboxHandle handle, String[] ownerAndRepo) {
+        CommandResult result = sandboxClient.runCommand(handle, buildGetRepoCommand(ownerAndRepo), COMMAND_TIMEOUT);
+        try {
+            JsonNode json = objectMapper.readTree(result.stdout());
+            JsonNode defaultBranch = json.get("default_branch");
+            if (defaultBranch != null && defaultBranch.isTextual()) {
+                return defaultBranch.asText();
+            }
+        } catch (Exception e) {
+            // Falls through to the "main" fallback below.
+        }
+        return "main";
+    }
+
+    private String buildGetRepoCommand(String[] ownerAndRepo) {
+        String url = "https://api.github.com/repos/" + ownerAndRepo[0] + "/" + ownerAndRepo[1];
+        return "curl -s -H \"Authorization: Bearer $" + GITHUB_TOKEN_ENV_VAR + "\" "
+                + "-H \"Accept: application/vnd.github+json\" " + url;
     }
 
     private String buildTestCommand(String testCommand) {

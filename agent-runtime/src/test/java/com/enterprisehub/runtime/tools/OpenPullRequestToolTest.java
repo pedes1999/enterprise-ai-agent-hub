@@ -95,6 +95,7 @@ class OpenPullRequestToolTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))
                 .thenReturn(ok("pushed"))
+                .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{\"html_url\":\"https://github.com/octocat/Hello-World/pull/42\",\"number\":42}"));
 
         String result = tool.execute(CONTEXT, BASE_ARGS);
@@ -102,7 +103,7 @@ class OpenPullRequestToolTest {
         assertThat(result).contains("Pull request opened successfully")
                 .contains("https://github.com/octocat/Hello-World/pull/42")
                 .contains("#42");
-        verify(sandboxClient, times(3)).runCommand(any(), any(), any());
+        verify(sandboxClient, times(4)).runCommand(any(), any(), any());
     }
 
     @Test
@@ -110,6 +111,7 @@ class OpenPullRequestToolTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))
                 .thenReturn(ok("pushed"))
+                .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{\"message\":\"Validation Failed\",\"errors\":[]}"));
 
         String result = tool.execute(CONTEXT, BASE_ARGS);
@@ -122,12 +124,13 @@ class OpenPullRequestToolTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))
                 .thenReturn(ok("pushed"))
+                .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{}"));
 
         tool.execute(CONTEXT, BASE_ARGS);
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(sandboxClient, times(3)).runCommand(any(), commandCaptor.capture(), any());
+        verify(sandboxClient, times(4)).runCommand(any(), commandCaptor.capture(), any());
         String pushCommand = commandCaptor.getAllValues().get(1);
         assertThat(pushCommand).contains("x-access-token:$GITHUB_TOKEN@").contains("git push").doesNotContain("ghp_secret");
     }
@@ -137,6 +140,7 @@ class OpenPullRequestToolTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))
                 .thenReturn(ok("pushed"))
+                .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{}"));
 
         Map<String, String> args = Map.of(
@@ -147,7 +151,7 @@ class OpenPullRequestToolTest {
         tool.execute(CONTEXT, args);
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(sandboxClient, times(3)).runCommand(any(), commandCaptor.capture(), any());
+        verify(sandboxClient, times(4)).runCommand(any(), commandCaptor.capture(), any());
         assertThat(commandCaptor.getAllValues().get(1)).contains("'\\''");
     }
 
@@ -191,17 +195,53 @@ class OpenPullRequestToolTest {
     }
 
     @Test
-    void execute_missingBaseBranch_defaultsToMain() {
+    void execute_missingBaseBranch_resolvesRepositoryActualDefaultBranch() {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))
                 .thenReturn(ok("pushed"))
+                .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{}"));
 
         tool.execute(CONTEXT, BASE_ARGS);
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient, times(4)).runCommand(any(), commandCaptor.capture(), any());
+        // Step 3: looks up the repo's real default branch via the GitHub API -- not hardcoded to 'main'.
+        assertThat(commandCaptor.getAllValues().get(2)).contains("api.github.com/repos/octocat/Hello-World")
+                .doesNotContain("/pulls");
+        // Step 4: the PR payload uses whatever that lookup returned.
+        assertThat(commandCaptor.getAllValues().get(3)).contains("\"base\":\"master\"");
+    }
+
+    @Test
+    void execute_defaultBranchLookupFails_fallsBackToMain() {
+        when(sandboxClient.runCommand(any(), any(), any()))
+                .thenReturn(ok("tests passed"))
+                .thenReturn(ok("pushed"))
+                .thenReturn(ok("not valid json"))
+                .thenReturn(ok("{}"));
+
+        tool.execute(CONTEXT, BASE_ARGS);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient, times(4)).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getAllValues().get(3)).contains("\"base\":\"main\"");
+    }
+
+    @Test
+    void execute_explicitBaseBranch_skipsDefaultBranchLookup() {
+        when(sandboxClient.runCommand(any(), any(), any()))
+                .thenReturn(ok("tests passed"))
+                .thenReturn(ok("pushed"))
+                .thenReturn(ok("{}"));
+
+        Map<String, String> args = new java.util.HashMap<>(BASE_ARGS);
+        args.put("baseBranch", "develop");
+        tool.execute(CONTEXT, args);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(sandboxClient, times(3)).runCommand(any(), commandCaptor.capture(), any());
-        assertThat(commandCaptor.getAllValues().get(2)).contains("\"base\":\"main\"");
+        assertThat(commandCaptor.getAllValues().get(2)).contains("\"base\":\"develop\"");
     }
 
     @Test
@@ -220,6 +260,7 @@ class OpenPullRequestToolTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))
                 .thenReturn(ok("pushed"))
+                .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{\"html_url\":\"https://github.com/x/y/pull/1\",\"number\":1}"));
 
         tool.execute(CONTEXT, BASE_ARGS);
