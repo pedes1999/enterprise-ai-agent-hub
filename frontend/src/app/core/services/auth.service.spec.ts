@@ -1,9 +1,12 @@
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { AuthService } from './auth.service';
 import { environment } from '../../../environments/environment';
 import { AuthResponse } from '../models/auth.model';
+
+const STORAGE_KEY = 'auth.session';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -20,6 +23,7 @@ describe('AuthService', () => {
   };
 
   beforeEach(() => {
+    localStorage.clear();
     TestBed.configureTestingModule({
       providers: [provideHttpClient(), provideHttpClientTesting()],
     });
@@ -29,6 +33,8 @@ describe('AuthService', () => {
 
   afterEach(() => {
     httpMock.verify();
+    vi.useRealTimers();
+    localStorage.clear();
   });
 
   it('starts unauthenticated with no token', () => {
@@ -69,7 +75,7 @@ describe('AuthService', () => {
     expect(service.isAdmin()).toBe(true);
   });
 
-  it('logout() clears the session', () => {
+  it('logout() clears the session and localStorage', () => {
     service.login({ tenantSlug: 'acme', email: 'dev@acme.com', password: 'hunter2' }).subscribe();
     httpMock.expectOne(`${environment.apiBaseUrl}/auth/login`).flush(authResponse);
     expect(service.isAuthenticated()).toBe(true);
@@ -80,6 +86,7 @@ describe('AuthService', () => {
     expect(service.token()).toBeNull();
     expect(service.tenantSlug()).toBeNull();
     expect(service.role()).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it('isAdmin() is false for a DEVELOPER session', () => {
@@ -101,5 +108,71 @@ describe('AuthService', () => {
 
     expect(errored).toBe(true);
     expect(service.isAuthenticated()).toBe(false);
+  });
+
+  it('login() persists the session to localStorage with an expiresAt derived from expiresInSeconds', () => {
+    const before = Date.now();
+    service.login({ tenantSlug: 'acme', email: 'dev@acme.com', password: 'hunter2' }).subscribe();
+    httpMock.expectOne(`${environment.apiBaseUrl}/auth/login`).flush(authResponse);
+
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+    expect(stored.token).toBe('jwt-token-abc');
+    expect(stored.tenantSlug).toBe('acme');
+    expect(stored.role).toBe('DEVELOPER');
+    expect(stored.expiresAt).toBeGreaterThanOrEqual(before + authResponse.expiresInSeconds * 1000);
+  });
+
+  it('a new AuthService instance restores the session from localStorage (survives a refresh)', () => {
+    service.login({ tenantSlug: 'acme', email: 'dev@acme.com', password: 'hunter2' }).subscribe();
+    httpMock.expectOne(`${environment.apiBaseUrl}/auth/login`).flush(authResponse);
+
+    // Simulate a page refresh: a brand-new service instance reads whatever is in localStorage.
+    const restored = TestBed.runInInjectionContext(() => new AuthService());
+    expect(restored).not.toBe(service);
+    expect(restored.isAuthenticated()).toBe(true);
+    expect(restored.token()).toBe('jwt-token-abc');
+    expect(restored.tenantSlug()).toBe('acme');
+    expect(restored.role()).toBe('DEVELOPER');
+  });
+
+  it('discards an already-expired stored session instead of restoring it', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        token: 'stale-token',
+        tenantSlug: 'acme',
+        email: 'dev@acme.com',
+        role: 'DEVELOPER',
+        expiresAt: Date.now() - 1000,
+      }),
+    );
+
+    const restored = TestBed.runInInjectionContext(() => new AuthService());
+
+    expect(restored.isAuthenticated()).toBe(false);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('discards a corrupt stored session instead of throwing', () => {
+    localStorage.setItem(STORAGE_KEY, 'not valid json{');
+
+    const restored = TestBed.runInInjectionContext(() => new AuthService());
+
+    expect(restored.isAuthenticated()).toBe(false);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('automatically logs out once the token reaches its own expiry while the tab stays open', () => {
+    vi.useFakeTimers();
+    service.login({ tenantSlug: 'acme', email: 'dev@acme.com', password: 'hunter2' }).subscribe();
+    httpMock.expectOne(`${environment.apiBaseUrl}/auth/login`).flush(authResponse);
+    expect(service.isAuthenticated()).toBe(true);
+
+    vi.advanceTimersByTime(authResponse.expiresInSeconds * 1000 - 1);
+    expect(service.isAuthenticated()).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    expect(service.isAuthenticated()).toBe(false);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });

@@ -2,10 +2,11 @@ import { Component, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AgentService } from '../../../core/services/agent.service';
 import { AgentExecutionStatusResponse, ToolExecutionRecord } from '../../../core/models/agent.model';
+import { LocalDateTimePipe } from '../../../shared/pipes/local-date-time.pipe';
 
 @Component({
   selector: 'app-execution-detail',
-  imports: [RouterLink],
+  imports: [RouterLink, LocalDateTimePipe],
   templateUrl: './execution-detail.html',
   styleUrl: './execution-detail.css',
 })

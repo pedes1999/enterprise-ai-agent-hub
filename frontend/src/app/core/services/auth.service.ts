@@ -4,15 +4,31 @@ import { Observable, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AuthResponse, LoginRequest, RegisterRequest, Role } from '../models/auth.model';
 
+const STORAGE_KEY = 'auth.session';
+
+interface StoredSession {
+  token: string;
+  tenantSlug: string;
+  email: string;
+  role: Role;
+  expiresAt: number;
+}
+
 /**
- * Token lives only in memory (a signal) -- never localStorage/sessionStorage.
- * A hard refresh logging the user out is the accepted tradeoff for v1 (see
- * the frontend build brief). AuthInterceptor reads `token()` on every
- * outgoing request; nothing else should touch storage for auth state.
+ * The session (token + claims) is persisted to localStorage so a page
+ * refresh doesn't log the user out -- but only for the JWT's own lifetime
+ * (expiresInSeconds from the backend, currently 1h). There is no refresh
+ * token: once expiresAt passes, logout() fires automatically, whether the
+ * tab was open the whole time (via the scheduled timer) or reloaded after
+ * expiry (via restoreSession() finding a stale entry). Storing the JWT in
+ * localStorage (readable by any injected script) is a real tradeoff against
+ * XSS versus the in-memory-only alternative; kept deliberately short-lived
+ * and single-token (no long-lived refresh credential) to bound that risk.
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
+  private expiryTimer?: ReturnType<typeof setTimeout>;
 
   private readonly _token = signal<string | null>(null);
   private readonly _tenantSlug = signal<string | null>(null);
@@ -27,6 +43,10 @@ export class AuthService {
   readonly isAuthenticated = computed(() => this._token() !== null);
   readonly isAdmin = computed(() => this._role() === 'ADMIN');
 
+  constructor() {
+    this.restoreSession();
+  }
+
   login(request: LoginRequest): Observable<AuthResponse> {
     return this.http
       .post<AuthResponse>(`${environment.apiBaseUrl}/auth/login`, request)
@@ -40,10 +60,39 @@ export class AuthService {
   }
 
   logout(): void {
+    if (this.expiryTimer !== undefined) {
+      clearTimeout(this.expiryTimer);
+      this.expiryTimer = undefined;
+    }
     this._token.set(null);
     this._tenantSlug.set(null);
     this._email.set(null);
     this._role.set(null);
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  private restoreSession(): void {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    let stored: StoredSession;
+    try {
+      stored = JSON.parse(raw);
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+    const remainingMs = stored.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+    this._token.set(stored.token);
+    this._tenantSlug.set(stored.tenantSlug);
+    this._email.set(stored.email);
+    this._role.set(stored.role);
+    this.scheduleExpiry(remainingMs);
   }
 
   private setSession(response: AuthResponse): void {
@@ -51,5 +100,23 @@ export class AuthService {
     this._tenantSlug.set(response.tenantSlug);
     this._email.set(response.email);
     this._role.set(response.role);
+
+    const expiresInMs = response.expiresInSeconds * 1000;
+    const stored: StoredSession = {
+      token: response.token,
+      tenantSlug: response.tenantSlug,
+      email: response.email,
+      role: response.role,
+      expiresAt: Date.now() + expiresInMs,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+    this.scheduleExpiry(expiresInMs);
+  }
+
+  private scheduleExpiry(ms: number): void {
+    if (this.expiryTimer !== undefined) {
+      clearTimeout(this.expiryTimer);
+    }
+    this.expiryTimer = setTimeout(() => this.logout(), ms);
   }
 }

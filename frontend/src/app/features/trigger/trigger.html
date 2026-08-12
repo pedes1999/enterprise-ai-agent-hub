@@ -13,21 +13,24 @@
     }
 
     <form (ngSubmit)="submit()">
-      <label for="prompt">Prompt (optional)</label>
-      <textarea id="prompt" rows="4" [(ngModel)]="prompt" name="prompt"></textarea>
-
-      <label for="repositoryUrl">Repository URL</label>
-      <input id="repositoryUrl" type="text" [(ngModel)]="repositoryUrl" name="repositoryUrl" placeholder="https://github.com/org/repo" />
-
-      <label>Input parameters</label>
-      @for (row of paramRows; track $index) {
-        <div class="param-row">
-          <input type="text" placeholder="key" [(ngModel)]="row.key" [name]="'key-' + $index" />
-          <input type="text" placeholder="value" [(ngModel)]="row.value" [name]="'value-' + $index" />
-          <button type="button" class="secondary" (click)="removeParamRow($index)">Remove</button>
-        </div>
+      @if (fields().length === 0) {
+        <p class="empty">This agent takes no inputs — just trigger it.</p>
       }
-      <button type="button" class="secondary" (click)="addParamRow()">Add parameter</button>
+      @for (field of fields(); track field.key) {
+        <label [for]="field.key">{{ field.label }}</label>
+        @if (field.key === 'prompt') {
+          <textarea [id]="field.key" rows="4" [(ngModel)]="fieldValues[field.key]" [name]="field.key" required></textarea>
+        } @else {
+          <input
+            [id]="field.key"
+            type="text"
+            [(ngModel)]="fieldValues[field.key]"
+            [name]="field.key"
+            required
+            [placeholder]="field.key === 'repositoryUrl' ? 'https://github.com/org/repo' : ''"
+          />
+        }
+      }
 
       @if (errorKind() === 'rate-limit') {
         <div class="banner banner-error" role="alert">Execution limit reached. {{ errorMessage() }}</div>

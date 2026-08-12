@@ -106,7 +106,11 @@ public class AgentExecutionService {
         execution.setAgentType(agentSlug);
         execution.setTriggerSource("API");
         execution.setLlmProvider(LlmProvider.ANTHROPIC.name());
-        execution.setPrompt(prompt);
+        // prompt is optional at the DTO/validation level (see validateRequiredInputs()) but
+        // the column itself is NOT NULL (V5__agent_execution_queue.sql) -- coerce null to the
+        // same "" sentinel that migration already uses, rather than letting a caller for an
+        // agent whose requiredInputs doesn't include "prompt" (e.g. coding-agent) crash the insert.
+        execution.setPrompt(prompt == null ? "" : prompt);
         execution.setRepositoryUrl(repositoryUrl);
         execution.setInputParameters(serializeInputParameters(inputParameters));
         execution.setStatus("QUEUED");

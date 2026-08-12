@@ -44,14 +44,9 @@ textarea {
   font-size: var(--font-size-sm);
 }
 
-.param-row {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-}
-
-.param-row input {
-  flex: 1;
+.empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 button {

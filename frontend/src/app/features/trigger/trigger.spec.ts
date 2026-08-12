@@ -41,7 +41,7 @@ describe('Trigger', () => {
     };
   }
 
-  function createComponent() {
+  function createComponent(requiredInputs: string[] = []) {
     TestBed.configureTestingModule({
       imports: [Trigger],
       providers: [
@@ -65,7 +65,7 @@ describe('Trigger', () => {
       systemPrompt: '',
       toolNames: [],
       inputSourceType: null,
-      requiredInputs: [],
+      requiredInputs,
     });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
 
@@ -208,10 +208,63 @@ describe('Trigger', () => {
     expect(fixture.componentInstance.errorMessage()).toBe('Missing required input(s): repositoryUrl');
   });
 
-  it('sends inputParameters built from the key/value rows', async () => {
-    vi.useFakeTimers();
-    const fixture = createComponent();
-    fixture.componentInstance.paramRows = [{ key: 'branch', value: 'main' }];
+  it('renders no fields, and no prompt/repositoryUrl in the request, for an agent with an empty requiredInputs', () => {
+    const fixture = createComponent([]);
+    expect(fixture.componentInstance.fields()).toEqual([]);
+
+    fixture.componentInstance.submit();
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);
+    expect(req.request.body).toEqual({
+      prompt: null,
+      agentSlug: 'code-reviewer',
+      repositoryUrl: null,
+      inputParameters: null,
+    });
+    req.flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('renders only a Prompt field, and sends prompt, for an agent whose requiredInputs is just ["prompt"]', () => {
+    const fixture = createComponent(['prompt']);
+    expect(fixture.componentInstance.fields()).toEqual([{ key: 'prompt', label: 'Prompt' }]);
+
+    fixture.componentInstance.fieldValues['prompt'] = 'What time is it?';
+    fixture.componentInstance.submit();
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);
+    expect(req.request.body).toEqual({
+      prompt: 'What time is it?',
+      agentSlug: 'code-reviewer',
+      repositoryUrl: null,
+      inputParameters: null,
+    });
+    req.flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('renders a Repository URL field, and sends repositoryUrl, for an agent whose requiredInputs is ["repositoryUrl"]', () => {
+    const fixture = createComponent(['repositoryUrl']);
+    expect(fixture.componentInstance.fields()).toEqual([{ key: 'repositoryUrl', label: 'Repository URL' }]);
+
+    fixture.componentInstance.fieldValues['repositoryUrl'] = 'https://github.com/octocat/Hello-World.git';
+    fixture.componentInstance.submit();
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);
+    expect(req.request.body).toEqual({
+      prompt: null,
+      agentSlug: 'code-reviewer',
+      repositoryUrl: 'https://github.com/octocat/Hello-World.git',
+      inputParameters: null,
+    });
+    req.flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('renders a generic labeled field, and sends it via inputParameters, for a non-fixed requiredInputs key', () => {
+    const fixture = createComponent(['text']);
+    expect(fixture.componentInstance.fields()).toEqual([{ key: 'text', label: 'Text' }]);
+
+    fixture.componentInstance.fieldValues['text'] = 'ticket body here';
     fixture.componentInstance.submit();
 
     const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);
@@ -219,14 +272,9 @@ describe('Trigger', () => {
       prompt: null,
       agentSlug: 'code-reviewer',
       repositoryUrl: null,
-      inputParameters: { branch: 'main' },
+      inputParameters: { text: 'ticket body here' },
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
-
-    await vi.advanceTimersByTimeAsync(0);
-    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1`).flush(statusResponse('QUEUED'));
-
-    fixture.destroy();
   });
 });

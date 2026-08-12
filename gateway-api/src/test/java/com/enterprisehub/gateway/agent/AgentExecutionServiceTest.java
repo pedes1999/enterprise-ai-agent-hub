@@ -121,6 +121,21 @@ class AgentExecutionServiceTest {
     }
 
     @Test
+    void enqueue_nullPrompt_coercedToEmptyString_notPersistedAsNull() {
+        // The frontend's trigger form only sends a prompt field for agents whose
+        // requiredInputs includes "prompt" -- for coding-agent (requiredInputs =
+        // ["repositoryUrl"]) it sends prompt: null. The agent_executions.prompt
+        // column is NOT NULL (see V5__agent_execution_queue.sql), so a literal
+        // null must never reach repository.save() or the insert fails.
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));
+
+        AgentExecution saved = service.enqueue(tenantId, null, "coding-agent", "https://github.com/org/repo.git", null);
+
+        assertThat(saved.getPrompt()).isEqualTo("");
+    }
+
+    @Test
     void enqueue_codingAgentStyle_missingRepositoryUrl_rejected() {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));

@@ -20,11 +20,11 @@
         <dt>Repository URL</dt>
         <dd class="mono">{{ exec.repositoryUrl ?? '—' }}</dd>
         <dt>Created</dt>
-        <dd class="mono">{{ exec.createdAt }}</dd>
+        <dd>{{ exec.createdAt | localDateTime }}</dd>
         <dt>Started</dt>
-        <dd class="mono">{{ exec.startedAt ?? '—' }}</dd>
+        <dd>{{ exec.startedAt | localDateTime }}</dd>
         <dt>Completed</dt>
-        <dd class="mono">{{ exec.completedAt ?? '—' }}</dd>
+        <dd>{{ exec.completedAt | localDateTime }}</dd>
       </dl>
     </section>
 
@@ -78,7 +78,7 @@
                   }
                 </td>
                 <td class="mono">{{ record.durationMs }}ms</td>
-                <td class="mono">{{ record.createdAt }}</td>
+                <td>{{ record.createdAt | localDateTime }}</td>
               </tr>
             }
           </tbody>

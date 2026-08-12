@@ -37,7 +37,7 @@
               <td>
                 <span class="badge" [class]="'status-' + exec.status.toLowerCase()">{{ exec.status }}</span>
               </td>
-              <td class="mono">{{ exec.createdAt }}</td>
+              <td>{{ exec.createdAt | localDateTime }}</td>
             </tr>
           }
         </tbody>

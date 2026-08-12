@@ -10,6 +10,7 @@ describe('Login', () => {
   let httpMock: HttpTestingController;
 
   beforeEach(async () => {
+    localStorage.clear();
     await TestBed.configureTestingModule({
       imports: [Login],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
@@ -17,7 +18,10 @@ describe('Login', () => {
     httpMock = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => httpMock.verify());
+  afterEach(() => {
+    httpMock.verify();
+    localStorage.clear();
+  });
 
   it('does not submit when the form is invalid', () => {
     const fixture = TestBed.createComponent(Login);

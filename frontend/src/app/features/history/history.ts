@@ -3,12 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AgentService } from '../../core/services/agent.service';
 import { AgentExecutionStatusResponse, ExecutionStatus, PagedModel } from '../../core/models/agent.model';
+import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
 
 const PAGE_SIZE = 20;
 
 @Component({
   selector: 'app-history',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, LocalDateTimePipe],
   templateUrl: './history.html',
   styleUrl: './history.css',
 })

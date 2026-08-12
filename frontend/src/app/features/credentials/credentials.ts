@@ -2,6 +2,7 @@ import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CredentialService } from '../../core/services/credential.service';
 import { ToolCredentialSummary, VendorCredentialSummary } from '../../core/models/credential.model';
+import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
 
 interface VendorProviderDef {
   provider: string;
@@ -33,7 +34,7 @@ export const TOOL_KINDS: ToolKindDef[] = [
 
 @Component({
   selector: 'app-credentials',
-  imports: [FormsModule],
+  imports: [FormsModule, LocalDateTimePipe],
   templateUrl: './credentials.html',
   styleUrl: './credentials.css',
 })

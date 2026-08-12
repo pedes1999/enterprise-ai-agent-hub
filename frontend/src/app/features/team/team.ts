@@ -4,6 +4,7 @@ import { UserService } from '../../core/services/user.service';
 import { AuthService } from '../../core/services/auth.service';
 import { Role } from '../../core/models/auth.model';
 import { UserSummary } from '../../core/models/user.model';
+import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
 
 interface RowMessage {
   kind: 'success' | 'error';
@@ -12,7 +13,7 @@ interface RowMessage {
 
 @Component({
   selector: 'app-team',
-  imports: [FormsModule],
+  imports: [FormsModule, LocalDateTimePipe],
   templateUrl: './team.html',
   styleUrl: './team.css',
 })

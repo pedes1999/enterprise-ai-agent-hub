@@ -71,7 +71,7 @@
                 <span class="spinner"></span>
               }
             </td>
-            <td class="mono">{{ user.createdAt }}</td>
+            <td>{{ user.createdAt | localDateTime }}</td>
             <td>
               @if (user.email !== currentUserEmail()) {
                 <button type="button" class="danger" (click)="removeUser(user)" [disabled]="pendingUserId() === user.id">
