@@ -1,18 +1,40 @@
 @if (authService.isAuthenticated()) {
   <header class="app-header">
-    <nav>
-      <a routerLink="/agents">Agents</a>
-      <a routerLink="/executions">Executions</a>
-      @if (authService.isAdmin()) {
-        <a routerLink="/credentials">Credentials</a>
-        <a routerLink="/team">Team</a>
-      }
-    </nav>
-    <div class="header-right">
-      <app-usage-indicator />
-      <span class="user-email mono">{{ authService.email() }}</span>
-      <button type="button" (click)="logout()">Sign out</button>
+    <div class="brand">
+      <a routerLink="/agents" class="brand-mark" aria-label="Agent Hub home">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="currentColor" />
+        </svg>
+      </a>
+      <a routerLink="/agents" class="brand-name">Agent Hub</a>
     </div>
+
+    <button
+      type="button"
+      class="menu-toggle"
+      (click)="toggleMobileMenu()"
+      [attr.aria-expanded]="mobileMenuOpen()"
+      aria-label="Toggle navigation menu"
+    >
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+
+    <nav class="primary-nav" [class.open]="mobileMenuOpen()">
+      <a routerLink="/agents" routerLinkActive="active">Agents</a>
+      <a routerLink="/executions" routerLinkActive="active">Executions</a>
+      @if (authService.isAdmin()) {
+        <a routerLink="/credentials" routerLinkActive="active">Credentials</a>
+        <a routerLink="/team" routerLinkActive="active">Team</a>
+      }
+
+      <div class="nav-actions">
+        <app-usage-indicator />
+        <span class="user-email mono">{{ authService.email() }}</span>
+        <button type="button" class="sign-out" (click)="logout()">Sign out</button>
+      </div>
+    </nav>
   </header>
 }
 

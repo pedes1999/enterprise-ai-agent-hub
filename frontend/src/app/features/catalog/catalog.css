@@ -3,6 +3,16 @@
   max-width: 1040px;
 }
 
+@media (max-width: 640px) {
+  .catalog-page {
+    padding: var(--space-4);
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 h1 {
   font-size: var(--font-size-xl);
 }

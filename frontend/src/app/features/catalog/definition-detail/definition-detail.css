@@ -3,6 +3,12 @@
   max-width: 720px;
 }
 
+@media (max-width: 640px) {
+  .detail-page {
+    padding: var(--space-4);
+  }
+}
+
 .back {
   display: inline-block;
   margin-bottom: var(--space-4);

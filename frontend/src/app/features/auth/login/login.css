@@ -3,7 +3,8 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: var(--color-bg);
+  padding: var(--space-4);
+  background: radial-gradient(circle at top left, var(--color-accent-light), var(--color-bg) 55%);
 }
 
 .auth-card {
@@ -15,8 +16,8 @@
   padding: var(--space-6);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
 }
 
 h1 {
@@ -62,18 +63,21 @@ input.invalid {
 
 button {
   margin-top: var(--space-4);
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-accent);
+  padding: var(--space-3) var(--space-4);
+  background: var(--gradient-accent);
   color: #fff;
   border: none;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-base);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s, transform 0.15s;
 }
 
 button:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 button:disabled {

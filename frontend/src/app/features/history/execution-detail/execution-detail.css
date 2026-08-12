@@ -3,6 +3,16 @@
   max-width: 760px;
 }
 
+@media (max-width: 640px) {
+  .detail-page {
+    padding: var(--space-4);
+  }
+
+  dl {
+    grid-template-columns: 1fr;
+  }
+}
+
 .back {
   display: inline-block;
   margin-bottom: var(--space-4);

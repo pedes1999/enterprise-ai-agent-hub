@@ -1,32 +1,38 @@
 /*
- * Design tokens for Enterprise AI Agent Hub -- confirmed token system:
- * cool-neutral base, one desaturated steel-blue accent, Inter for UI text,
+ * Design tokens for Enterprise AI Agent Hub -- modern enterprise: a vivid
+ * indigo/cyan brand pair on a cool-neutral base, Inter for UI text,
  * JetBrains Mono for technical content (repo URLs, execution IDs, tool
- * output, PR links). Restrained, precise, quiet confidence -- Datadog/
- * Linear/Vercel/Stripe dashboard energy, not marketing-site energy.
+ * output, PR links). More saturated and confident than a bare admin
+ * panel, still restrained enough for daily dashboard use -- Linear/
+ * Vercel/Stripe energy, not marketing-site energy.
  */
 
 :root {
   /* Palette */
-  --color-bg: #f6f7f9;
+  --color-bg: #f3f4f9;
   --color-surface: #ffffff;
-  --color-border: #e1e4e9;
-  --color-text: #14171c;
-  --color-text-muted: #5b6472;
-  --color-accent: #35516f;
-  --color-accent-hover: #2a405a;
+  --color-surface-alt: #f7f8fc;
+  --color-border: #e3e5ee;
+  --color-text: #12131c;
+  --color-text-muted: #666a7d;
+
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-light: #eef0fe;
+  --color-accent-2: #06b6d4;
+  --gradient-accent: linear-gradient(135deg, #4f46e5 0%, #6d28d9 55%, #06b6d4 100%);
 
   /* Status */
-  --color-status-queued: #8a93a3;
-  --color-status-running: #35516f;
-  --color-status-succeeded: #3f7d56;
-  --color-status-failed: #b1453e;
+  --color-status-queued: #6b7280;
+  --color-status-running: #2563eb;
+  --color-status-succeeded: #15803d;
+  --color-status-failed: #dc2626;
 
-  /* Status backgrounds (very light tint, used behind a dot+label pill) */
-  --color-status-queued-bg: #eef0f2;
-  --color-status-running-bg: #e8edf2;
-  --color-status-succeeded-bg: #e8f3ec;
-  --color-status-failed-bg: #f7eae9;
+  /* Status backgrounds (light tint, used behind a dot+label pill) */
+  --color-status-queued-bg: #eef0f4;
+  --color-status-running-bg: #e6eefd;
+  --color-status-succeeded-bg: #e5f6ea;
+  --color-status-failed-bg: #fbe9e9;
 
   /* Typography */
   --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -37,21 +43,23 @@
   --font-size-base: 14px;
   --font-size-md: 16px;
   --font-size-lg: 20px;
-  --font-size-xl: 24px;
+  --font-size-xl: 26px;
 
   /* Layout */
-  --radius-sm: 4px;
-  --radius-md: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
-  --sidebar-width: 220px;
-  --header-height: 56px;
+  --header-height: 64px;
 
-  --shadow-sm: 0 1px 2px rgba(20, 23, 28, 0.04);
+  --shadow-sm: 0 1px 2px rgba(18, 19, 28, 0.05), 0 1px 1px rgba(18, 19, 28, 0.03);
+  --shadow-md: 0 6px 16px rgba(18, 19, 28, 0.08), 0 2px 6px rgba(18, 19, 28, 0.04);
+  --shadow-lg: 0 16px 40px rgba(18, 19, 28, 0.14);
 }
 
 * {
@@ -70,6 +78,7 @@ body {
   color: var(--color-text);
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 code,
@@ -95,11 +104,39 @@ h1,
 h2,
 h3 {
   margin: 0;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 p {
   margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* A little character without sacrificing legibility: a slim, quiet
+   scrollbar instead of the default chunky OS one. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cdd0e0;
+  border-radius: 999px;
+  border: 2px solid var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b3b7cc;
 }
 
 /* Feedback: success/error banners and inline loading spinner, shared
@@ -150,5 +187,19 @@ p {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Responsive baseline: every feature page's own root class
+   (.credentials-page, .catalog-page, etc.) sets its own padding/max-width,
+   but they all follow the same "px-6 desktop, tighter on small screens"
+   shape -- rather than repeating this in eight files, tables (the thing
+   most likely to actually break on a narrow screen) get one global rule. */
+@media (max-width: 768px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
   }
 }
