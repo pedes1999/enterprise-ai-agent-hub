@@ -69,6 +69,25 @@ class CorsIntegrationTest {
     }
 
     @Test
+    void preflight_deleteMethod_isAllowed() {
+        // Regression test: DELETE was missing from allowedMethods, so a
+        // browser's preflight for e.g. DELETE /vendor-credentials/{provider}
+        // failed before the request ever reached the server -- surfaced as a
+        // CORS error in the UI on every credential-removal attempt, for
+        // every provider (not anything OpenAI-specific).
+        HttpHeaders headers = new HttpHeaders();
+        headers.setOrigin("http://localhost:4200");
+        headers.set(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "DELETE");
+        headers.set(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization");
+
+        ResponseEntity<Void> response = restTemplate.exchange(
+                url("/vendor-credentials/OPENAI"), HttpMethod.OPTIONS, new HttpEntity<>(headers), Void.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getAccessControlAllowMethods()).contains(HttpMethod.DELETE);
+    }
+
+    @Test
     void configuredOrigin_isNeverAWildcard() {
         HttpHeaders headers = new HttpHeaders();
         headers.setOrigin("http://localhost:4200");
