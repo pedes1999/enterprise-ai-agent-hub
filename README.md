@@ -290,8 +290,8 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-335 automated tests as of the last update (20 `agent-core` + 88
-`agent-runtime` + 227 `gateway-api`) — unit tests (mocked) for every
+340 automated tests as of the last update (20 `agent-core` + 88
+`agent-runtime` + 232 `gateway-api`) — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
@@ -364,3 +364,21 @@ the sandbox at all in any of them. Found by bypassing gateway-api
 entirely and hitting the sidecar directly with a known test env var, and
 confirmed against the SDK's own shipped type definitions. See
 `CODE_WALKTHROUGH.md`'s symptom table for the full diagnostic trail.
+
+A fourth: `app.credentials.local-key`'s fallback (used when
+`CREDENTIAL_LOCAL_KEY` isn't set) was a real, working AES-256 key
+committed in plaintext in `application.yml`, not an obvious placeholder
+like `jwt-secret`'s right above it — an environment that forgot to set
+the env var would have silently encrypted every tenant's vendor/tool
+credentials with a key visible to anyone with repo access. Fixed: the
+default is now `REPLACE_ME_WITH_A_STRONG_KEY_FROM_VAULT`, and
+`LocalAesGcmCredentialEncryptor`'s constructor rejects that literal value
+(and non-base64/wrong-length values) at startup, failing loudly instead
+of silently working — same fail-closed posture as `TenantAwareDataSource`
+always setting the RLS session variable. **If you're running this
+locally, you now need to export a real `CREDENTIAL_LOCAL_KEY`** (see the
+generator command next to that property) before `mvn spring-boot:run`
+will start; `application-test.yml` carries its own separate, freshly
+generated, test-only key so `mvn test` is unaffected. The previously
+committed key value is treated as compromised — never reuse it as a real
+`CREDENTIAL_LOCAL_KEY` in any actual deployment.

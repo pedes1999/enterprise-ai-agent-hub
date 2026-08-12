@@ -75,4 +75,36 @@ class LocalAesGcmCredentialEncryptorTest {
         assertThatThrownBy(() -> new LocalAesGcmCredentialEncryptor(badProps))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void constructor_rejectsThePlaceholderValue_failsFastAtStartup() {
+        // The exact default application.yml falls back to when
+        // CREDENTIAL_LOCAL_KEY is unset -- must never silently work, or
+        // every tenant's credentials end up encrypted with a key sitting
+        // in plaintext in the source tree.
+        CredentialsProperties placeholderProps = new CredentialsProperties("local-dev-only",
+                "REPLACE_ME_WITH_A_STRONG_KEY_FROM_VAULT");
+
+        assertThatThrownBy(() -> new LocalAesGcmCredentialEncryptor(placeholderProps))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("placeholder")
+                .hasMessageContaining("CREDENTIAL_LOCAL_KEY");
+    }
+
+    @Test
+    void constructor_rejectsInvalidBase64_withClearMessage() {
+        CredentialsProperties badProps = new CredentialsProperties("local-dev-only", "not-valid-base64!!!");
+
+        assertThatThrownBy(() -> new LocalAesGcmCredentialEncryptor(badProps))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not valid base64");
+    }
+
+    @Test
+    void constructor_rejectsBlankKey() {
+        CredentialsProperties blankProps = new CredentialsProperties("local-dev-only", "");
+
+        assertThatThrownBy(() -> new LocalAesGcmCredentialEncryptor(blankProps))
+                .isInstanceOf(IllegalStateException.class);
+    }
 }

@@ -31,11 +31,47 @@ public class LocalAesGcmCredentialEncryptor implements CredentialEncryptor {
     private static final int IV_LENGTH_BYTES = 12;
     private static final int TAG_LENGTH_BITS = 128;
 
+    /**
+     * Must match application.yml's default exactly. Rejected here, not just
+     * left to fail base64 decoding on its own -- this string WOULD
+     * base64-decode "successfully" to garbage bytes of the wrong length
+     * (or, worse, some other length entirely by coincidence), so relying on
+     * the length check alone to catch it is not guaranteed. Checking for
+     * the literal placeholder up front makes "you forgot to set
+     * CREDENTIAL_LOCAL_KEY" an unambiguous error message instead of a
+     * confusing base64/length one.
+     */
+    static final String PLACEHOLDER_KEY = "REPLACE_ME_WITH_A_STRONG_KEY_FROM_VAULT";
+
     private final SecretKeySpec key;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /**
+     * Fails fast (at bean construction, i.e. application startup) rather
+     * than on the first encrypt/decrypt call -- same fail-closed discipline
+     * as TenantAwareDataSource always setting the RLS session variable. A
+     * misconfigured key here means every tenant's vendor/tool credentials
+     * would otherwise be encrypted with either no real secret at all or a
+     * key known from the source tree -- this must never reach a running
+     * deployment silently.
+     */
     public LocalAesGcmCredentialEncryptor(CredentialsProperties properties) {
-        byte[] keyBytes = Base64.getDecoder().decode(properties.localKey());
+        String localKey = properties.localKey();
+        if (PLACEHOLDER_KEY.equals(localKey)) {
+            throw new IllegalStateException(
+                    "app.credentials.local-key is still the placeholder value -- set CREDENTIAL_LOCAL_KEY to a real "
+                            + "base64-encoded 256-bit key before starting this application. Generate one with: "
+                            + "python3 -c \"import os,base64;print(base64.b64encode(os.urandom(32)).decode())\"");
+        }
+
+        byte[] keyBytes;
+        try {
+            keyBytes = Base64.getDecoder().decode(localKey);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "app.credentials.local-key is not valid base64 -- set CREDENTIAL_LOCAL_KEY to a real "
+                            + "base64-encoded 256-bit key.", e);
+        }
         if (keyBytes.length != 32) {
             throw new IllegalStateException(
                     "app.credentials.local-key must decode to exactly 32 bytes (AES-256), got " + keyBytes.length);

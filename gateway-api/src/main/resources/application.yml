@@ -49,11 +49,17 @@ app:
     # Placeholder for the encryption key used to encrypt vendor API tokens at rest.
     # In production this comes from AWS KMS / HashiCorp Vault, never from application.yml directly.
     encryption-key-provider: ${CREDENTIAL_KMS_PROVIDER:local-dev-only}
-    # Base64 AES-256 key used by LocalAesGcmCredentialEncryptor. This default
-    # is fine for local dev ONLY -- override via CREDENTIAL_LOCAL_KEY in any
-    # shared environment. Generate a real one with:
+    # Base64 AES-256 key used by LocalAesGcmCredentialEncryptor to encrypt
+    # every tenant's vendor/tool credentials at rest. Deliberately an
+    # obvious, non-functional placeholder -- NOT a real working key, unlike
+    # an earlier version of this line -- so an environment that forgets to
+    # set CREDENTIAL_LOCAL_KEY fails loudly at startup (see
+    # LocalAesGcmCredentialEncryptor's constructor) instead of silently
+    # encrypting every tenant's secrets with a key sitting in plaintext in
+    # the source tree. Same fail-closed pattern as jwt-secret above.
+    # Generate a real one with:
     #   python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
-    local-key: ${CREDENTIAL_LOCAL_KEY:/3dBhMR8lbAxFJy33RJzEcW0Tuk8Y1jsqxR09zA1R48=}
+    local-key: ${CREDENTIAL_LOCAL_KEY:REPLACE_ME_WITH_A_STRONG_KEY_FROM_VAULT}
   llm:
     # Not the langchain4j-bundled AnthropicChatModelName enum -- see
     # LlmProperties javadoc. Override via env var as Anthropic ships newer

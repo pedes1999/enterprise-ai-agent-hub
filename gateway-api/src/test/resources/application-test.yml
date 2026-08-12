@@ -12,3 +12,13 @@ app:
     # integration tests assert on agent_executions rows directly and must
     # not have a background poller claiming/mutating them concurrently.
     enabled: false
+  credentials:
+    # application.yml's default is now a deliberate non-functional
+    # placeholder (see its comment) that LocalAesGcmCredentialEncryptor
+    # rejects at startup -- @SpringBootTest integration tests that boot the
+    # real Spring context need a real (if test-only) 32-byte key here, or
+    # context loading fails for every one of them. Freshly generated,
+    # committed only because it's test-only and never protects anything
+    # real -- never reuse this value (or copy this pattern) for an actual
+    # deployment's CREDENTIAL_LOCAL_KEY.
+    local-key: Pe2FHA6ZfpQW7AsD8eraRLuBv7gImE4fYZGA+cL/dlw=
