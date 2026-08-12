@@ -50,6 +50,14 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/auth/**", "/actuator/health").permitAll()
                 .requestMatchers("/webhooks/**").permitAll() // signature validation happens in the webhook controller itself
+                // Spring Boot's default error handling forwards any unhandled
+                // exception to /error to render the response. Without this,
+                // that forwarded request re-enters the filter chain as an
+                // unauthenticated request, anyRequest().authenticated() denies
+                // it, and the client sees a bare, misleading 403 instead of
+                // the real error status/body -- masking every uncaught 500
+                // (and anything else) behind "Forbidden".
+                .requestMatchers("/error").permitAll()
                 .anyRequest().authenticated()
             );
 

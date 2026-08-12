@@ -50,6 +50,16 @@ input:focus {
   outline-offset: -1px;
 }
 
+input.invalid {
+  border-color: var(--color-status-failed);
+}
+
+.field-error {
+  color: var(--color-status-failed);
+  font-size: var(--font-size-xs);
+  margin: var(--space-1) 0 0;
+}
+
 button {
   margin-top: var(--space-4);
   padding: var(--space-2) var(--space-4);
