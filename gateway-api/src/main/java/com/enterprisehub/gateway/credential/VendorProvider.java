@@ -6,7 +6,9 @@ import java.util.Optional;
 public enum VendorProvider {
     ANTHROPIC,
     OPENAI,
-    GEMINI;
+    GEMINI,
+    /** Any OpenAI-API-compatible server on the tenant's own machine (Ollama, LM Studio, vLLM, etc.) -- see LlmEngineFactory. No real secret is needed; any non-blank placeholder value is accepted as the token. */
+    LOCAL;
 
     public static Optional<VendorProvider> parse(String value) {
         if (value == null) {

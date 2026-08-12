@@ -11,6 +11,7 @@ class LlmProviderTest {
         assertThat(LlmProvider.parse("anthropic")).contains(LlmProvider.ANTHROPIC);
         assertThat(LlmProvider.parse("OPENAI")).contains(LlmProvider.OPENAI);
         assertThat(LlmProvider.parse("Gemini")).contains(LlmProvider.GEMINI);
+        assertThat(LlmProvider.parse("local")).contains(LlmProvider.LOCAL);
     }
 
     @Test

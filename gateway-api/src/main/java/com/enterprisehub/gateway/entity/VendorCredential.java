@@ -34,7 +34,7 @@ public class VendorCredential {
     private UUID tenantId;
 
     @Column(nullable = false)
-    private String provider; // ANTHROPIC, OPENAI, GEMINI
+    private String provider; // ANTHROPIC, OPENAI, GEMINI, LOCAL
 
     @Column(name = "encrypted_token", nullable = false, columnDefinition = "TEXT")
     private String encryptedToken;

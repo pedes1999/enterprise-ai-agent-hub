@@ -35,7 +35,7 @@ class VendorCredentialTestServiceTest {
         vendorCredentialService = mock(VendorCredentialService.class);
         llmEngineFactory = mock(LlmEngineFactory.class);
         chatModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("claude-sonnet-4-5-20250929");
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", null, null);
         service = new VendorCredentialTestService(repository, vendorCredentialService, llmEngineFactory, properties);
     }
 

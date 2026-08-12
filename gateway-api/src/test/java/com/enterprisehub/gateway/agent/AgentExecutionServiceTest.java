@@ -2,6 +2,7 @@ package com.enterprisehub.gateway.agent;
 
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
+import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.entity.ToolExecution;
@@ -36,7 +37,8 @@ class AgentExecutionServiceTest {
         repository = mock(AgentExecutionRepository.class);
         agentDefinitionRepository = mock(AgentDefinitionRepository.class);
         toolExecutionRepository = mock(ToolExecutionRepository.class);
-        service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5));
+        service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5),
+                new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));

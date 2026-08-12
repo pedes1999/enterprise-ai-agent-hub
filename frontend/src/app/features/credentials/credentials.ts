@@ -25,6 +25,7 @@ export const VENDOR_PROVIDERS: VendorProviderDef[] = [
   { provider: 'ANTHROPIC', label: 'Anthropic', testSupported: true },
   { provider: 'OPENAI', label: 'OpenAI', testSupported: false },
   { provider: 'GEMINI', label: 'Gemini', testSupported: false },
+  { provider: 'LOCAL', label: 'Local (Ollama, LM Studio, vLLM)', testSupported: false },
 ];
 
 export const TOOL_KINDS: ToolKindDef[] = [

@@ -24,13 +24,19 @@ public class SharedExecutionContextFactory {
 
     public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
                                           String modelName, List<AgentTool> tools) {
-        return create(tenantId, executionId, provider, apiKey, modelName, tools, null);
+        return create(tenantId, executionId, provider, apiKey, modelName, tools, null, null);
     }
 
     /** systemPrompt: see SharedExecutionContext's javadoc -- an AgentDefinition's persona/instructions, nullable. */
     public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
                                           String modelName, List<AgentTool> tools, String systemPrompt) {
-        ChatLanguageModel chatModel = llmEngineFactory.create(provider, apiKey, modelName);
+        return create(tenantId, executionId, provider, apiKey, modelName, tools, systemPrompt, null);
+    }
+
+    /** baseUrl: only meaningful for LlmProvider.LOCAL -- see LlmEngineFactory. Null for every other provider. */
+    public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
+                                          String modelName, List<AgentTool> tools, String systemPrompt, String baseUrl) {
+        ChatLanguageModel chatModel = llmEngineFactory.create(provider, apiKey, modelName, baseUrl);
         return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt);
     }
 }

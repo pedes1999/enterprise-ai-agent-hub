@@ -43,7 +43,7 @@ public class VendorCredentialTestService {
     public CredentialTestResult test(UUID tenantId, String providerValue) {
         VendorProvider provider = VendorProvider.parse(providerValue)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.BAD_REQUEST,
-                        "provider must be one of ANTHROPIC, OPENAI, GEMINI"));
+                        "provider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
         if (provider != VendorProvider.ANTHROPIC) {
             return new CredentialTestResult(false, "Test connection is not supported for " + provider.name() + " yet.");

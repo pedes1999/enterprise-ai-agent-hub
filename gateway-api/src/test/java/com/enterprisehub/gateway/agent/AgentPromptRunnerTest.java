@@ -62,7 +62,7 @@ class AgentPromptRunnerTest {
         vendorCredentialService = mock(VendorCredentialService.class);
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("claude-3-5-sonnet-20240620");
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
         sandboxClient = mock(SandboxClient.class);
         ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
         credentialResolver = mock(CredentialResolver.class);
@@ -135,7 +135,7 @@ class AgentPromptRunnerTest {
      */
     private void stubContextFactory(String executionId) {
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(executionId), eq(LlmProvider.ANTHROPIC),
-                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any()))
+                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);

@@ -99,7 +99,7 @@ public class AgentPromptRunner {
     }
 
     public String modelName() {
-        return llmProperties.anthropicModelName();
+        return llmProperties.modelName();
     }
 
     /**
@@ -125,8 +125,9 @@ public class AgentPromptRunner {
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
                                                       String repositoryUrl, Map<String, String> inputParameters) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
-        String apiKey = resolveApiKey(tenantId);
-        String modelName = llmProperties.anthropicModelName();
+        LlmProvider provider = llmProperties.resolvedProvider();
+        String apiKey = resolveApiKey(tenantId, provider);
+        String modelName = llmProperties.modelName();
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
         String assembledPrompt = assemblePrompt(repositoryUrl, resolvedInput, prompt);
 
@@ -134,7 +135,7 @@ public class AgentPromptRunner {
         try {
             List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver);
             SharedExecutionContext context = sharedExecutionContextFactory.create(
-                    tenantId.toString(), executionId, LlmProvider.ANTHROPIC, apiKey, modelName, tools, definition.getSystemPrompt());
+                    tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(), llmProperties.baseUrl());
 
             return context.chat(assembledPrompt);
         } finally {
@@ -201,11 +202,11 @@ public class AgentPromptRunner {
         return new SandboxSpec(tenantId.toString(), executionId, credentials, SESSION_MAX_LIFETIME, SESSION_MAX_OUTPUT_BYTES);
     }
 
-    private String resolveApiKey(UUID tenantId) {
-        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, LlmProvider.ANTHROPIC.name())
+    private String resolveApiKey(UUID tenantId, LlmProvider provider) {
+        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST,
-                        "No active ANTHROPIC credential configured for this tenant -- PUT /vendor-credentials first"));
+                        "No active " + provider + " credential configured for this tenant -- PUT /vendor-credentials first"));
         return vendorCredentialService.decryptToken(credential);
     }
 }

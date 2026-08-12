@@ -48,7 +48,7 @@ class AgentPingServiceTest {
         llmEngineFactory = mock(LlmEngineFactory.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("claude-3-5-sonnet-20240620");
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
         when(agentPromptRunner.modelName()).thenReturn("claude-3-5-sonnet-20240620");
         service = new AgentPingService(vendorCredentialRepository, vendorCredentialService, llmEngineFactory,
                 properties, agentPromptRunner);
@@ -70,7 +70,7 @@ class AgentPingServiceTest {
         VendorCredential credential = activeCredential();
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
-        when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620"))
+        when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620", null))
                 .thenReturn(chatLanguageModel);
         when(chatLanguageModel.generate("Hello")).thenReturn("Hi there!");
 
@@ -86,13 +86,13 @@ class AgentPingServiceTest {
         VendorCredential credential = activeCredential();
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
-        when(llmEngineFactory.create(any(), any(), any())).thenReturn(chatLanguageModel);
+        when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatLanguageModel);
         when(chatLanguageModel.generate(any(String.class))).thenReturn("ok");
 
         service.ping(tenantId, "Hello");
 
-        verify(llmEngineFactory).create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620");
-        verify(llmEngineFactory, never()).create(any(), eq("ciphertext"), any());
+        verify(llmEngineFactory).create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620", null);
+        verify(llmEngineFactory, never()).create(any(), eq("ciphertext"), any(), any());
     }
 
     @Test
@@ -134,12 +134,12 @@ class AgentPingServiceTest {
         VendorCredential credential = activeCredential();
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
-        when(llmEngineFactory.create(any(), any(), any())).thenReturn(chatLanguageModel);
+        when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatLanguageModel);
         when(chatLanguageModel.generate(any(String.class))).thenThrow(new RuntimeException("401 unauthorized from Anthropic"));
 
         assertThatThrownBy(() -> service.ping(tenantId, "Hello"))
                 .isInstanceOf(AgentException.class)
-                .hasMessageContaining("Anthropic API call failed")
+                .hasMessageContaining("ANTHROPIC call failed")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
     }
 

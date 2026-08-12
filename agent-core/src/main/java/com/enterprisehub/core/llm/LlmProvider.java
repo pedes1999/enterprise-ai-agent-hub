@@ -12,7 +12,9 @@ import java.util.Optional;
 public enum LlmProvider {
     ANTHROPIC,
     OPENAI,
-    GEMINI;
+    GEMINI,
+    /** Any OpenAI-API-compatible server running on the caller's own machine (Ollama, LM Studio, vLLM, etc.) -- see LlmEngineFactory. */
+    LOCAL;
 
     public static Optional<LlmProvider> parse(String value) {
         if (value == null) {

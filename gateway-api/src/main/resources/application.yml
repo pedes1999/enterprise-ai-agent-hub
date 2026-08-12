@@ -77,10 +77,20 @@ app:
     #   python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
     local-key: ${CREDENTIAL_LOCAL_KEY:REPLACE_ME_WITH_A_STRONG_KEY_FROM_VAULT}
   llm:
+    # Whole-instance switch between ANTHROPIC (default) and LOCAL (any
+    # OpenAI-compatible server on this machine -- Ollama, LM Studio, vLLM).
+    # See LlmProperties javadoc. Not per-tenant/per-execution.
+    provider: ${LLM_PROVIDER:ANTHROPIC}
     # Not the langchain4j-bundled AnthropicChatModelName enum -- see
     # LlmProperties javadoc. Override via env var as Anthropic ships newer
     # models; the API accepts any valid model id string.
     anthropic-model-name: ${ANTHROPIC_MODEL_NAME:claude-sonnet-4-5-20250929}
+    # Only read when provider=LOCAL. Must match a model already pulled in
+    # your local server (e.g. `ollama pull llama3.1`).
+    local-model-name: ${LLM_LOCAL_MODEL_NAME:llama3.1}
+    # Only read when provider=LOCAL. Defaults to Ollama's standard address
+    # if left unset -- see LlmEngineFactory.
+    local-base-url: ${LLM_LOCAL_BASE_URL:http://localhost:11434/v1}
   sandbox:
     # Points at agent-runtime/sidecar (see its README) -- must be running
     # separately (node --env-file=.env server.js, or the Dockerfile) for

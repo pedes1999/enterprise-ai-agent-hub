@@ -36,7 +36,7 @@ public class VendorCredentialService {
     public VendorCredentialSummary put(UUID tenantId, CreateVendorCredentialRequest request) {
         VendorProvider provider = VendorProvider.parse(request.provider())
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.BAD_REQUEST,
-                        "provider must be one of ANTHROPIC, OPENAI, GEMINI"));
+                        "provider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
         if (request.token() == null || request.token().isBlank()) {
             throw new VendorCredentialException(HttpStatus.BAD_REQUEST, "token is required");
@@ -65,7 +65,7 @@ public class VendorCredentialService {
     public void delete(UUID tenantId, String providerValue) {
         VendorProvider provider = VendorProvider.parse(providerValue)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.BAD_REQUEST,
-                        "provider must be one of ANTHROPIC, OPENAI, GEMINI"));
+                        "provider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
         VendorCredential credential = repository.findByTenantIdAndProvider(tenantId, provider.name())
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.NOT_FOUND,

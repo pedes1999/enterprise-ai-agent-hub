@@ -50,18 +50,19 @@ public class AgentPingService {
 
     public AgentPingResponse ping(UUID tenantId, String prompt) {
         validatePrompt(prompt);
-        String apiKey = resolveApiKey(tenantId);
-        String modelName = llmProperties.anthropicModelName();
-        ChatLanguageModel model = llmEngineFactory.create(LlmProvider.ANTHROPIC, apiKey, modelName);
+        LlmProvider provider = llmProperties.resolvedProvider();
+        String apiKey = resolveApiKey(tenantId, provider);
+        String modelName = llmProperties.modelName();
+        ChatLanguageModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl());
 
         String reply;
         try {
             reply = model.generate(prompt);
         } catch (RuntimeException e) {
-            throw new AgentException(HttpStatus.BAD_GATEWAY, "Anthropic API call failed: " + e.getMessage());
+            throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + e.getMessage());
         }
 
-        return new AgentPingResponse(LlmProvider.ANTHROPIC.name(), modelName, reply);
+        return new AgentPingResponse(provider.name(), modelName, reply);
     }
 
     public AgentToolPingResponse pingWithTools(UUID tenantId, String prompt, String agentSlug) {
@@ -80,10 +81,10 @@ public class AgentPingService {
         } catch (AgentException e) {
             throw e; // already the right status (e.g. unknown agent, no credential) -- don't relabel it as a provider failure
         } catch (RuntimeException e) {
-            throw new AgentException(HttpStatus.BAD_GATEWAY, "Anthropic API call failed: " + e.getMessage());
+            throw new AgentException(HttpStatus.BAD_GATEWAY, llmProperties.resolvedProvider() + " call failed: " + e.getMessage());
         }
 
-        return new AgentToolPingResponse(LlmProvider.ANTHROPIC.name(), agentPromptRunner.modelName(), result.reply(), result.toolWasUsed(), resolvedSlug);
+        return new AgentToolPingResponse(llmProperties.resolvedProvider().name(), agentPromptRunner.modelName(), result.reply(), result.toolWasUsed(), resolvedSlug);
     }
 
     private void validatePrompt(String prompt) {
@@ -92,14 +93,14 @@ public class AgentPingService {
         }
     }
 
-    private String resolveApiKey(UUID tenantId) {
+    private String resolveApiKey(UUID tenantId, LlmProvider provider) {
         if (tenantId == null) {
             throw new AgentException(HttpStatus.BAD_REQUEST, "tenantId is required");
         }
-        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, LlmProvider.ANTHROPIC.name())
+        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST,
-                        "No active ANTHROPIC credential configured for this tenant -- PUT /vendor-credentials first"));
+                        "No active " + provider + " credential configured for this tenant -- PUT /vendor-credentials first"));
         return vendorCredentialService.decryptToken(credential);
     }
 }
