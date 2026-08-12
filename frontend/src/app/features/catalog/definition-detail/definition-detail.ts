@@ -16,6 +16,7 @@ export class DefinitionDetail implements OnInit {
   readonly definition = signal<AgentDefinitionDetail | null>(null);
   readonly loading = signal(true);
   readonly notFound = signal(false);
+  readonly loadError = signal<string | null>(null);
 
   ngOnInit(): void {
     const slug = this.route.snapshot.paramMap.get('slug')!;
@@ -24,8 +25,12 @@ export class DefinitionDetail implements OnInit {
         this.definition.set(detail);
         this.loading.set(false);
       },
-      error: () => {
-        this.notFound.set(true);
+      error: (err) => {
+        if (err.status === 404) {
+          this.notFound.set(true);
+        } else {
+          this.loadError.set(err.error?.message ?? 'Failed to load this agent.');
+        }
         this.loading.set(false);
       },
     });

@@ -34,15 +34,18 @@ describe('Catalog', () => {
     expect(text).toContain('code-reviewer');
   });
 
-  it('shows an empty state and stops loading on error', () => {
+  it('shows an error banner and stops loading on error', () => {
     const fixture = TestBed.createComponent(Catalog);
     fixture.detectChanges();
 
     httpMock
       .expectOne(`${environment.apiBaseUrl}/agents/definitions`)
-      .flush({ message: 'error' }, { status: 500, statusText: 'Server Error' });
+      .flush({ message: 'Failed to load.' }, { status: 500, statusText: 'Server Error' });
+    fixture.detectChanges();
 
     expect(fixture.componentInstance.loading()).toBe(false);
     expect(fixture.componentInstance.definitions().length).toBe(0);
+    expect(fixture.componentInstance.loadError()).toBe('Failed to load.');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Failed to load.');
   });
 });

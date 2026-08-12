@@ -64,7 +64,7 @@ describe('Credentials', () => {
     httpMock.expectNone(`${environment.apiBaseUrl}/vendor-credentials`);
   });
 
-  it('tests a vendor credential and stores the result', () => {
+  it('tests a vendor credential and stores a success message', () => {
     const fixture = createComponent();
     const component = fixture.componentInstance;
 
@@ -77,10 +77,41 @@ describe('Credentials', () => {
 
     httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([activeAnthropic]);
 
-    expect(component.testResults['ANTHROPIC']).toEqual({ valid: true, message: 'Anthropic credential is valid.' });
+    expect(component.vendorMessages['ANTHROPIC']).toEqual({ kind: 'success', text: 'Anthropic credential is valid.' });
   });
 
-  it('removes a tool credential and refreshes the list', () => {
+  it('records a failed test-connection result as an error message', () => {
+    const fixture = createComponent();
+    const component = fixture.componentInstance;
+
+    component.testVendorCredential('ANTHROPIC');
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/vendor-credentials/test`)
+      .flush({ valid: false, message: 'Anthropic rejected this credential.' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([activeAnthropic]);
+
+    expect(component.vendorMessages['ANTHROPIC']).toEqual({ kind: 'error', text: 'Anthropic rejected this credential.' });
+  });
+
+  it('shows an error message when a test-connection request itself fails', () => {
+    const fixture = createComponent();
+    const component = fixture.componentInstance;
+
+    component.testVendorCredential('ANTHROPIC');
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/vendor-credentials/test`)
+      .flush({ message: 'No active credential stored for provider ANTHROPIC' }, { status: 404, statusText: 'Not Found' });
+
+    expect(component.vendorMessages['ANTHROPIC']).toEqual({
+      kind: 'error',
+      text: 'No active credential stored for provider ANTHROPIC',
+    });
+    expect(component.testingKey()).toBeNull();
+  });
+
+  it('removes a tool credential, shows a success message, and refreshes the list', () => {
     const fixture = createComponent();
     const component = fixture.componentInstance;
 
@@ -90,5 +121,19 @@ describe('Credentials', () => {
     httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
 
     expect(component.toolSummary('GITHUB')).toBeUndefined();
+    expect(component.toolMessages['GITHUB']).toEqual({ kind: 'success', text: 'Credential removed.' });
+  });
+
+  it('shows a top-level error banner when the initial load fails', () => {
+    const fixture = TestBed.createComponent(Credentials);
+    fixture.detectChanges();
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/vendor-credentials`)
+      .flush({ message: 'Access denied' }, { status: 403, statusText: 'Forbidden' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
+
+    expect(fixture.componentInstance.loadError()).toBe('Access denied');
+    expect(fixture.componentInstance.loading()).toBe(false);
   });
 });

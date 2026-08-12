@@ -2,9 +2,11 @@
   <a class="back" routerLink="/agents">← Back to catalog</a>
 
   @if (loading()) {
-    <p class="empty">Loading…</p>
+    <div class="loading-state"><span class="spinner"></span> Loading…</div>
   } @else if (notFound()) {
     <p class="empty">This agent could not be found.</p>
+  } @else if (loadError()) {
+    <div class="banner banner-error" role="alert">{{ loadError() }}</div>
   } @else if (definition(); as def) {
     <h1>{{ def.name }}</h1>
     <p class="slug mono">{{ def.slug }}</p>

@@ -95,4 +95,18 @@ describe('History', () => {
 
     httpMock.expectNone((r) => r.url === `${environment.apiBaseUrl}/agents/executions` && r.params.get('page') === '1');
   });
+
+  it('shows an error banner when loading fails', () => {
+    const fixture = TestBed.createComponent(History);
+    fixture.detectChanges();
+
+    httpMock
+      .expectOne((r) => r.url === `${environment.apiBaseUrl}/agents/executions`)
+      .flush({ message: 'Failed to load.' }, { status: 500, statusText: 'Server Error' });
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.loadError()).toBe('Failed to load.');
+    expect(fixture.componentInstance.loading()).toBe(false);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Failed to load.');
+  });
 });

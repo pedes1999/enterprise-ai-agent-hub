@@ -13,7 +13,9 @@
   </div>
 
   @if (loading()) {
-    <p class="empty">Loading…</p>
+    <div class="loading-state"><span class="spinner"></span> Loading executions…</div>
+  } @else if (loadError()) {
+    <div class="banner banner-error" role="alert">{{ loadError() }}</div>
   } @else if (page(); as p) {
     @if (p.content.length === 0) {
       <p class="empty">No executions found.</p>

@@ -77,7 +77,7 @@ describe('Team', () => {
     expect(fixture.componentInstance.newEmail).toBe('');
   });
 
-  it('changeRole() PATCHes the new role and refreshes', () => {
+  it('changeRole() PATCHes the new role, refreshes, and shows a success message', () => {
     const fixture = createComponent();
     fixture.componentInstance.changeRole(devUser, 'ADMIN');
 
@@ -87,6 +87,21 @@ describe('Team', () => {
     req.flush({ ...devUser, role: 'ADMIN' });
 
     httpMock.expectOne(`${environment.apiBaseUrl}/users`).flush([adminUser, { ...devUser, role: 'ADMIN' }]);
+
+    expect(fixture.componentInstance.rowMessages['user-2']).toEqual({ kind: 'success', text: 'Role updated to ADMIN.' });
+    expect(fixture.componentInstance.pendingUserId()).toBeNull();
+  });
+
+  it('changeRole() shows an error message and does not refresh on failure', () => {
+    const fixture = createComponent();
+    fixture.componentInstance.changeRole(devUser, 'ADMIN');
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/users/user-2/role`)
+      .flush({ message: 'Cannot change your own role.' }, { status: 400, statusText: 'Bad Request' });
+
+    expect(fixture.componentInstance.rowMessages['user-2']).toEqual({ kind: 'error', text: 'Cannot change your own role.' });
+    expect(fixture.componentInstance.pendingUserId()).toBeNull();
   });
 
   it('removeUser() DELETEs the user and refreshes', () => {
@@ -95,5 +110,30 @@ describe('Team', () => {
 
     httpMock.expectOne(`${environment.apiBaseUrl}/users/user-2`).flush(null);
     httpMock.expectOne(`${environment.apiBaseUrl}/users`).flush([adminUser]);
+
+    expect(fixture.componentInstance.pendingUserId()).toBeNull();
+  });
+
+  it('removeUser() shows an error message on failure', () => {
+    const fixture = createComponent();
+    fixture.componentInstance.removeUser(devUser);
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/users/user-2`)
+      .flush({ message: 'Failed to remove user.' }, { status: 500, statusText: 'Server Error' });
+
+    expect(fixture.componentInstance.rowMessages['user-2']).toEqual({ kind: 'error', text: 'Failed to remove user.' });
+  });
+
+  it('shows a top-level error banner when the initial load fails', () => {
+    const fixture = TestBed.createComponent(Team);
+    fixture.detectChanges();
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/users`)
+      .flush({ message: 'Access denied' }, { status: 403, statusText: 'Forbidden' });
+
+    expect(fixture.componentInstance.loadError()).toBe('Access denied');
+    expect(fixture.componentInstance.loading()).toBe(false);
   });
 });

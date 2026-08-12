@@ -50,16 +50,16 @@ h1 {
   color: var(--color-text-muted);
 }
 
-.success {
+.banner {
   margin-top: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-status-succeeded);
 }
 
-.error {
-  margin-top: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-status-failed);
+.message-row td {
+  padding-top: 0;
+}
+
+.message-row .banner {
+  margin: 0;
 }
 
 button {

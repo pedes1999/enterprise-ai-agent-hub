@@ -14,6 +14,7 @@ export class Catalog implements OnInit {
 
   readonly definitions = signal<AgentDefinitionSummary[]>([]);
   readonly loading = signal(true);
+  readonly loadError = signal<string | null>(null);
 
   ngOnInit(): void {
     this.agentService.listDefinitions().subscribe({
@@ -21,7 +22,10 @@ export class Catalog implements OnInit {
         this.definitions.set(list);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (err) => {
+        this.loadError.set(err.error?.message ?? 'Failed to load the agent catalog.');
+        this.loading.set(false);
+      },
     });
   }
 }

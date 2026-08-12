@@ -21,20 +21,26 @@
         </select>
       </div>
       <button type="submit" [disabled]="creating() || !newEmail || !newName">
-        {{ creating() ? 'Inviting…' : 'Invite' }}
+        @if (creating()) {
+          <span class="spinner"></span> Inviting…
+        } @else {
+          Invite
+        }
       </button>
     </div>
     <p class="hint">A temporary password is generated and emailed automatically — it is never shown here.</p>
     @if (createdMessage()) {
-      <p class="success">{{ createdMessage() }}</p>
+      <div class="banner banner-success">{{ createdMessage() }}</div>
     }
     @if (createError()) {
-      <p class="error">{{ createError() }}</p>
+      <div class="banner banner-error" role="alert">{{ createError() }}</div>
     }
   </form>
 
   @if (loading()) {
-    <p class="empty">Loading…</p>
+    <div class="loading-state"><span class="spinner"></span> Loading team members…</div>
+  } @else if (loadError()) {
+    <div class="banner banner-error" role="alert">{{ loadError() }}</div>
   } @else {
     <table class="team-table">
       <thead>
@@ -52,19 +58,41 @@
             <td>{{ user.name }}</td>
             <td class="mono">{{ user.email }}</td>
             <td>
-              <select [ngModel]="user.role" (ngModelChange)="changeRole(user, $event)">
+              <select
+                [ngModel]="user.role"
+                (ngModelChange)="changeRole(user, $event)"
+                [disabled]="pendingUserId() === user.id"
+              >
                 <option value="ADMIN">Admin</option>
                 <option value="DEVELOPER">Developer</option>
                 <option value="READONLY">Read only</option>
               </select>
+              @if (pendingUserId() === user.id) {
+                <span class="spinner"></span>
+              }
             </td>
             <td class="mono">{{ user.createdAt }}</td>
             <td>
               @if (user.email !== currentUserEmail()) {
-                <button type="button" class="danger" (click)="removeUser(user)">Remove</button>
+                <button type="button" class="danger" (click)="removeUser(user)" [disabled]="pendingUserId() === user.id">
+                  @if (pendingUserId() === user.id) {
+                    <span class="spinner"></span> Removing…
+                  } @else {
+                    Remove
+                  }
+                </button>
               }
             </td>
           </tr>
+          @if (rowMessages[user.id]; as msg) {
+            <tr class="message-row">
+              <td colspan="5">
+                <div class="banner" [class.banner-success]="msg.kind === 'success'" [class.banner-error]="msg.kind === 'error'">
+                  {{ msg.text }}
+                </div>
+              </td>
+            </tr>
+          }
         }
       </tbody>
     </table>

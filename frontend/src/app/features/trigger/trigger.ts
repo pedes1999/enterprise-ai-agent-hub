@@ -27,6 +27,8 @@ export class Trigger implements OnInit, OnDestroy {
 
   readonly slug = this.route.snapshot.paramMap.get('slug')!;
   readonly definition = signal<AgentDefinitionDetail | null>(null);
+  readonly definitionLoading = signal(true);
+  readonly definitionError = signal<string | null>(null);
   readonly usage = signal<ExecutionUsage | null>(null);
 
   prompt = '';
@@ -36,10 +38,21 @@ export class Trigger implements OnInit, OnDestroy {
   readonly submitting = signal(false);
   readonly errorKind = signal<TriggerErrorKind>(null);
   readonly errorMessage = signal<string | null>(null);
+  readonly confirmationMessage = signal<string | null>(null);
   readonly execution = signal<AgentExecutionStatusResponse | null>(null);
+  readonly pollError = signal<string | null>(null);
 
   ngOnInit(): void {
-    this.agentService.getDefinition(this.slug).subscribe((detail) => this.definition.set(detail));
+    this.agentService.getDefinition(this.slug).subscribe({
+      next: (detail) => {
+        this.definition.set(detail);
+        this.definitionLoading.set(false);
+      },
+      error: (err) => {
+        this.definitionError.set(err.error?.message ?? 'Failed to load this agent.');
+        this.definitionLoading.set(false);
+      },
+    });
     this.refreshUsage();
   }
 
@@ -48,7 +61,7 @@ export class Trigger implements OnInit, OnDestroy {
   }
 
   private refreshUsage(): void {
-    this.agentService.getUsage().subscribe((usage) => this.usage.set(usage));
+    this.agentService.getUsage().subscribe({ next: (usage) => this.usage.set(usage), error: () => {} });
   }
 
   addParamRow(): void {
@@ -63,7 +76,10 @@ export class Trigger implements OnInit, OnDestroy {
     this.submitting.set(true);
     this.errorKind.set(null);
     this.errorMessage.set(null);
+    this.confirmationMessage.set(null);
+    this.pollError.set(null);
     this.execution.set(null);
+    this.pollSubscription?.unsubscribe();
 
     const inputParameters: Record<string, string> = {};
     for (const row of this.paramRows) {
@@ -82,6 +98,7 @@ export class Trigger implements OnInit, OnDestroy {
       .subscribe({
         next: (accepted) => {
           this.submitting.set(false);
+          this.confirmationMessage.set(`Execution ${accepted.executionId} queued.`);
           this.refreshUsage();
           this.startPolling(accepted.executionId);
         },
@@ -102,12 +119,14 @@ export class Trigger implements OnInit, OnDestroy {
   }
 
   private startPolling(executionId: string): void {
-    this.pollSubscription?.unsubscribe();
     this.pollSubscription = timer(0, POLL_INTERVAL_MS)
       .pipe(
         switchMap(() => this.agentService.getExecution(executionId)),
         takeWhile((exec) => exec.status === 'QUEUED' || exec.status === 'RUNNING', true),
       )
-      .subscribe((exec) => this.execution.set(exec));
+      .subscribe({
+        next: (exec) => this.execution.set(exec),
+        error: (err) => this.pollError.set(err.error?.message ?? 'Lost connection while checking execution status.'),
+      });
   }
 }

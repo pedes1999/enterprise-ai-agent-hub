@@ -76,6 +76,65 @@ describe('Trigger', () => {
     const fixture = createComponent();
     expect(fixture.componentInstance.definition()?.name).toBe('Code Reviewer');
     expect(fixture.componentInstance.usage()).toEqual({ active: 1, limit: 5 });
+    expect(fixture.componentInstance.definitionLoading()).toBe(false);
+  });
+
+  it('shows an error banner when the agent definition fails to load', () => {
+    TestBed.configureTestingModule({
+      imports: [Trigger],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        {
+          provide: ActivatedRoute,
+          useValue: { snapshot: { paramMap: convertToParamMap({ slug: 'unknown-slug' }) } },
+        },
+      ],
+    });
+    httpMock = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(Trigger);
+    fixture.detectChanges();
+
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/agents/definitions/unknown-slug`)
+      .flush({ message: 'Unknown or inactive agent: unknown-slug' }, { status: 400, statusText: 'Bad Request' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 0, limit: 5 });
+
+    expect(fixture.componentInstance.definitionError()).toBe('Unknown or inactive agent: unknown-slug');
+    expect(fixture.componentInstance.definitionLoading()).toBe(false);
+  });
+
+  it('shows a confirmation banner immediately when the execution is accepted', () => {
+    const fixture = createComponent();
+    fixture.componentInstance.submit();
+
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`).flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 2, limit: 5 });
+
+    expect(fixture.componentInstance.confirmationMessage()).toBe('Execution exec-1 queued.');
+  });
+
+  it('shows an error banner and stops polling if a poll request fails', async () => {
+    vi.useFakeTimers();
+    const fixture = createComponent();
+    fixture.componentInstance.submit();
+
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`).flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 2, limit: 5 });
+
+    await vi.advanceTimersByTimeAsync(0);
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1`)
+      .flush({ message: 'No execution with id exec-1' }, { status: 404, statusText: 'Not Found' });
+
+    expect(fixture.componentInstance.pollError()).toBe('No execution with id exec-1');
+
+    // The poll observable errored out (terminated), so no further requests should fire.
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3);
+    httpMock.expectNone(`${environment.apiBaseUrl}/agents/executions/exec-1`);
+
+    fixture.destroy();
   });
 
   it('polls at the configured interval, applies each update, and stops on a terminal status', async () => {

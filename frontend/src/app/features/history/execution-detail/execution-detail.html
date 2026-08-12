@@ -2,7 +2,9 @@
   <a class="back" routerLink="/executions">← Back to history</a>
 
   @if (loading()) {
-    <p class="empty">Loading…</p>
+    <div class="loading-state"><span class="spinner"></span> Loading execution…</div>
+  } @else if (loadError()) {
+    <div class="banner banner-error" role="alert">{{ loadError() }}</div>
   } @else if (execution(); as exec) {
     <h1 class="mono">{{ exec.id }}</h1>
     <p>
@@ -43,13 +45,15 @@
     @if (exec.errorMessage) {
       <section>
         <h2>Error</h2>
-        <p class="error">{{ exec.errorMessage }}</p>
+        <div class="banner banner-error" role="alert">{{ exec.errorMessage }}</div>
       </section>
     }
 
     <section>
       <h2>Tool-call trace</h2>
-      @if (toolExecutions().length === 0) {
+      @if (traceError()) {
+        <div class="banner banner-error" role="alert">{{ traceError() }}</div>
+      } @else if (toolExecutions().length === 0) {
         <p class="empty">No tools were called during this execution.</p>
       } @else {
         <table class="trace-table">

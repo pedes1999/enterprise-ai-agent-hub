@@ -3,7 +3,9 @@
   <p class="subtitle">Browse the agents available to this organization.</p>
 
   @if (loading()) {
-    <p class="empty">Loading…</p>
+    <div class="loading-state"><span class="spinner"></span> Loading agents…</div>
+  } @else if (loadError()) {
+    <div class="banner banner-error" role="alert">{{ loadError() }}</div>
   } @else if (definitions().length === 0) {
     <p class="empty">No agents are configured yet.</p>
   } @else {

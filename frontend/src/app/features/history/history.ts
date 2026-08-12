@@ -17,6 +17,7 @@ export class History implements OnInit {
 
   readonly page = signal<PagedModel<AgentExecutionStatusResponse> | null>(null);
   readonly loading = signal(true);
+  readonly loadError = signal<string | null>(null);
   readonly currentPage = signal(0);
   statusFilter: ExecutionStatus | '' = '';
 
@@ -26,12 +27,16 @@ export class History implements OnInit {
 
   private load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.agentService.listExecutions(this.currentPage(), PAGE_SIZE, this.statusFilter || undefined).subscribe({
       next: (result) => {
         this.page.set(result);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (err) => {
+        this.loadError.set(err.error?.message ?? 'Failed to load execution history.');
+        this.loading.set(false);
+      },
     });
   }
 
