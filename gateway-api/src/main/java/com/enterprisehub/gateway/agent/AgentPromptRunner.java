@@ -118,7 +118,7 @@ public class AgentPromptRunner {
     /**
      * repositoryUrl/inputParameters are both optional and additive -- see
      * TriggerAgentExecutionRequest's javadoc. An AgentDefinition with no
-     * inputSourceType (general-assistant, coding-agent today) ignores them
+     * inputSourceType (general-assistant, ticket-resolver today) ignores them
      * entirely: assemblePrompt() reduces to exactly `prompt`, byte-identical
      * to this method's behavior before either parameter existed.
      */

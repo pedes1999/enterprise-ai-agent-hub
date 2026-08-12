@@ -360,7 +360,7 @@ one call.
 **6a. The enqueue request returns immediately, before any LLM call happens**
 
 ```
-POST /agents/execute  { "prompt": "...", "agentSlug": "coding-agent" }
+POST /agents/execute  { "prompt": "...", "agentSlug": "ticket-resolver" }
  -> JwtAuthFilter / TenantResolvingFilter (same as any request, see §3 step 1)
  -> AgentExecutionController.execute(principal, request)
       validates prompt is non-blank

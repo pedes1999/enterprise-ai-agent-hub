@@ -38,11 +38,16 @@ public class ToolCallingChatEngine {
      * How many rounds of "model requests tools -> we run them -> feed
      * results back" this allows before forcing a final text-only answer.
      * A simple single-step tool use (e.g. "what time is it") finishes in
-     * round 1; a real coding task (clone, read, edit, verify) needs
-     * several. Chosen as a cost/safety bound, not a measured requirement --
-     * revisit if real tasks start hitting it.
+     * round 1. A real ticket-to-PR task (clone, explore, read, write,
+     * open_pull_request) alone needs ~5; ticket-resolver's system prompt
+     * additionally allows one corrected attempt if open_pull_request
+     * reports the test run failed, which costs a read/write/retry cycle
+     * on top of that -- 6 was measured too tight for that combined shape
+     * (the cap would hit mid-retry, forcing a text-only answer with no
+     * tool calls left rather than a real PR or a clear stop reason), so
+     * this leaves real headroom instead of the exact minimum.
      */
-    static final int MAX_TOOL_ROUNDS = 6;
+    static final int MAX_TOOL_ROUNDS = 14;
 
     private final ChatLanguageModel chatModel;
     private final Map<String, AgentTool> toolsByName;

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "653a9bdb-2fe6-4878-aadc-13f663481920",
     "name": "Enterprise AI Agent Hub - Gateway API",
-    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + multi-round tool-calling + agent/tool catalog + pull-request delivery + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption (GIT + GITHUB kinds), LLM ping + tool-calling, real sandboxed shell command/git-clone/read-file/write-file execution, durable async agent execution, the agent catalog) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone/read-file/write-file requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\ncoding-agent can now also open a real pull request via open_pull_request (commit, push, open a PR -- gated on a mandatory testCommand the tool re-verifies itself before doing anything, see its javadoc). That request is NOT included in this collection since it has a real, visible side effect on an actual GitHub repo and needs a real GITHUB tool credential -- see the 'Store GitHub Credential' request in the Tool Credentials folder for the encrypted-storage half of it, and 'List Agent Catalog' below for confirming coding-agent has the tool available.\n\nAgents are now named entries in a catalog (agentSlug), not a fixed hardcoded tool list -- requests that need real sandboxed tools explicitly pass agentSlug: 'coding-agent' (see 'List Agent Catalog' for the full catalog); requests that omit agentSlug get the default 'general-assistant', which deliberately has NO sandboxed tools at all (see 'General Assistant Correctly Has No Git Access').\n\nThe 'Multi-Step' request chains git_clone -> read_file -> write_file -> run_shell_command in one prompt -- it's the one that actually proves the persistent per-execution sandbox (every sandboxed tool call in that request shares one real sandbox instead of each getting its own empty one) and the bounded multi-round tool-calling loop (ToolCallingChatEngine keeps going instead of stopping after one round) both work end to end, not just individually.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
+    "description": "Covers every endpoint built through the agent-runtime sandbox + git integration + multi-round tool-calling + agent/tool catalog + pull-request delivery + async job queue (auth/register+login, user management + RBAC, platform API keys, vendor credential encryption, tool credential encryption (GIT + GITHUB kinds), LLM ping + tool-calling, real sandboxed shell command/git-clone/read-file/write-file execution, durable async agent execution, the agent catalog) plus cross-tenant isolation checks. Run the whole collection top-to-bottom via the Collection Runner -- requests are ordered so variables (tokens, ids) flow from earlier requests into later ones. Re-running the full collection is safe; tenant slugs are regenerated each run.\n\nThe 'Agents' folder makes REAL calls to the Anthropic API (costs real credits -- set the collectionVariable 'anthropicApiKey' to a real key before running it, or expect those requests to fail with 502) AND real E2B sandbox executions via the sandbox sidecar (agent-runtime/sidecar/ must be running locally -- see its README -- or the shell-command/git-clone/read-file/write-file requests will fail with 502 too). Both failures are valid, testable outcomes if you haven't set those up. The git clone request targets a public repo, so no tool credential is required for it to succeed.\n\nticket-resolver can now also open a real pull request via open_pull_request (commit, push, open a PR -- gated on a mandatory testCommand the tool re-verifies itself before doing anything, see its javadoc). That request is NOT included in this collection since it has a real, visible side effect on an actual GitHub repo and needs a real GITHUB tool credential -- see the 'Store GitHub Credential' request in the Tool Credentials folder for the encrypted-storage half of it, and 'List Agent Catalog' below for confirming ticket-resolver has the tool available.\n\nAgents are now named entries in a catalog (agentSlug), not a fixed hardcoded tool list -- requests that need real sandboxed tools explicitly pass agentSlug: 'ticket-resolver' (see 'List Agent Catalog' for the full catalog); requests that omit agentSlug get the default 'general-assistant', which deliberately has NO sandboxed tools at all (see 'General Assistant Correctly Has No Git Access').\n\nThe 'Multi-Step' request chains git_clone -> read_file -> write_file -> run_shell_command in one prompt -- it's the one that actually proves the persistent per-execution sandbox (every sandboxed tool call in that request shares one real sandbox instead of each getting its own empty one) and the bounded multi-round tool-calling loop (ToolCallingChatEngine keeps going instead of stopping after one round) both work end to end, not just individually.\n\nThe async 'Enqueue Agent Execution' / 'Get Execution Status' pair (end of the Agents folder) exercises POST /agents/execute + GET /agents/executions/{id} -- the real, durable job-queue execution model, as opposed to the synchronous ping/ping-with-tools spikes above it. Whether the polled status has already progressed past QUEUED by the time you run the GET request depends on whether AgentJobWorker is enabled and how much time elapsed (default poll interval 2s) -- the test asserts against the full set of valid states rather than one specific one for that reason.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -2120,7 +2120,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Run the shell command 'whoami && uname -a' using the shell command tool and tell me exactly what it printed.\",\n  \"agentSlug\": \"coding-agent\"\n}",
+              "raw": "{\n  \"prompt\": \"Run the shell command 'whoami && uname -a' using the shell command tool and tell me exactly what it printed.\",\n  \"agentSlug\": \"ticket-resolver\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2170,7 +2170,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Use the git_clone tool to clone https://github.com/octocat/Hello-World.git. Just report whether the clone succeeded or failed and the exit code -- do not run any other commands.\",\n  \"agentSlug\": \"coding-agent\"\n}",
+              "raw": "{\n  \"prompt\": \"Use the git_clone tool to clone https://github.com/octocat/Hello-World.git. Just report whether the clone succeeded or failed and the exit code -- do not run any other commands.\",\n  \"agentSlug\": \"ticket-resolver\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2220,7 +2220,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Do the following in order, using the tools available: 1) Use git_clone to clone https://github.com/octocat/Hello-World.git. 2) Use read_file to read README.md. 3) Use write_file to create a file called NOTES.md containing exactly: Verified multi-step agent execution. 4) Use run_shell_command to run 'cat NOTES.md' to confirm it was written. Report the outcome of each of these four steps clearly.\",\n  \"agentSlug\": \"coding-agent\"\n}",
+              "raw": "{\n  \"prompt\": \"Do the following in order, using the tools available: 1) Use git_clone to clone https://github.com/octocat/Hello-World.git. 2) Use read_file to read README.md. 3) Use write_file to create a file called NOTES.md containing exactly: Verified multi-step agent execution. 4) Use run_shell_command to run 'cat NOTES.md' to confirm it was written. Report the outcome of each of these four steps clearly.\",\n  \"agentSlug\": \"ticket-resolver\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2238,7 +2238,7 @@
                   "pm.test('Status is 200 OK (requires the sandbox sidecar running)', () => pm.response.to.have.status(200));",
                   "const json = pm.response.json();",
                   "pm.test('At least one tool was used', () => pm.expect(json.toolWasUsed).to.eql(true));",
-                  "pm.test('Ran as the coding-agent (has git_clone/read_file/write_file/run_shell_command, unlike the default general-assistant)', () => pm.expect(json.agentSlug).to.eql('coding-agent'));",
+                  "pm.test('Ran as the ticket-resolver (has git_clone/read_file/write_file/run_shell_command, unlike the default general-assistant)', () => pm.expect(json.agentSlug).to.eql('ticket-resolver'));",
                   "// This is the scenario that actually proves the persistent-per-execution sandbox",
                   "// (SandboxSession) and the multi-round tool-calling loop both work: step 2 can only",
                   "// succeed if it's reading from the SAME sandbox git_clone cloned into one round",
@@ -2280,9 +2280,9 @@
                   "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
                   "const json = pm.response.json();",
                   "pm.test('general-assistant is in the catalog', () => pm.expect(json.some(a => a.slug === 'general-assistant')).to.eql(true));",
-                  "const codingAgent = json.find(a => a.slug === 'coding-agent');",
-                  "pm.test('coding-agent is in the catalog with its real tool list', () => pm.expect(codingAgent.toolNames).to.include('git_clone'));",
-                  "pm.test('coding-agent can open pull requests', () => pm.expect(codingAgent.toolNames).to.include('open_pull_request'));"
+                  "const codingAgent = json.find(a => a.slug === 'ticket-resolver');",
+                  "pm.test('ticket-resolver is in the catalog with its real tool list', () => pm.expect(codingAgent.toolNames).to.include('git_clone'));",
+                  "pm.test('ticket-resolver can open pull requests', () => pm.expect(codingAgent.toolNames).to.include('open_pull_request'));"
                 ]
               }
             }
@@ -2299,14 +2299,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/agents/definitions/coding-agent",
+              "raw": "{{baseUrl}}/agents/definitions/ticket-resolver",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "agents",
                 "definitions",
-                "coding-agent"
+                "ticket-resolver"
               ]
             },
             "description": "Full, read-only configuration -- system prompt, tool list, inputSourceType, requiredInputs. 'View configuration' on a catalog card, not an edit form; there is still no admin CRUD API for AgentDefinition."
@@ -2832,14 +2832,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"List the files in the current directory.\",\n  \"agentSlug\": \"coding-agent\",\n  \"repositoryUrl\": \"https://github.com/octocat/Hello-World.git\"\n}",
+              "raw": "{\n  \"prompt\": \"List the files in the current directory.\",\n  \"agentSlug\": \"ticket-resolver\",\n  \"repositoryUrl\": \"https://github.com/octocat/Hello-World.git\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Demonstrates the additive repositoryUrl field (InputSourceResolver work): assembled into the prompt as \"Repository: {url}\" ahead of the free-text prompt, regardless of whether the agent has an inputSourceType configured -- coding-agent doesn't, so this only exercises the repositoryUrl half. Exercising the inputParameters/MANUAL_TEXT resolver half needs an AgentDefinition with input_source_type='MANUAL_TEXT', which isn't seeded by any migration yet (no second real agent has been built on top of the abstraction yet -- see README's Status section)."
+            "description": "Demonstrates the additive repositoryUrl field (InputSourceResolver work): assembled into the prompt as \"Repository: {url}\" ahead of the free-text prompt, regardless of whether the agent has an inputSourceType configured -- ticket-resolver doesn't, so this only exercises the repositoryUrl half. Exercising the inputParameters/MANUAL_TEXT resolver half needs an AgentDefinition with input_source_type='MANUAL_TEXT', which isn't seeded by any migration yet (no second real agent has been built on top of the abstraction yet -- see README's Status section)."
           },
           "response": [],
           "event": [

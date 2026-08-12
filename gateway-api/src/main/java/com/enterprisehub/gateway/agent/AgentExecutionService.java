@@ -37,7 +37,7 @@ import java.util.UUID;
  * run that follows it.
  *
  * agentType stores the resolved AgentDefinition slug for this run (e.g.
- * "coding-agent") -- repurposed from its original Week 1 meaning
+ * "ticket-resolver") -- repurposed from its original Week 1 meaning
  * ("SECURITY_PATCH", "CROSS_STACK_ALIGNMENT", categories for a
  * not-yet-built agent) now that real named agents exist, see
  * V6__agent_definitions.sql.
@@ -108,8 +108,10 @@ public class AgentExecutionService {
         execution.setLlmProvider(LlmProvider.ANTHROPIC.name());
         // prompt is optional at the DTO/validation level (see validateRequiredInputs()) but
         // the column itself is NOT NULL (V5__agent_execution_queue.sql) -- coerce null to the
-        // same "" sentinel that migration already uses, rather than letting a caller for an
-        // agent whose requiredInputs doesn't include "prompt" (e.g. coding-agent) crash the insert.
+        // same "" sentinel that migration already uses, rather than letting a caller for any
+        // agent whose requiredInputs doesn't include "prompt" crash the insert. Both seeded
+        // agents currently require prompt, but that's a per-AgentDefinition choice, not a
+        // guarantee -- this stays defensive for the next one that doesn't.
         execution.setPrompt(prompt == null ? "" : prompt);
         execution.setRepositoryUrl(repositoryUrl);
         execution.setInputParameters(serializeInputParameters(inputParameters));
