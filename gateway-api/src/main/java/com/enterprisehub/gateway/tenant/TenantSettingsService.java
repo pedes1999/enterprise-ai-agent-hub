@@ -39,17 +39,17 @@ public class TenantSettingsService {
 
     public TenantSettingsResponse get(UUID tenantId) {
         Tenant tenant = requireTenant(tenantId);
-        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), availableProviders(tenantId));
+        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(), availableProviders(tenantId));
     }
 
     public TenantSettingsResponse update(UUID tenantId, UpdateTenantSettingsRequest request) {
         Tenant tenant = requireTenant(tenantId);
-        String requested = request.preferredLlmProvider();
+        String requestedProvider = request.preferredLlmProvider();
 
-        if (requested == null || requested.isBlank()) {
+        if (requestedProvider == null || requestedProvider.isBlank()) {
             tenant.setPreferredLlmProvider(null);
         } else {
-            VendorProvider provider = VendorProvider.parse(requested)
+            VendorProvider provider = VendorProvider.parse(requestedProvider)
                     .orElseThrow(() -> new TenantSettingsException(HttpStatus.BAD_REQUEST,
                             "preferredLlmProvider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
@@ -63,8 +63,11 @@ public class TenantSettingsService {
             tenant.setPreferredLlmProvider(provider.name());
         }
 
+        String requestedModelName = request.preferredModelName();
+        tenant.setPreferredModelName(requestedModelName == null || requestedModelName.isBlank() ? null : requestedModelName);
+
         tenantRepository.save(tenant);
-        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), availableProviders(tenantId));
+        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(), availableProviders(tenantId));
     }
 
     private List<LlmProviderAvailability> availableProviders(UUID tenantId) {

@@ -67,6 +67,7 @@ class AgentPromptRunnerTest {
         LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
+        when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");
         sandboxClient = mock(SandboxClient.class);
         ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
         credentialResolver = mock(CredentialResolver.class);
@@ -409,13 +410,9 @@ class AgentPromptRunnerTest {
 
     @Test
     void modelName_tenantResolvesToLocal_returnsLocalModelName() {
-        LlmProperties localProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", "llama3.1", "http://localhost:11434/v1");
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);
-        AgentPromptRunner localRunner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
-                sharedExecutionContextFactory, localProperties, tenantLlmProviderResolver, sandboxClient, mock(ToolExecutionListener.class),
-                credentialResolver, agentDefinitionRepository, new ToolCatalog(List.of(new CurrentDateTimeToolFactory())),
-                new InputSourceResolverRegistry(List.of(new ManualTextInputResolver())));
+        when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.LOCAL)).thenReturn("llama3.1");
 
-        assertThat(localRunner.modelName(tenantId)).isEqualTo("llama3.1");
+        assertThat(runner.modelName(tenantId)).isEqualTo("llama3.1");
     }
 }

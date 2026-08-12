@@ -2,7 +2,7 @@ import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CredentialService } from '../../core/services/credential.service';
 import { TenantSettingsService } from '../../core/services/tenant-settings.service';
-import { LlmProviderAvailability, ToolCredentialSummary, VendorCredentialSummary } from '../../core/models/credential.model';
+import { LlmProviderAvailability, ModelOption, ToolCredentialSummary, VendorCredentialSummary } from '../../core/models/credential.model';
 import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
 
 interface VendorProviderDef {
@@ -59,9 +59,15 @@ export class Credentials implements OnInit {
 
   /** '' means "no override -- use the server default", matching a null preferredLlmProvider. */
   readonly preferredProviderSelection = signal('');
+  /** '' means "no override -- use the provider's default model". */
+  readonly preferredModelSelection = signal('');
   readonly availableProviders = signal<LlmProviderAvailability[]>([]);
   readonly savingPreference = signal(false);
   readonly preferenceMessage = signal<RowMessage | null>(null);
+
+  readonly modelOptions = signal<ModelOption[]>([]);
+  readonly loadingModels = signal(false);
+  readonly modelsError = signal<string | null>(null);
 
   readonly vendorInputs: Record<string, string> = {};
   readonly toolInputs: Record<string, string> = {};
@@ -107,6 +113,7 @@ export class Credentials implements OnInit {
     this.tenantSettingsService.getSettings().subscribe({
       next: (settings) => {
         this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
+        this.preferredModelSelection.set(settings.preferredModelName ?? '');
         this.availableProviders.set(settings.availableProviders);
         done();
       },
@@ -138,14 +145,45 @@ export class Credentials implements OnInit {
     return this.availableProviders().find((p) => p.provider === provider)?.hasActiveCredential ?? false;
   }
 
+  modelIsInOptions(modelId: string): boolean {
+    return this.modelOptions().some((option) => option.id === modelId);
+  }
+
+  /** Whichever models were loaded for the currently-selected provider might not include a model name the tenant already had saved -- shown anyway so the dropdown never silently drops the current selection. */
+  onProviderSelectionChange(): void {
+    this.modelOptions.set([]);
+    this.modelsError.set(null);
+  }
+
+  loadModels(): void {
+    const provider = this.preferredProviderSelection();
+    if (!provider) {
+      return;
+    }
+    this.loadingModels.set(true);
+    this.modelsError.set(null);
+    this.credentialService.listModels(provider).subscribe({
+      next: (options) => {
+        this.loadingModels.set(false);
+        this.modelOptions.set(options);
+      },
+      error: (err) => {
+        this.loadingModels.set(false);
+        this.modelsError.set(this.extractMessage(err, 'Failed to load models.'));
+      },
+    });
+  }
+
   savePreferredProvider(): void {
-    const selection = this.preferredProviderSelection();
+    const provider = this.preferredProviderSelection();
+    const modelName = this.preferredModelSelection();
     this.savingPreference.set(true);
     this.preferenceMessage.set(null);
-    this.tenantSettingsService.updatePreferredLlmProvider(selection || null).subscribe({
+    this.tenantSettingsService.updateSettings(provider || null, modelName || null).subscribe({
       next: (settings) => {
         this.savingPreference.set(false);
         this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
+        this.preferredModelSelection.set(settings.preferredModelName ?? '');
         this.availableProviders.set(settings.availableProviders);
         this.preferenceMessage.set({ kind: 'success', text: 'Preference saved.' });
       },

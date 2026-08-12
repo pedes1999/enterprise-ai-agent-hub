@@ -41,4 +41,18 @@ public class TenantLlmProviderResolver {
                 .flatMap(LlmProvider::parse)
                 .orElseGet(llmProperties::resolvedProvider);
     }
+
+    /**
+     * Same fallback shape as resolve(), but for the model id -- a tenant can
+     * pin a specific model (e.g. "claude-opus-4-1-20250805") without also
+     * having to override the provider. `provider` should be whatever
+     * resolve(tenantId) just returned, since the fallback model name is
+     * provider-specific (see LlmProperties.modelName(LlmProvider)).
+     */
+    public String resolveModelName(UUID tenantId, LlmProvider provider) {
+        return tenantRepository.findById(tenantId)
+                .map(Tenant::getPreferredModelName)
+                .filter(value -> value != null && !value.isBlank())
+                .orElseGet(() -> llmProperties.modelName(provider));
+    }
 }

@@ -56,7 +56,7 @@ public class AgentPingService {
         validatePrompt(prompt);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
-        String modelName = llmProperties.modelName(provider);
+        String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         ChatLanguageModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl(provider));
 
         String reply;

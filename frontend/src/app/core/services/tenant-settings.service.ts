@@ -12,7 +12,8 @@ export class TenantSettingsService {
     return this.http.get<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`);
   }
 
-  updatePreferredLlmProvider(preferredLlmProvider: string | null): Observable<TenantSettings> {
-    return this.http.put<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`, { preferredLlmProvider });
+  /** A full replace, not a partial patch -- always send both fields, matching the backend's UpdateTenantSettingsRequest. */
+  updateSettings(preferredLlmProvider: string | null, preferredModelName: string | null): Observable<TenantSettings> {
+    return this.http.put<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`, { preferredLlmProvider, preferredModelName });
   }
 }

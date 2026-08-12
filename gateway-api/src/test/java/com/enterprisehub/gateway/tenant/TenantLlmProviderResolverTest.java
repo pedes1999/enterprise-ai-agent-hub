@@ -28,11 +28,16 @@ class TenantLlmProviderResolverTest {
     }
 
     private Tenant tenantWithPreference(String preferredLlmProvider) {
+        return tenantWithPreference(preferredLlmProvider, null);
+    }
+
+    private Tenant tenantWithPreference(String preferredLlmProvider, String preferredModelName) {
         Tenant tenant = new Tenant();
         tenant.setId(tenantId);
         tenant.setName("Acme");
         tenant.setSlug("acme");
         tenant.setPreferredLlmProvider(preferredLlmProvider);
+        tenant.setPreferredModelName(preferredModelName);
         return tenant;
     }
 
@@ -69,5 +74,33 @@ class TenantLlmProviderResolverTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
 
         assertThat(resolver.resolve(tenantId)).isEqualTo(LlmProvider.ANTHROPIC);
+    }
+
+    @Test
+    void resolveModelName_tenantHasNoPreference_fallsBackToServerDefaultForThatProvider() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference(null, null)));
+
+        assertThat(resolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).isEqualTo("claude-3-5-sonnet-20240620");
+    }
+
+    @Test
+    void resolveModelName_tenantHasBlankPreference_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference(null, "  ")));
+
+        assertThat(resolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).isEqualTo("claude-3-5-sonnet-20240620");
+    }
+
+    @Test
+    void resolveModelName_tenantHasPreference_returnsItInsteadOfServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference(null, "claude-opus-4-1-20250805")));
+
+        assertThat(resolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).isEqualTo("claude-opus-4-1-20250805");
+    }
+
+    @Test
+    void resolveModelName_unknownTenant_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+
+        assertThat(resolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).isEqualTo("claude-3-5-sonnet-20240620");
     }
 }

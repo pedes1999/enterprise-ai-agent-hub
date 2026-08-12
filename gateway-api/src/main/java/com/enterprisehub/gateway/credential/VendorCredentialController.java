@@ -2,6 +2,7 @@ package com.enterprisehub.gateway.credential;
 
 import com.enterprisehub.dto.CreateVendorCredentialRequest;
 import com.enterprisehub.dto.CredentialTestResult;
+import com.enterprisehub.dto.ModelOption;
 import com.enterprisehub.dto.VendorCredentialSummary;
 import com.enterprisehub.dto.VendorCredentialTestRequest;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
@@ -20,10 +21,13 @@ public class VendorCredentialController {
 
     private final VendorCredentialService vendorCredentialService;
     private final VendorCredentialTestService vendorCredentialTestService;
+    private final VendorModelCatalogService vendorModelCatalogService;
 
-    public VendorCredentialController(VendorCredentialService vendorCredentialService, VendorCredentialTestService vendorCredentialTestService) {
+    public VendorCredentialController(VendorCredentialService vendorCredentialService, VendorCredentialTestService vendorCredentialTestService,
+                                       VendorModelCatalogService vendorModelCatalogService) {
         this.vendorCredentialService = vendorCredentialService;
         this.vendorCredentialTestService = vendorCredentialTestService;
+        this.vendorModelCatalogService = vendorModelCatalogService;
     }
 
     @PutMapping
@@ -50,5 +54,11 @@ public class VendorCredentialController {
                                                        @RequestBody VendorCredentialTestRequest request) {
         var result = vendorCredentialTestService.test(UUID.fromString(principal.tenantId()), request.provider());
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/{provider}/models")
+    public ResponseEntity<List<ModelOption>> listModels(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                          @PathVariable String provider) {
+        return ResponseEntity.ok(vendorModelCatalogService.list(UUID.fromString(principal.tenantId()), provider));
     }
 }

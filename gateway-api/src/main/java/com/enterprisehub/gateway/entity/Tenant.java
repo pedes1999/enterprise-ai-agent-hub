@@ -43,4 +43,8 @@ public class Tenant {
     /** Null means "no override" -- falls back to the server-wide app.llm.provider default. See TenantLlmProviderResolver. */
     @Column(name = "preferred_llm_provider")
     private String preferredLlmProvider;
+
+    /** Null means "no override" -- falls back to the server-wide default model for whichever provider resolves. See TenantLlmProviderResolver. */
+    @Column(name = "preferred_model_name")
+    private String preferredModelName;
 }

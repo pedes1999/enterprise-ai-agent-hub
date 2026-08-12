@@ -51,25 +51,27 @@ class TenantSettingsControllerTest {
     @Test
     void get_returnsPreferenceAndAvailability() throws Exception {
         when(tenantSettingsService.get(tenantId)).thenReturn(new TenantSettingsResponse(
-                "LOCAL", List.of(new LlmProviderAvailability("ANTHROPIC", true), new LlmProviderAvailability("LOCAL", true))));
+                "LOCAL", "llama3.1", List.of(new LlmProviderAvailability("ANTHROPIC", true), new LlmProviderAvailability("LOCAL", true))));
 
         mockMvc.perform(get("/tenant-settings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.preferredLlmProvider").value("LOCAL"))
+                .andExpect(jsonPath("$.preferredModelName").value("llama3.1"))
                 .andExpect(jsonPath("$.availableProviders[1].provider").value("LOCAL"));
     }
 
     @Test
     void put_delegatesToService_returnsUpdatedSettings() throws Exception {
         when(tenantSettingsService.update(eq(tenantId), any())).thenReturn(new TenantSettingsResponse(
-                "LOCAL", List.of(new LlmProviderAvailability("LOCAL", true))));
+                "LOCAL", "llama3.1", List.of(new LlmProviderAvailability("LOCAL", true))));
 
         mockMvc.perform(put("/tenant-settings")
                         .contentType("application/json")
                         .content("""
-                                {"preferredLlmProvider":"local"}"""))
+                                {"preferredLlmProvider":"local","preferredModelName":"llama3.1"}"""))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.preferredLlmProvider").value("LOCAL"));
+                .andExpect(jsonPath("$.preferredLlmProvider").value("LOCAL"))
+                .andExpect(jsonPath("$.preferredModelName").value("llama3.1"));
     }
 
     @Test

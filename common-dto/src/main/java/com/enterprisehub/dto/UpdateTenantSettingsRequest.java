@@ -1,7 +1,14 @@
 package com.enterprisehub.dto;
 
-/** null or blank preferredLlmProvider clears the override -- agent executions fall back to the server-wide app.llm.provider default. */
+/**
+ * A full replace, not a partial patch -- callers always send both fields
+ * together (matching every other PUT in this API). null or blank
+ * preferredLlmProvider clears the provider override, falling back to the
+ * server-wide app.llm.provider default. null or blank preferredModelName
+ * clears the model override the same way, independent of the provider.
+ */
 public record UpdateTenantSettingsRequest(
-        String preferredLlmProvider
+        String preferredLlmProvider,
+        String preferredModelName
 ) {
 }

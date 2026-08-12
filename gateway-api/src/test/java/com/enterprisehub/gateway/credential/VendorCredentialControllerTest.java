@@ -29,6 +29,7 @@ class VendorCredentialControllerTest {
 
     private VendorCredentialService vendorCredentialService;
     private VendorCredentialTestService vendorCredentialTestService;
+    private VendorModelCatalogService vendorModelCatalogService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -36,7 +37,8 @@ class VendorCredentialControllerTest {
     void setUp() {
         vendorCredentialService = mock(VendorCredentialService.class);
         vendorCredentialTestService = mock(VendorCredentialTestService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new VendorCredentialController(vendorCredentialService, vendorCredentialTestService))
+        vendorModelCatalogService = mock(VendorModelCatalogService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new VendorCredentialController(vendorCredentialService, vendorCredentialTestService, vendorModelCatalogService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -139,6 +141,26 @@ class VendorCredentialControllerTest {
                         .contentType("application/json")
                         .content("""
                                 {"provider":"ANTHROPIC"}"""))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listModels_delegatesToService_returnsOptions() throws Exception {
+        when(vendorModelCatalogService.list(tenantId, "ANTHROPIC"))
+                .thenReturn(List.of(new com.enterprisehub.dto.ModelOption("claude-opus-4-1-20250805", "Claude Opus 4.1")));
+
+        mockMvc.perform(get("/vendor-credentials/ANTHROPIC/models"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("claude-opus-4-1-20250805"))
+                .andExpect(jsonPath("$[0].label").value("Claude Opus 4.1"));
+    }
+
+    @Test
+    void listModels_noActiveCredential_returns404() throws Exception {
+        when(vendorModelCatalogService.list(tenantId, "LOCAL"))
+                .thenThrow(new VendorCredentialException(HttpStatus.NOT_FOUND, "No active credential stored for provider LOCAL"));
+
+        mockMvc.perform(get("/vendor-credentials/LOCAL/models"))
                 .andExpect(status().isNotFound());
     }
 }

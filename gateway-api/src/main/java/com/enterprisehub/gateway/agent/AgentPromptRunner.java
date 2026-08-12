@@ -104,7 +104,7 @@ public class AgentPromptRunner {
 
     /** The model name depends on which provider the tenant resolves to -- see TenantLlmProviderResolver. */
     public String modelName(UUID tenantId) {
-        return llmProperties.modelName(tenantLlmProviderResolver.resolve(tenantId));
+        return tenantLlmProviderResolver.resolveModelName(tenantId, tenantLlmProviderResolver.resolve(tenantId));
     }
 
     /**
@@ -132,7 +132,7 @@ public class AgentPromptRunner {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
-        String modelName = llmProperties.modelName(provider);
+        String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
         String assembledPrompt = assemblePrompt(repositoryUrl, resolvedInput, prompt);
 

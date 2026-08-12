@@ -40,5 +40,11 @@ export interface LlmProviderAvailability {
 
 export interface TenantSettings {
   preferredLlmProvider: string | null;
+  preferredModelName: string | null;
   availableProviders: LlmProviderAvailability[];
+}
+
+export interface ModelOption {
+  id: string;
+  label: string;
 }

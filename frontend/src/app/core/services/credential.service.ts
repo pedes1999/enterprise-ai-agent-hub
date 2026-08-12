@@ -6,6 +6,7 @@ import {
   CreateToolCredentialRequest,
   CreateVendorCredentialRequest,
   CredentialTestResult,
+  ModelOption,
   ToolCredentialSummary,
   VendorCredentialSummary,
 } from '../models/credential.model';
@@ -28,6 +29,10 @@ export class CredentialService {
 
   testVendorCredential(provider: string): Observable<CredentialTestResult> {
     return this.http.post<CredentialTestResult>(`${environment.apiBaseUrl}/vendor-credentials/test`, { provider });
+  }
+
+  listModels(provider: string): Observable<ModelOption[]> {
+    return this.http.get<ModelOption[]>(`${environment.apiBaseUrl}/vendor-credentials/${provider}/models`);
   }
 
   listToolCredentials(): Observable<ToolCredentialSummary[]> {
