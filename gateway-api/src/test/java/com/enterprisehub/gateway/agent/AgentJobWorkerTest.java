@@ -13,6 +13,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -82,7 +83,7 @@ class AgentJobWorkerTest {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
                     assertThat(TenantContext.get()).isEqualTo(tenantId.toString());
-                    return new ToolCallingChatEngine.ToolChatResult("here are the files", true);
+                    return new ToolCallingChatEngine.ToolChatResult("here are the files", true, false, null);
                 });
 
         worker.pollAndProcessOne();
@@ -90,6 +91,78 @@ class AgentJobWorkerTest {
         verify(executionService).complete(executionId, "here are the files", true);
         verify(executionService, never()).fail(any(), any());
         assertThat(TenantContext.get()).isNull();
+    }
+
+    @Test
+    void pollAndProcessOne_resultIncomplete_marksFailedWithTheIncompleteReason() {
+        // incomplete==true means the model never reached a real stopping
+        // point (truncated by max_tokens, or ran out of tool-call rounds) --
+        // reporting that as a clean SUCCEEDED with a half-finished reply and
+        // no error anywhere is exactly the silent-failure gap this guards.
+        UUID tenantId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = new AgentExecution();
+        job.setId(executionId);
+        job.setTenantId(tenantId);
+        job.setPrompt("fix the bug");
+        job.setAgentType("ticket-resolver");
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any())).thenReturn(
+                new ToolCallingChatEngine.ToolChatResult("Let me check if there's a", true, true,
+                        "Agent used all 14 allowed tool-call rounds without finishing."));
+
+        worker.pollAndProcessOne();
+
+        verify(executionService).fail(executionId, "Agent used all 14 allowed tool-call rounds without finishing.");
+        verify(executionService, never()).complete(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void pollAndProcessOne_completeButBlankReplyDespiteToolUse_marksFailed() {
+        // A genuine final answer (incomplete==false) that's still blank after
+        // using tools is its own failure signal -- most often every tool call
+        // the model tried actually failed (e.g. the sandbox sidecar was
+        // unreachable) and it gave up with nothing to show for it. Those
+        // individual tool failures are already recorded in tool_executions,
+        // but nothing previously made the execution's own status reflect that.
+        UUID tenantId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = new AgentExecution();
+        job.setId(executionId);
+        job.setTenantId(tenantId);
+        job.setPrompt("fix the bug");
+        job.setAgentType("ticket-resolver");
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("", true, false, null));
+
+        worker.pollAndProcessOne();
+
+        verify(executionService).fail(eq(executionId), contains("tool-call trace"));
+        verify(executionService, never()).complete(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void pollAndProcessOne_blankReplyButNoToolUse_stillCompletesNormally() {
+        // No tools were even offered/used (e.g. general-assistant answering
+        // "" is a legitimate, if unusual, direct answer) -- blank-reply-as-
+        // failure is specifically about tool use going nowhere, not about
+        // every blank reply ever.
+        UUID tenantId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = new AgentExecution();
+        job.setId(executionId);
+        job.setTenantId(tenantId);
+        job.setPrompt("say nothing");
+        job.setAgentType("general-assistant");
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("", false, false, null));
+
+        worker.pollAndProcessOne();
+
+        verify(executionService).complete(executionId, "", false);
+        verify(executionService, never()).fail(any(), any());
     }
 
     @Test

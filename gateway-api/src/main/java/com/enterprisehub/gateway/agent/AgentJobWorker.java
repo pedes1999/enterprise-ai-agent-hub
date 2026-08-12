@@ -76,7 +76,22 @@ public class AgentJobWorker {
             ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
                     job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt(),
                     job.getRepositoryUrl(), executionService.deserializeInputParameters(job));
-            executionService.complete(job.getId(), result.reply(), result.toolWasUsed());
+            if (result.incomplete()) {
+                executionService.fail(job.getId(), result.incompleteReason());
+            } else if (result.toolWasUsed() && (result.reply() == null || result.reply().isBlank())) {
+                // A genuine final answer (incomplete==false) that is still blank
+                // despite having used tools is its own kind of failure -- most
+                // often every tool call the model tried failed for real (e.g.
+                // the sandbox sidecar was unreachable) and it gave up without
+                // ever writing a summary. The individual tool failures are
+                // already recorded in tool_executions (see ToolExecutionListener),
+                // but nothing previously made the execution itself reflect that;
+                // it silently reported SUCCEEDED with nothing to show for it.
+                executionService.fail(job.getId(),
+                        "Agent used tools but produced no final summary -- check the tool-call trace for repeated failures.");
+            } else {
+                executionService.complete(job.getId(), result.reply(), result.toolWasUsed());
+            }
         } catch (RuntimeException e) {
             log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);
             executionService.fail(job.getId(), e.getMessage());

@@ -148,7 +148,7 @@ class AgentPingServiceTest {
     @Test
     void pingWithTools_delegatesToRunner_returnsItsResult() {
         when(agentPromptRunner.run(eq(tenantId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
-                .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", false));
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", false, false, null));
 
         AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello", null);
 
@@ -162,7 +162,7 @@ class AgentPingServiceTest {
     @Test
     void pingWithTools_explicitAgentSlug_passedThroughToRunner() {
         when(agentPromptRunner.run(eq(tenantId), any(), eq("coding-agent"), eq("Hello")))
-                .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", true));
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", true, false, null));
 
         AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello", "coding-agent");
 

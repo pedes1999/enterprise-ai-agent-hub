@@ -7,6 +7,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -56,7 +57,26 @@ class ToolCallingChatEngineTest {
 
         assertThat(result.reply()).isEqualTo("Just an answer");
         assertThat(result.toolWasUsed()).isFalse();
+        assertThat(result.incomplete()).isFalse();
+        assertThat(result.incompleteReason()).isNull();
         verify(model, times(1)).generate(anyList(), anyList());
+    }
+
+    @Test
+    void chat_finalResponseTruncatedByMaxTokens_markedIncompleteWithAReason() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("Let me check if there's a README on"), null, FinishReason.LENGTH));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("do the thing");
+
+        // A response cut off by the token limit is not a real final answer --
+        // silently reporting it as one (the pre-fix behavior) means a task can
+        // end early with no error anywhere the caller can see. This is exactly
+        // the failure mode live-verified against ticket-resolver.
+        assertThat(result.incomplete()).isTrue();
+        assertThat(result.incompleteReason()).contains("max_tokens");
     }
 
     @Test
@@ -248,6 +268,11 @@ class ToolCallingChatEngineTest {
         // MAX_TOOL_ROUNDS rounds of tool-offering calls, plus one final forced call.
         verify(model, times(ToolCallingChatEngine.MAX_TOOL_ROUNDS + 1)).generate(anyList(), anyList());
         assertThat(result.toolWasUsed()).isTrue();
+        // Hitting the round cap is not a real stopping point either -- the
+        // model still wanted to keep calling tools -- so this must be flagged
+        // the same way a truncated response is, not reported as a clean success.
+        assertThat(result.incomplete()).isTrue();
+        assertThat(result.incompleteReason()).contains(String.valueOf(ToolCallingChatEngine.MAX_TOOL_ROUNDS));
     }
 
     @Test

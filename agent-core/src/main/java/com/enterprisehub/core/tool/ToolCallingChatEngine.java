@@ -11,6 +11,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.Response;
 
 import java.util.ArrayList;
@@ -90,7 +91,18 @@ public class ToolCallingChatEngine {
             AiMessage aiMessage = response.content();
 
             if (!aiMessage.hasToolExecutionRequests()) {
-                return new ToolChatResult(aiMessage.text(), toolWasUsed);
+                // A "final" answer that was actually cut off mid-generation (the
+                // model ran out of output tokens before it could finish, possibly
+                // before it even got to request the next tool call) is not a real
+                // stopping point -- treating it as one silently ends the task
+                // early with no error anywhere. finishReason() carries exactly
+                // that signal (LENGTH), already returned by every provider call,
+                // previously discarded here.
+                boolean truncated = response.finishReason() == FinishReason.LENGTH;
+                String incompleteReason = truncated
+                        ? "Model response was truncated (hit the max_tokens limit) before it finished."
+                        : null;
+                return new ToolChatResult(aiMessage.text(), toolWasUsed, truncated, incompleteReason);
             }
 
             toolWasUsed = true;
@@ -102,9 +114,12 @@ public class ToolCallingChatEngine {
         }
 
         // Round cap hit -- force a text answer instead of letting the model
-        // request yet another round it won't get to use.
+        // request yet another round it won't get to use. This is also not a
+        // real stopping point -- the model still wanted to keep going -- so
+        // it's incomplete for the same reason a truncated response is.
         Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
-        return new ToolChatResult(finalResponse.content().text(), toolWasUsed);
+        return new ToolChatResult(finalResponse.content().text(), toolWasUsed, true,
+                "Agent used all " + MAX_TOOL_ROUNDS + " allowed tool-call rounds without finishing.");
     }
 
     private String executeTool(ToolExecutionRequest request) {
@@ -138,6 +153,15 @@ public class ToolCallingChatEngine {
         return builder.build();
     }
 
-    public record ToolChatResult(String reply, boolean toolWasUsed) {
+    /**
+     * incomplete is true when reply is NOT a genuine final answer -- either
+     * the model's response was truncated by max_tokens before it finished,
+     * or the round cap was hit while the model still wanted to keep calling
+     * tools. In both cases the model never reached a real stopping point, so
+     * a caller (AgentJobWorker) should treat this as a failed execution with
+     * incompleteReason as the error, not a successful one with a
+     * suspiciously short (or blank) reply and no explanation anywhere.
+     */
+    public record ToolChatResult(String reply, boolean toolWasUsed, boolean incomplete, String incompleteReason) {
     }
 }
