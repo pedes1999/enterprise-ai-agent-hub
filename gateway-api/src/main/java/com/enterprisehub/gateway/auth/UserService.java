@@ -3,9 +3,11 @@ package com.enterprisehub.gateway.auth;
 import com.enterprisehub.dto.CreateUserRequest;
 import com.enterprisehub.dto.UserSummary;
 import com.enterprisehub.gateway.entity.AppUser;
+import com.enterprisehub.gateway.mail.MailService;
 import com.enterprisehub.gateway.repository.AppUserRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.MailException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -24,16 +26,30 @@ public class UserService {
 
     private final AppUserRepository appUserRepository;
     private final PasswordEncoder passwordEncoder;
+    private final MailService mailService;
 
-    public UserService(AppUserRepository appUserRepository, PasswordEncoder passwordEncoder) {
+    public UserService(AppUserRepository appUserRepository, PasswordEncoder passwordEncoder, MailService mailService) {
         this.appUserRepository = appUserRepository;
         this.passwordEncoder = passwordEncoder;
+        this.mailService = mailService;
     }
 
+    /**
+     * No password comes from the caller (see CreateUserRequest's javadoc) --
+     * a temporary one is generated here and emailed, never returned in this
+     * method's result or any HTTP response, same "never show a secret back,
+     * not even once" discipline as VendorCredentialSummary/ToolCredentialSummary.
+     *
+     * The email send happens BEFORE the user row is persisted, deliberately:
+     * if it fails, account creation aborts entirely rather than leaving a
+     * row in the DB with a password nobody -- not the admin, not the new
+     * user -- has any way to learn. The reverse ordering (persist then
+     * email) would fail worse: a real, usable account existing with a
+     * password lost forever the moment email delivery fails.
+     */
     public UserSummary create(UUID tenantId, CreateUserRequest request) {
-        if (isBlank(request.email()) || request.password() == null || request.password().length() < 8) {
-            throw new UserManagementException(HttpStatus.BAD_REQUEST,
-                    "email is required and password must be at least 8 characters");
+        if (isBlank(request.email()) || isBlank(request.name())) {
+            throw new UserManagementException(HttpStatus.BAD_REQUEST, "email and name are required");
         }
         Role role = Role.parse(request.role())
                 .orElseThrow(() -> new UserManagementException(HttpStatus.BAD_REQUEST,
@@ -43,10 +59,19 @@ public class UserService {
             throw new UserManagementException(HttpStatus.CONFLICT, "Email already registered for this tenant");
         }
 
+        String temporaryPassword = TempPasswordGenerator.generate();
+        try {
+            mailService.sendTemporaryPassword(request.email(), request.name(), temporaryPassword);
+        } catch (MailException e) {
+            throw new UserManagementException(HttpStatus.BAD_GATEWAY,
+                    "Could not email the temporary password -- account was not created: " + e.getMessage());
+        }
+
         AppUser user = new AppUser();
         user.setTenantId(tenantId);
         user.setEmail(request.email());
-        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setName(request.name());
+        user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
         user.setRole(role.name());
 
         try {
@@ -103,7 +128,7 @@ public class UserService {
     }
 
     private UserSummary toSummary(AppUser user) {
-        return new UserSummary(user.getId().toString(), user.getEmail(), user.getRole(), user.getCreatedAt());
+        return new UserSummary(user.getId().toString(), user.getEmail(), user.getName(), user.getRole(), user.getCreatedAt());
     }
 
     private boolean isBlank(String value) {

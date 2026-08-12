@@ -31,6 +31,11 @@ public class AppUser {
     @Column(nullable = false)
     private String email;
 
+    // '' for every row created before V12 (registration's first-admin flow
+    // still doesn't collect one) -- see V12__app_users_name.sql.
+    @Column(nullable = false)
+    private String name = "";
+
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 

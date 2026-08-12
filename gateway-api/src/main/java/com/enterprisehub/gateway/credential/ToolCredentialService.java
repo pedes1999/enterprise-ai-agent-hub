@@ -79,13 +79,26 @@ public class ToolCredentialService {
      * plaintext credential at tool-execution time. Returns empty (not an
      * error) if the tenant has no active credential of this kind
      * configured; callers (a specific AgentTool) decide whether that's
-     * fatal.
+     * fatal. Stamps lastUsedAt on every real resolution -- this is what
+     * "actually used" means (see V11__credential_health_timestamps.sql),
+     * distinct from an explicit test-connection validation.
      */
     public Optional<String> decryptActiveValue(UUID tenantId, String credentialKind) {
         return repository.findByTenantIdAndCredentialKind(tenantId, credentialKind)
                 .filter(ToolCredential::isActive)
-                .map(credential -> encryptor.decrypt(
-                        new EncryptedCredential(credential.getEncryptedValue(), credential.getEncryptionKeyId())));
+                .map(credential -> {
+                    credential.setLastUsedAt(Instant.now());
+                    repository.save(credential);
+                    return encryptor.decrypt(new EncryptedCredential(credential.getEncryptedValue(), credential.getEncryptionKeyId()));
+                });
+    }
+
+    /** Stamps lastValidatedAt after a caller (ToolCredentialTestService) has independently confirmed the credential actually works. */
+    public void markValidated(UUID tenantId, String credentialKind) {
+        repository.findByTenantIdAndCredentialKind(tenantId, credentialKind).ifPresent(credential -> {
+            credential.setLastValidatedAt(Instant.now());
+            repository.save(credential);
+        });
     }
 
     private ToolCredentialSummary toSummary(ToolCredential credential) {
@@ -94,6 +107,8 @@ public class ToolCredentialService {
                 credential.getCredentialKind(),
                 credential.isActive(),
                 credential.getCreatedAt(),
-                credential.getUpdatedAt());
+                credential.getUpdatedAt(),
+                credential.getLastUsedAt(),
+                credential.getLastValidatedAt());
     }
 }

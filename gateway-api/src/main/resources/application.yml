@@ -25,6 +25,22 @@ spring:
     # (see the note at the bottom of V1__init_schema.sql) -- otherwise RLS
     # policies get silently ignored for every query the app makes.
 
+  mail:
+    # Brevo's SMTP relay -- backs MailService's temp-password emails for
+    # admin-created team members (see UserService.create()). username is
+    # the Brevo account login, distinct from BREVO_SMTP_KEY (the SMTP
+    # password/API key) -- Brevo's SMTP relay requires both, not just one.
+    host: smtp-relay.brevo.com
+    port: 587
+    username: ${BREVO_SMTP_USERNAME:REPLACE_ME_WITH_BREVO_SMTP_LOGIN}
+    password: ${BREVO_SMTP_KEY:REPLACE_ME_WITH_BREVO_SMTP_KEY}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 server:
   port: ${SERVER_PORT:8080}
 
@@ -70,6 +86,13 @@ app:
     # separately (node --env-file=.env server.js, or the Dockerfile) for
     # any sandboxed AgentTool (e.g. RunShellCommandTool) to work.
     sidecar-url: ${SANDBOX_SIDECAR_URL:http://localhost:8090/}
+  cors:
+    # The Angular frontend is a genuine cross-origin browser client (its own
+    # nginx container/Deployment/origin, deployed independently of this
+    # module) -- every caller before it was non-browser (Postman, CI), so
+    # this never needed to exist until now. Deliberately ONE explicit
+    # origin, never a wildcard -- see SecurityConfig's corsConfigurationSource().
+    allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:4200}
   job-worker:
     # AgentJobWorker's poll loop against agent_executions (POST
     # /agents/execute enqueues, this picks it up). Disabled in
@@ -77,6 +100,10 @@ app:
     # poller against rows they're asserting on.
     enabled: ${JOB_WORKER_ENABLED:true}
     poll-interval-ms: ${JOB_WORKER_POLL_INTERVAL_MS:2000}
+  mail:
+    # Must be a sender address verified in the Brevo account above, or
+    # Brevo rejects the send outright.
+    from-address: ${MAIL_FROM_ADDRESS:REPLACE_ME_WITH_A_BREVO_VERIFIED_SENDER}
 
 logging:
   level:

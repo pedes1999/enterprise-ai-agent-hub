@@ -3,11 +3,13 @@ package com.enterprisehub.gateway.auth;
 import com.enterprisehub.dto.CreateUserRequest;
 import com.enterprisehub.dto.UserSummary;
 import com.enterprisehub.gateway.entity.AppUser;
+import com.enterprisehub.gateway.mail.MailService;
 import com.enterprisehub.gateway.repository.AppUserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.MailSendException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.List;
@@ -17,12 +19,15 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class UserServiceTest {
 
     private AppUserRepository repository;
     private PasswordEncoder passwordEncoder;
+    private MailService mailService;
     private UserService service;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -30,7 +35,8 @@ class UserServiceTest {
     void setUp() {
         repository = mock(AppUserRepository.class);
         passwordEncoder = mock(PasswordEncoder.class);
-        service = new UserService(repository, passwordEncoder);
+        mailService = mock(MailService.class);
+        service = new UserService(repository, passwordEncoder, mailService);
     }
 
     private AppUser user(UUID id, UUID tenantId, String email, String role) {
@@ -46,9 +52,9 @@ class UserServiceTest {
     // ---------- create ----------
 
     @Test
-    void create_happyPath_savesWithHashedPasswordAndValidatedRole() {
+    void create_happyPath_generatesAndEmailsTempPassword_savesHashedNeverRawPassword() {
         when(repository.findByTenantIdAndEmail(tenantId, "dev@acme.com")).thenReturn(Optional.empty());
-        when(passwordEncoder.encode("password123")).thenReturn("hashed");
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed");
         UUID newId = UUID.randomUUID();
         when(repository.save(any(AppUser.class))).thenAnswer(inv -> {
             AppUser u = inv.getArgument(0);
@@ -56,36 +62,79 @@ class UserServiceTest {
             return u;
         });
 
-        UserSummary summary = service.create(tenantId, new CreateUserRequest("dev@acme.com", "password123", "DEVELOPER"));
+        UserSummary summary = service.create(tenantId, new CreateUserRequest("dev@acme.com", "Dev Person", "DEVELOPER"));
 
         assertThat(summary.email()).isEqualTo("dev@acme.com");
+        assertThat(summary.name()).isEqualTo("Dev Person");
         assertThat(summary.role()).isEqualTo("DEVELOPER");
-        verify(repository).save(argThat(u -> "hashed".equals(u.getPasswordHash())));
+        verify(mailService).sendTemporaryPassword(eq("dev@acme.com"), eq("Dev Person"), anyString());
+        verify(repository).save(argThat(u -> "hashed".equals(u.getPasswordHash()) && "Dev Person".equals(u.getName())));
     }
 
     @Test
-    void create_invalidRole_throwsBadRequest() {
+    void create_neverReturnsOrPersistsTheRawTemporaryPassword() {
         when(repository.findByTenantIdAndEmail(any(), any())).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", "password123", "SUPERUSER")))
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed");
+        when(repository.save(any())).thenAnswer(inv -> {
+            AppUser u = inv.getArgument(0);
+            u.setId(UUID.randomUUID());
+            return u;
+        });
+        org.mockito.ArgumentCaptor<String> rawPasswordCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+
+        service.create(tenantId, new CreateUserRequest("x@acme.com", "X Person", "DEVELOPER"));
+
+        verify(mailService).sendTemporaryPassword(eq("x@acme.com"), eq("X Person"), rawPasswordCaptor.capture());
+        String rawPassword = rawPasswordCaptor.getValue();
+        assertThat(rawPassword).isNotBlank();
+        verify(repository).save(argThat(u -> !rawPassword.equals(u.getPasswordHash())));
+    }
+
+    @Test
+    void create_invalidRole_throwsBadRequest_neverSendsEmail() {
+        when(repository.findByTenantIdAndEmail(any(), any())).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", "X Person", "SUPERUSER")))
                 .isInstanceOf(UserManagementException.class)
                 .satisfies(e -> assertThat(((UserManagementException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(mailService);
     }
 
     @Test
-    void create_shortPassword_throwsBadRequest() {
-        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", "short", "DEVELOPER")))
+    void create_blankName_throwsBadRequest() {
+        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", " ", "DEVELOPER")))
                 .isInstanceOf(UserManagementException.class);
         verifyNoInteractions(repository);
+        verifyNoInteractions(mailService);
     }
 
     @Test
-    void create_duplicateEmail_throwsConflict() {
+    void create_blankEmail_throwsBadRequest() {
+        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest(" ", "X Person", "DEVELOPER")))
+                .isInstanceOf(UserManagementException.class);
+        verifyNoInteractions(mailService);
+    }
+
+    @Test
+    void create_duplicateEmail_throwsConflict_neverSendsEmail() {
         when(repository.findByTenantIdAndEmail(tenantId, "dev@acme.com"))
                 .thenReturn(Optional.of(user(UUID.randomUUID(), tenantId, "dev@acme.com", "DEVELOPER")));
 
-        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("dev@acme.com", "password123", "DEVELOPER")))
+        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("dev@acme.com", "Dev Person", "DEVELOPER")))
                 .isInstanceOf(UserManagementException.class)
                 .satisfies(e -> assertThat(((UserManagementException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
+        verifyNoInteractions(mailService);
+    }
+
+    @Test
+    void create_mailDeliveryFails_throwsBadGateway_neverPersistsUser() {
+        when(repository.findByTenantIdAndEmail(any(), any())).thenReturn(Optional.empty());
+        doThrow(new MailSendException("SMTP connection refused"))
+                .when(mailService).sendTemporaryPassword(any(), any(), any());
+
+        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", "X Person", "DEVELOPER")))
+                .isInstanceOf(UserManagementException.class)
+                .satisfies(e -> assertThat(((UserManagementException) e).getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
+        verify(repository, never()).save(any());
     }
 
     @Test
@@ -94,7 +143,7 @@ class UserServiceTest {
         when(passwordEncoder.encode(any())).thenReturn("hashed");
         when(repository.save(any())).thenThrow(new DataIntegrityViolationException("dup"));
 
-        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", "password123", "DEVELOPER")))
+        assertThatThrownBy(() -> service.create(tenantId, new CreateUserRequest("x@acme.com", "X Person", "DEVELOPER")))
                 .isInstanceOf(UserManagementException.class)
                 .satisfies(e -> assertThat(((UserManagementException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
     }

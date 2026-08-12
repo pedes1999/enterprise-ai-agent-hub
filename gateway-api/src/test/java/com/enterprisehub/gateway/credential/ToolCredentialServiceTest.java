@@ -168,4 +168,52 @@ class ToolCredentialServiceTest {
 
         assertThat(service.decryptActiveValue(tenantId, "GIT")).isEmpty();
     }
+
+    @Test
+    void decryptActiveValue_stampsLastUsedAt() {
+        ToolCredential credential = new ToolCredential();
+        credential.setEncryptedValue("ciphertext");
+        credential.setEncryptionKeyId("local-v1");
+        credential.setActive(true);
+        when(repository.findByTenantIdAndCredentialKind(tenantId, "GIT")).thenReturn(Optional.of(credential));
+        when(encryptor.decrypt(any())).thenReturn("plaintext-token");
+
+        service.decryptActiveValue(tenantId, "GIT");
+
+        assertThat(credential.getLastUsedAt()).isNotNull();
+        verify(repository).save(credential);
+    }
+
+    @Test
+    void decryptActiveValue_inactiveCredential_neverStampsLastUsedAt() {
+        ToolCredential credential = new ToolCredential();
+        credential.setActive(false);
+        when(repository.findByTenantIdAndCredentialKind(tenantId, "GIT")).thenReturn(Optional.of(credential));
+
+        service.decryptActiveValue(tenantId, "GIT");
+
+        assertThat(credential.getLastUsedAt()).isNull();
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void markValidated_existingCredential_stampsLastValidatedAt() {
+        ToolCredential credential = new ToolCredential();
+        credential.setCredentialKind("GITHUB");
+        when(repository.findByTenantIdAndCredentialKind(tenantId, "GITHUB")).thenReturn(Optional.of(credential));
+
+        service.markValidated(tenantId, "GITHUB");
+
+        assertThat(credential.getLastValidatedAt()).isNotNull();
+        verify(repository).save(credential);
+    }
+
+    @Test
+    void markValidated_noStoredCredential_doesNothing_doesNotThrow() {
+        when(repository.findByTenantIdAndCredentialKind(tenantId, "GITHUB")).thenReturn(Optional.empty());
+
+        service.markValidated(tenantId, "GITHUB");
+
+        verify(repository, never()).save(any());
+    }
 }

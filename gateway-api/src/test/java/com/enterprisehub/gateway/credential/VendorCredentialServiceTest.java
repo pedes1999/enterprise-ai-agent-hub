@@ -149,4 +149,45 @@ class VendorCredentialServiceTest {
 
         assertThat(service.decryptToken(credential)).isEqualTo("plaintext-token");
     }
+
+    @Test
+    void decryptToken_stampsLastUsedAt() {
+        VendorCredential credential = new VendorCredential();
+        credential.setEncryptedToken("ciphertext");
+        credential.setEncryptionKeyId("local-v1");
+        when(encryptor.decrypt(any())).thenReturn("plaintext-token");
+
+        service.decryptToken(credential);
+
+        assertThat(credential.getLastUsedAt()).isNotNull();
+        verify(repository).save(credential);
+    }
+
+    @Test
+    void markValidated_existingCredential_stampsLastValidatedAt() {
+        VendorCredential credential = new VendorCredential();
+        credential.setProvider("ANTHROPIC");
+        when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+
+        service.markValidated(tenantId, "anthropic");
+
+        assertThat(credential.getLastValidatedAt()).isNotNull();
+        verify(repository).save(credential);
+    }
+
+    @Test
+    void markValidated_noStoredCredential_doesNothing_doesNotThrow() {
+        when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.empty());
+
+        service.markValidated(tenantId, "ANTHROPIC");
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void markValidated_invalidProvider_doesNothing_doesNotThrow() {
+        service.markValidated(tenantId, "COHERE");
+
+        verifyNoInteractions(repository);
+    }
 }

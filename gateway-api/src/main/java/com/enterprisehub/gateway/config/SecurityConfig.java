@@ -11,6 +11,11 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 /**
  * Baseline security posture for the gateway.
@@ -28,15 +33,18 @@ public class SecurityConfig {
 
     private final TenantResolvingFilter tenantResolvingFilter;
     private final JwtAuthFilter jwtAuthFilter;
+    private final CorsProperties corsProperties;
 
-    public SecurityConfig(TenantResolvingFilter tenantResolvingFilter, JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(TenantResolvingFilter tenantResolvingFilter, JwtAuthFilter jwtAuthFilter, CorsProperties corsProperties) {
         this.tenantResolvingFilter = tenantResolvingFilter;
         this.jwtAuthFilter = jwtAuthFilter;
+        this.corsProperties = corsProperties;
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -52,6 +60,29 @@ public class SecurityConfig {
         http.addFilterAfter(tenantResolvingFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * Every prior caller (Postman, CI) was non-browser, so this never
+     * existed until the Angular frontend -- a genuine cross-origin browser
+     * client. Deliberately a single explicit origin from configuration
+     * (app.cors.allowed-origin), never "*": a wildcard origin combined with
+     * credentialed requests (Authorization headers) would undercut the
+     * tenant-isolation discipline the rest of this system is careful about
+     * (RLS, scoped credential resolution, etc.) by letting any origin read
+     * responses meant for one tenant's authenticated session.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of(corsProperties.allowedOrigin()));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 
     @Bean

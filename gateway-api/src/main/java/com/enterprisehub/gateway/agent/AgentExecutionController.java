@@ -1,11 +1,17 @@
 package com.enterprisehub.gateway.agent;
 
+import com.enterprisehub.dto.AgentDefinitionDetail;
 import com.enterprisehub.dto.AgentDefinitionSummary;
 import com.enterprisehub.dto.AgentExecutionAccepted;
 import com.enterprisehub.dto.AgentExecutionStatusResponse;
+import com.enterprisehub.dto.ExecutionUsage;
+import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.dto.TriggerAgentExecutionRequest;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -15,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -58,6 +65,19 @@ public class AgentExecutionController {
                 .body(new AgentExecutionAccepted(execution.getId(), execution.getStatus()));
     }
 
+    /**
+     * "3 / 5 executions running" -- lets a caller see remaining capacity
+     * before submitting a trigger request. A literal path segment
+     * ("usage"), so Spring's routing resolves it ahead of the {id}
+     * variable below for any request to exactly this URL -- path
+     * specificity, not declaration order, is what makes that safe.
+     */
+    @GetMapping("/executions/usage")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<ExecutionUsage> getUsage(@AuthenticationPrincipal PlatformPrincipal principal) {
+        return ResponseEntity.ok(executionService.getUsage(UUID.fromString(principal.tenantId())));
+    }
+
     @GetMapping("/executions/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
     public ResponseEntity<AgentExecutionStatusResponse> getExecution(@AuthenticationPrincipal PlatformPrincipal principal,
@@ -67,15 +87,50 @@ public class AgentExecutionController {
         return ResponseEntity.ok(toResponse(execution));
     }
 
+    /**
+     * Tenant-scoped, paginated (standard Spring Pageable -- ?page=0&size=20&sort=createdAt,desc),
+     * optional status filter. Same 3-role read access as getExecution().
+     *
+     * Returns PagedModel, not a raw Page -- Page's own JSON shape depends
+     * on Jackson modules being registered in the serving ApplicationContext
+     * (Spring Boot's docs call raw Page serialization out as unstable
+     * across versions for exactly this reason) and PagedModel doesn't
+     * require anything extra to serialize predictably.
+     */
+    @GetMapping("/executions")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<PagedModel<AgentExecutionStatusResponse>> listExecutions(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                                                     @RequestParam(required = false) String status,
+                                                                                     Pageable pageable) {
+        Page<AgentExecution> page = executionService.list(UUID.fromString(principal.tenantId()), status, pageable);
+        return ResponseEntity.ok(new PagedModel<>(page.map(this::toResponse)));
+    }
+
+    /** The ordered tool-call trace for one execution -- what a skeptical teammate opens to verify what an agent actually did. */
+    @GetMapping("/executions/{id}/tool-executions")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<List<ToolExecutionRecord>> getToolExecutions(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                                         @PathVariable UUID id) {
+        return ResponseEntity.ok(executionService.getToolExecutions(UUID.fromString(principal.tenantId()), id));
+    }
+
     @GetMapping("/definitions")
     @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
     public ResponseEntity<List<AgentDefinitionSummary>> listDefinitions() {
         return ResponseEntity.ok(agentDefinitionService.listActive());
     }
 
+    /** Full, read-only configuration for one definition -- "view configuration" on a catalog card, not an edit form (see AgentDefinition's javadoc). */
+    @GetMapping("/definitions/{slug}")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<AgentDefinitionDetail> getDefinition(@PathVariable String slug) {
+        return ResponseEntity.ok(agentDefinitionService.getDetail(slug));
+    }
+
     private AgentExecutionStatusResponse toResponse(AgentExecution execution) {
         return new AgentExecutionStatusResponse(
                 execution.getId(), execution.getStatus(), execution.getLlmProvider(), execution.getAgentType(), execution.getPrompt(),
+                execution.getRepositoryUrl(), executionService.deserializeInputParameters(execution),
                 execution.getReply(), execution.getToolWasUsed(), execution.getErrorMessage(),
                 execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt());
     }

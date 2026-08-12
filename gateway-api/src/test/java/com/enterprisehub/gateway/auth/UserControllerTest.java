@@ -51,12 +51,12 @@ class UserControllerTest {
     @Test
     void create_returns201() throws Exception {
         when(userService.create(eq(tenantId), any())).thenReturn(
-                new UserSummary(UUID.randomUUID().toString(), "dev@acme.com", "DEVELOPER", Instant.now()));
+                new UserSummary(UUID.randomUUID().toString(), "dev@acme.com", "Dev Person", "DEVELOPER", Instant.now()));
 
         mockMvc.perform(post("/users")
                         .contentType("application/json")
                         .content("""
-                                {"email":"dev@acme.com","password":"password123","role":"DEVELOPER"}"""))
+                                {"email":"dev@acme.com","name":"Dev Person","role":"DEVELOPER"}"""))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.role").value("DEVELOPER"));
     }
@@ -69,14 +69,14 @@ class UserControllerTest {
         mockMvc.perform(post("/users")
                         .contentType("application/json")
                         .content("""
-                                {"email":"dev@acme.com","password":"password123","role":"SUPERUSER"}"""))
+                                {"email":"dev@acme.com","name":"Dev Person","role":"SUPERUSER"}"""))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void list_returnsUsers() throws Exception {
         when(userService.list(tenantId)).thenReturn(List.of(
-                new UserSummary(UUID.randomUUID().toString(), "admin@acme.com", "ADMIN", Instant.now())));
+                new UserSummary(UUID.randomUUID().toString(), "admin@acme.com", "Admin Person", "ADMIN", Instant.now())));
 
         mockMvc.perform(get("/users"))
                 .andExpect(status().isOk())
@@ -87,7 +87,7 @@ class UserControllerTest {
     void updateRole_returns200() throws Exception {
         UUID userId = UUID.randomUUID();
         when(userService.updateRole(eq(tenantId), eq(userId), eq("READONLY"))).thenReturn(
-                new UserSummary(userId.toString(), "dev@acme.com", "READONLY", Instant.now()));
+                new UserSummary(userId.toString(), "dev@acme.com", "Dev Person", "READONLY", Instant.now()));
 
         mockMvc.perform(patch("/users/" + userId + "/role")
                         .contentType("application/json")

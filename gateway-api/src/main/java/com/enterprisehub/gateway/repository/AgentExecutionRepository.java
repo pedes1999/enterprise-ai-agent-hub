@@ -1,6 +1,8 @@
 package com.enterprisehub.gateway.repository;
 
 import com.enterprisehub.gateway.entity.AgentExecution;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -14,6 +16,12 @@ public interface AgentExecutionRepository extends JpaRepository<AgentExecution, 
 
     /** Backs the per-tenant concurrency cap -- see AgentExecutionService.enqueue(). Normal RLS applies (no worker-sentinel involved). */
     long countByTenantIdAndStatusIn(UUID tenantId, Collection<String> statuses);
+
+    /** Backs GET /agents/executions (no status filter). */
+    Page<AgentExecution> findByTenantId(UUID tenantId, Pageable pageable);
+
+    /** Backs GET /agents/executions?status=... */
+    Page<AgentExecution> findByTenantIdAndStatus(UUID tenantId, String status, Pageable pageable);
 
     /**
      * Atomically claims the oldest still-QUEUED job across every tenant.

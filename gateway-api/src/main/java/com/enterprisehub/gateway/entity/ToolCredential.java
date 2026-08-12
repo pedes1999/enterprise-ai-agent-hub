@@ -47,4 +47,12 @@ public class ToolCredential {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
+
+    // Both nullable -- see V11__credential_health_timestamps.sql for the
+    // distinction between "actually used" and "explicitly validated".
+    @Column(name = "last_used_at")
+    private Instant lastUsedAt;
+
+    @Column(name = "last_validated_at")
+    private Instant lastValidatedAt;
 }

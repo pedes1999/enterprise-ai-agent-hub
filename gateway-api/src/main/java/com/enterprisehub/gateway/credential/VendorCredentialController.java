@@ -1,7 +1,9 @@
 package com.enterprisehub.gateway.credential;
 
 import com.enterprisehub.dto.CreateVendorCredentialRequest;
+import com.enterprisehub.dto.CredentialTestResult;
 import com.enterprisehub.dto.VendorCredentialSummary;
+import com.enterprisehub.dto.VendorCredentialTestRequest;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,9 +19,11 @@ import java.util.UUID;
 public class VendorCredentialController {
 
     private final VendorCredentialService vendorCredentialService;
+    private final VendorCredentialTestService vendorCredentialTestService;
 
-    public VendorCredentialController(VendorCredentialService vendorCredentialService) {
+    public VendorCredentialController(VendorCredentialService vendorCredentialService, VendorCredentialTestService vendorCredentialTestService) {
         this.vendorCredentialService = vendorCredentialService;
+        this.vendorCredentialTestService = vendorCredentialTestService;
     }
 
     @PutMapping
@@ -39,5 +43,12 @@ public class VendorCredentialController {
                                         @PathVariable String provider) {
         vendorCredentialService.delete(UUID.fromString(principal.tenantId()), provider);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/test")
+    public ResponseEntity<CredentialTestResult> test(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                       @RequestBody VendorCredentialTestRequest request) {
+        var result = vendorCredentialTestService.test(UUID.fromString(principal.tenantId()), request.provider());
+        return ResponseEntity.ok(result);
     }
 }

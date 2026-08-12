@@ -75,11 +75,25 @@ public class VendorCredentialService {
     }
 
     /**
-     * Not exposed over HTTP -- for agent-core's future use when actually
-     * constructing an LLM client for a tenant's chosen provider.
+     * Not exposed over HTTP -- for agent-core's use when actually
+     * constructing an LLM client for a tenant's chosen provider. Stamps
+     * lastUsedAt on every real resolution -- this is what "actually used"
+     * means (see V11__credential_health_timestamps.sql), distinct from an
+     * explicit test-connection validation.
      */
     public String decryptToken(VendorCredential credential) {
+        credential.setLastUsedAt(Instant.now());
+        repository.save(credential);
         return encryptor.decrypt(new EncryptedCredential(credential.getEncryptedToken(), credential.getEncryptionKeyId()));
+    }
+
+    /** Stamps lastValidatedAt after a caller (VendorCredentialTestService) has independently confirmed the credential actually works. */
+    public void markValidated(UUID tenantId, String providerValue) {
+        VendorProvider.parse(providerValue).ifPresent(provider ->
+                repository.findByTenantIdAndProvider(tenantId, provider.name()).ifPresent(credential -> {
+                    credential.setLastValidatedAt(Instant.now());
+                    repository.save(credential);
+                }));
     }
 
     private VendorCredentialSummary toSummary(VendorCredential credential) {
@@ -88,6 +102,8 @@ public class VendorCredentialService {
                 credential.getProvider(),
                 credential.isActive(),
                 credential.getCreatedAt(),
-                credential.getUpdatedAt());
+                credential.getUpdatedAt(),
+                credential.getLastUsedAt(),
+                credential.getLastValidatedAt());
     }
 }

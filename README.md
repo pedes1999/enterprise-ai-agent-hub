@@ -161,6 +161,37 @@ at the database layer (Postgres RLS), not just in application code.
   `repositoryUrl`. An unrecognized requirement string on a definition row
   is treated as a data-integrity problem (500), the same posture as
   `ToolCatalog`'s unknown-tool-name error, not a caller mistake.
+- **A genuine cross-origin browser client, for the first time**: every
+  caller before the Angular frontend was non-browser (Postman, CI), so
+  `SecurityConfig` never needed CORS rules. `CorsProperties` (`app.cors.allowed-origin`,
+  env `CORS_ALLOWED_ORIGIN`) is deliberately a single configurable origin,
+  never a wildcard — a wildcard combined with credentialed requests
+  (`Authorization` headers) would undercut the tenant-isolation discipline
+  the rest of this system is careful about. `GET/POST/PUT/PATCH` and
+  `Authorization`/`Content-Type` headers only. Live-verified with real
+  preflight (`OPTIONS`) requests against the actual filter chain, not just
+  a config-object unit test.
+- **Credential health and live validation**: `VendorCredential`/`ToolCredential`
+  gained `lastUsedAt` (migration `V11`, stamped on every real resolve —
+  `VendorCredentialService.decryptToken()`/`ToolCredentialService.decryptActiveValue()`,
+  i.e. an actual agent run used it) and `lastValidatedAt` (stamped only by
+  an explicit `POST /vendor-credentials/test` or `/tool-credentials/test`
+  call). The "cheap" Anthropic check is still a real, tiny, billed API
+  call — there's no free way to validate a key short of using it. The
+  GitHub check confirms validity only, not repo/PR scope (fine-grained
+  PATs don't expose that cheaply); `GIT` credentials skip test-connection
+  entirely (no fixed target to validate a generic clone credential
+  against).
+- **Team management now actually onboards someone**: `POST /users` no
+  longer accepts a caller-supplied password (migration `V12` also adds
+  `AppUser.name`) — `TempPasswordGenerator` generates one server-side and
+  `MailService` emails it via Brevo's SMTP relay, **before** the user row
+  is persisted. That ordering is deliberate: if email delivery fails,
+  account creation aborts entirely (502) rather than leaving a real,
+  usable account whose password nobody — not the admin, not the new user —
+  has any way to learn. `application-test.yml`'s `test` profile swaps in
+  an inert mock `JavaMailSender` (`TestMailConfig`) so `mvn test` never
+  attempts a real SMTP connection with placeholder Brevo credentials.
 - **Sandboxed tool execution is vendor-neutral at the API boundary**:
   `SandboxClient` (`agent-runtime`) knows nothing about E2B specifically —
   `SandboxClientHttpImpl` calls an internal HTTP sidecar
@@ -283,15 +314,22 @@ in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterpris
 |---|---|---|
 | `POST /auth/register` | none | Create a tenant + its first (ADMIN) user |
 | `POST /auth/login` | none | Get a JWT |
-| `POST /users` · `GET /users` · `PATCH /users/{id}/role` · `DELETE /users/{id}` | ADMIN | Manage a tenant's users |
+| `POST /users` | ADMIN | Create a team member in the caller's own tenant. No password in the request — a temporary one is generated server-side and emailed via Brevo SMTP (`MailService`), never returned in the response (same "never show a secret back" discipline as `VendorCredentialSummary`). Email delivery happens **before** the row is persisted — if it fails, account creation aborts entirely (502) rather than leaving a user with a password nobody can learn. |
+| `GET /users` · `PATCH /users/{id}/role` · `DELETE /users/{id}` | ADMIN | List/re-role/remove a tenant's users. Guards against demoting or deleting a tenant's last remaining ADMIN. |
 | `POST /api-keys` · `GET /api-keys` · `DELETE /api-keys/{id}` | ADMIN | Issue/revoke platform API keys (for future CI/CD & webhook triggers) |
-| `PUT /vendor-credentials` · `GET /vendor-credentials` · `DELETE /vendor-credentials/{provider}` | ADMIN | Store/rotate/remove encrypted LLM vendor credentials |
-| `PUT /tool-credentials` · `GET /tool-credentials` · `DELETE /tool-credentials/{credentialKind}` | ADMIN | Store/rotate/remove encrypted credentials sandboxed tools need — `credentialKind` is `GIT` (clone auth) or `GITHUB` (a PAT with repo/PR scope, used by `OpenPullRequestTool`) |
+| `PUT /vendor-credentials` · `GET /vendor-credentials` · `DELETE /vendor-credentials/{provider}` | ADMIN | Store/rotate/remove encrypted LLM vendor credentials. Summaries now include `lastUsedAt` (stamped on every real resolve, e.g. an agent run) and `lastValidatedAt` (stamped only by an explicit test-connection call below). |
+| `POST /vendor-credentials/test` | ADMIN | Live-validates a stored vendor credential — for `ANTHROPIC`, a real (tiny, billed) `messages.create` call; other providers return `{valid: false, message: "not supported yet"}` since only Anthropic is wired up (see `LlmEngineFactory`). Never returns the credential value; stamps `lastValidatedAt` on success. |
+| `PUT /tool-credentials` · `GET /tool-credentials` · `DELETE /tool-credentials/{credentialKind}` | ADMIN | Store/rotate/remove encrypted credentials sandboxed tools need — `credentialKind` is `GIT` (clone auth) or `GITHUB` (a PAT with repo/PR scope, used by `OpenPullRequestTool`). Same `lastUsedAt`/`lastValidatedAt` fields as vendor credentials. |
+| `POST /tool-credentials/test` | ADMIN | Live-validates a stored tool credential — `GITHUB` only (`GET /user` against GitHub's API, confirms the token is valid/unrevoked, deliberately does **not** confirm repo/PR scope — fine-grained PATs don't expose that cheaply). `GIT` returns `{valid: false, message: "not supported yet"}` — no fixed target to validate a generic clone credential against. |
 | `POST /agents/ping` | ADMIN, DEVELOPER | Spike endpoint: real round-trip to the tenant's configured LLM, proves the credential → LangChain4j → provider chain works. Not the real agent execution model. |
 | `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: runs a named `AgentDefinition` (`agentSlug` in the body, defaults to `general-assistant`) synchronously through `SharedExecutionContext` — proves the full multi-round tool-calling loop, real sandbox execution (via `SandboxSession` and whichever tools that agent's definition includes), and audit logging all work end to end. A prompt that chains several steps (e.g. "clone, then read the README, then write a new file, then cat it") works in one request now, as long as the chosen agent's tool list includes what it needs. |
 | `POST /agents/execute` | ADMIN, DEVELOPER | The real (durable, async) execution model: enqueues an `agent_executions` row (`QUEUED`, tagged with the resolved `agentSlug`) and returns its id immediately — `202 Accepted` — without waiting for the LLM or any tool. `AgentJobWorker` picks it up separately. Rejects an unknown/inactive `agentSlug` immediately (400), before persisting anything. `repositoryUrl`/`inputParameters` are optional — see the input source abstraction note above; both no-ops for an `AgentDefinition` with no `inputSourceType`. Rejects with `400` listing every unmet requirement (e.g. `"Missing required input(s): repositoryUrl"`) per that agent's own `requiredInputs` — see the generalized required-inputs note above. Rejects with `429` (before persisting) once the calling tenant already has `app.execution.max-concurrent-per-tenant` (default 5) executions `QUEUED`/`RUNNING`. |
-| `GET /agents/executions/{id}` | ADMIN, DEVELOPER, READONLY | Poll a queued/running/finished execution's current status, and once `SUCCEEDED`/`FAILED`, its reply/error. Tenant-isolated the same way as everything else (RLS + an explicit `tenant_id` filter). |
+| `GET /agents/executions/{id}` | ADMIN, DEVELOPER, READONLY | Poll a queued/running/finished execution's current status, and once `SUCCEEDED`/`FAILED`, its reply/error. Response now also includes `repositoryUrl`/`inputParameters`. Tenant-isolated the same way as everything else (RLS + an explicit `tenant_id` filter). |
+| `GET /agents/executions` | ADMIN, DEVELOPER, READONLY | Tenant-scoped, paginated (`?page=0&size=20&sort=createdAt,desc`), optional `?status=` filter. Returns `PagedModel<AgentExecutionStatusResponse>`, not a raw `Page` — `Page`'s own JSON shape depends on which Jackson modules happen to be registered, `PagedModel` doesn't. |
+| `GET /agents/executions/usage` | ADMIN, DEVELOPER, READONLY | `{active, limit}` — lets a caller see remaining concurrency-cap capacity before submitting a trigger request. Same count `POST /agents/execute`'s own rejection check uses, so the two can never drift apart. A literal path segment ahead of `/agents/executions/{id}` in the URL space — Spring's routing resolves path specificity correctly regardless of declaration order, verified by a dedicated regression test. |
+| `GET /agents/executions/{id}/tool-executions` | ADMIN, DEVELOPER, READONLY | The ordered tool-call trace for one execution (tool name, duration, outcome, error if any) — what a skeptical teammate opens to verify what an agent actually did. 404s if the execution itself doesn't exist or belongs to another tenant. |
 | `GET /agents/definitions` | ADMIN, DEVELOPER, READONLY | The browsable agent catalog — slug, name, description, and tool list for every active `AgentDefinition`. This is how a caller discovers what `agentSlug` values are valid. |
+| `GET /agents/definitions/{slug}` | ADMIN, DEVELOPER, READONLY | Full, **read-only** configuration for one definition — system prompt, tool list, `inputSourceType`, `requiredInputs`. "View configuration" on a catalog card, not an edit form; `AgentDefinition` still has no admin CRUD API, this is browsing only. |
 | `GET /actuator/health` | none | Health check |
 
 ## Test
@@ -305,8 +343,8 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-347 automated tests as of the last update (20 `agent-core` + 88
-`agent-runtime` + 239 `gateway-api`) — unit tests (mocked) for every
+399 automated tests as of the last update (20 `agent-core` + 88
+`agent-runtime` + 291 `gateway-api`) — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
@@ -354,6 +392,8 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **Input source abstraction** (groundwork for a second real agent, log-to-fix-PR, alongside ticket-to-PR) — `InputSourceResolver`/`InputSourceResolverRegistry` (`gateway-api`) let an `AgentDefinition` declare an `inputSourceType` (migration `V8`) instead of every triggerable agent needing bespoke input plumbing; `ManualTextInputResolver` is the first (simplest) implementation. `TriggerAgentExecutionRequest` gained `repositoryUrl` + `inputParameters`, both additive/optional — `AgentPromptRunner` assembles `"Repository: {url}"` + resolved blob + free-text `prompt`, skipping blank sections, verified byte-identical to prior behavior when neither is used. Unit-tested only so far (not yet live-verified against the running app with a real trigger request).
 - [x] **Per-tenant execution concurrency cap** — `AgentExecutionService.enqueue()` rejects with `429` (before persisting anything) once a tenant already has `app.execution.max-concurrent-per-tenant` (default 5) executions `QUEUED`/`RUNNING`, logged at WARN. Protects a metered E2B/Anthropic account from a bug or a misbehaving loop, not from a hostile tenant (RLS remains the isolation boundary). A flat number today, not a per-tenant-tier setting — deliberately not built yet, just left room for it.
 - [x] **Generalized per-agent required inputs** — `AgentDefinition.requiredInputs` (migration `V10`) replaces the old hardcoded `"prompt is required"` check with a fixed vocabulary (`prompt`, `repositoryUrl`, `inputParameters:{key}`) a definition declares against; `AgentExecutionService.enqueue()` collects every unmet requirement and rejects with `400` listing all of them, not just the first. `general-assistant` requires `prompt`, `coding-agent` requires `repositoryUrl`.
+- [x] **Backend additions for the Angular frontend** — built ahead of the frontend itself, per its own build order: CORS (one configurable origin, never a wildcard, live-verified with real preflight requests); credential health (`lastUsedAt`/`lastValidatedAt`, migration `V11`) plus live test-connection endpoints for `ANTHROPIC` (real billed API call) and `GITHUB` (validity-only check); `GET /agents/definitions/{slug}` for read-only "view configuration"; paginated `GET /agents/executions` (as `PagedModel`, not a raw `Page`) with `repositoryUrl`/`inputParameters` added to the status response; `GET /agents/executions/{id}/tool-executions` for the ordered tool-call trace; `GET /agents/executions/usage` for a "N / limit" indicator; and `POST /users` now generates + emails a temporary password via Brevo SMTP instead of accepting one from the caller (migration `V12` adds `AppUser.name`). All fully unit- and integration-tested, live-verified against real Postgres.
+- [ ] The Angular frontend itself — not started yet as of this backend pass; see the process note in this repo's session history for the confirmed design token system (cool-neutral palette, Inter + JetBrains Mono, sidebar-nav dashboard layout) it'll be built against.
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)
 - [ ] Multi-agent "Ticket → PR" pipeline — the actual end product this is building toward: a Planner/Coder/Reviewer sequence of agent executions per ticket (each a named `AgentDefinition` from the catalog above), using `agent_executions.agent_type` to distinguish stages, ending with the now-real `OpenPullRequestTool` step. Not started.

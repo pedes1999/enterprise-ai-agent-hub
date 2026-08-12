@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.credential;
 
+import com.enterprisehub.dto.CredentialTestResult;
 import com.enterprisehub.dto.ToolCredentialSummary;
 import com.enterprisehub.gateway.error.GlobalExceptionHandler;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
@@ -27,13 +28,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ToolCredentialControllerTest {
 
     private ToolCredentialService toolCredentialService;
+    private ToolCredentialTestService toolCredentialTestService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         toolCredentialService = mock(ToolCredentialService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new ToolCredentialController(toolCredentialService))
+        toolCredentialTestService = mock(ToolCredentialTestService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new ToolCredentialController(toolCredentialService, toolCredentialTestService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -51,7 +54,7 @@ class ToolCredentialControllerTest {
     @Test
     void put_returns200_withNoValueField() throws Exception {
         when(toolCredentialService.put(eq(tenantId), any())).thenReturn(
-                new ToolCredentialSummary(UUID.randomUUID().toString(), "GIT", true, Instant.now(), Instant.now()));
+                new ToolCredentialSummary(UUID.randomUUID().toString(), "GIT", true, Instant.now(), Instant.now(), null, null));
 
         mockMvc.perform(put("/tool-credentials")
                         .contentType("application/json")
@@ -77,7 +80,7 @@ class ToolCredentialControllerTest {
     @Test
     void list_returnsSummaries() throws Exception {
         when(toolCredentialService.list(tenantId)).thenReturn(List.of(
-                new ToolCredentialSummary(UUID.randomUUID().toString(), "GIT", true, Instant.now(), Instant.now())));
+                new ToolCredentialSummary(UUID.randomUUID().toString(), "GIT", true, Instant.now(), Instant.now(), null, null)));
 
         mockMvc.perform(get("/tool-credentials"))
                 .andExpect(status().isOk())
@@ -98,6 +101,44 @@ class ToolCredentialControllerTest {
                 .when(toolCredentialService).delete(tenantId, "GIT");
 
         mockMvc.perform(delete("/tool-credentials/GIT"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void test_validCredential_returnsValidTrue() throws Exception {
+        when(toolCredentialTestService.test(tenantId, "GITHUB"))
+                .thenReturn(new CredentialTestResult(true, "GitHub token is valid."));
+
+        mockMvc.perform(post("/tool-credentials/test")
+                        .contentType("application/json")
+                        .content("""
+                                {"credentialKind":"GITHUB"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(true));
+    }
+
+    @Test
+    void test_gitKind_returnsValidFalse_notSupported() throws Exception {
+        when(toolCredentialTestService.test(tenantId, "GIT"))
+                .thenReturn(new CredentialTestResult(false, "Test connection is not supported for GIT yet."));
+
+        mockMvc.perform(post("/tool-credentials/test")
+                        .contentType("application/json")
+                        .content("""
+                                {"credentialKind":"GIT"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false));
+    }
+
+    @Test
+    void test_noCredentialStored_returns404() throws Exception {
+        when(toolCredentialTestService.test(tenantId, "GITHUB"))
+                .thenThrow(new ToolCredentialException(HttpStatus.NOT_FOUND, "No active credential stored for kind GITHUB"));
+
+        mockMvc.perform(post("/tool-credentials/test")
+                        .contentType("application/json")
+                        .content("""
+                                {"credentialKind":"GITHUB"}"""))
                 .andExpect(status().isNotFound());
     }
 }

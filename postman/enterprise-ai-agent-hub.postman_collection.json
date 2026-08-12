@@ -276,7 +276,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"dev@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"DEVELOPER\"\n}",
+              "raw": "{\n  \"email\": \"dev@{{tenantSlug}}.com\",\n  \"name\": \"Test Person\",\n  \"role\": \"DEVELOPER\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -325,7 +325,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"dev@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"READONLY\"\n}",
+              "raw": "{\n  \"email\": \"dev@{{tenantSlug}}.com\",\n  \"name\": \"Test Person\",\n  \"role\": \"READONLY\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -371,7 +371,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"bad-role@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"SUPERUSER\"\n}",
+              "raw": "{\n  \"email\": \"bad-role@{{tenantSlug}}.com\",\n  \"name\": \"Test Person\",\n  \"role\": \"SUPERUSER\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1185,6 +1185,59 @@
           ]
         },
         {
+          "name": "Test Anthropic Credential Connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vendor-credentials/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vendor-credentials",
+                "test"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"ANTHROPIC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Real, tiny, billed Anthropic API call -- there is no free way to validate a key short of using it. Move this ABOVE 'Delete Anthropic Credential' if running standalone, since it needs a real stored credential and a real ANTHROPIC_API key value (the test-token placeholder used elsewhere in this collection will correctly report valid: false)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Response has a valid field and a message', () => {",
+                  "    pm.expect(json).to.have.property('valid');",
+                  "    pm.expect(json).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Delete Anthropic Credential",
           "request": {
             "method": "DELETE",
@@ -1504,6 +1557,56 @@
           ]
         },
         {
+          "name": "Test GIT Credential Connection - Not Supported",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials",
+                "test"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialKind\": \"GIT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "GIT has no fixed target to validate a generic clone credential against, so this always reports valid: false with an explanatory message -- not an error."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Reports not supported for GIT', () => pm.expect(json.valid).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Delete Git Credential",
           "request": {
             "method": "DELETE",
@@ -1650,6 +1753,59 @@
                   "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
                   "const json = pm.response.json();",
                   "pm.test('GitHub credential is listed', () => pm.expect(json.some(c => c.credentialKind === 'GITHUB')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Test GitHub Credential Connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tool-credentials/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tool-credentials",
+                "test"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialKind\": \"GITHUB\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Calls GET https://api.github.com/user with the stored token -- confirms it's valid/unrevoked only, not repo/PR scope (fine-grained PATs don't expose that cheaply). Needs a real GitHub PAT stored to return valid: true; the test-token placeholder used elsewhere in this collection will correctly report valid: false."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Response has a valid field and a message', () => {",
+                  "    pm.expect(json).to.have.property('valid');",
+                  "    pm.expect(json).to.have.property('message');",
+                  "});"
                 ]
               }
             }
@@ -2133,6 +2289,45 @@
           ]
         },
         {
+          "name": "Get Agent Definition Detail (View Configuration)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/definitions/coding-agent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "definitions",
+                "coding-agent"
+              ]
+            },
+            "description": "Full, read-only configuration -- system prompt, tool list, inputSourceType, requiredInputs. 'View configuration' on a catalog card, not an edit form; there is still no admin CRUD API for AgentDefinition."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Includes the system prompt', () => pm.expect(json.systemPrompt).to.exist);",
+                  "pm.test('Includes requiredInputs', () => pm.expect(json.requiredInputs).to.include('repositoryUrl'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "General Assistant Correctly Has No Git Access",
           "request": {
             "method": "POST",
@@ -2209,7 +2404,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"agent-dev@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"DEVELOPER\"\n}",
+              "raw": "{\n  \"email\": \"agent-dev@{{tenantSlug}}.com\",\n  \"name\": \"Test Person\",\n  \"role\": \"DEVELOPER\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2346,7 +2541,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"agent-readonly@{{tenantSlug}}.com\",\n  \"password\": \"password123\",\n  \"role\": \"READONLY\"\n}",
+              "raw": "{\n  \"email\": \"agent-readonly@{{tenantSlug}}.com\",\n  \"name\": \"Test Person\",\n  \"role\": \"READONLY\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2666,6 +2861,47 @@
           ]
         },
         {
+          "name": "Get Execution Usage (Quota Indicator)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions/usage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions",
+                "usage"
+              ]
+            },
+            "description": "{active, limit} -- lets a caller see remaining concurrency-cap capacity before submitting a trigger request. Same count POST /agents/execute's own rejection check uses."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Response has active and limit fields', () => {",
+                  "    pm.expect(json).to.have.property('active');",
+                  "    pm.expect(json).to.have.property('limit');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Get Execution Status",
           "request": {
             "method": "GET",
@@ -2699,6 +2935,83 @@
                   "pm.test('Prompt is echoed back', () => pm.expect(json.prompt).to.eql('List the files in the current directory.'));",
                   "pm.test('Status is one AgentJobWorker\\'s poll loop would produce (timing-dependent -- it may already have been picked up)',",
                   "    () => pm.expect(['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED']).to.include(json.status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Tool-Call Trace For Execution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions/{{executionId}}/tool-executions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions",
+                "{{executionId}}",
+                "tool-executions"
+              ]
+            },
+            "description": "The ordered tool-call trace (tool name, duration, outcome, error if any) -- what a skeptical teammate opens to verify what an agent actually did."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Response is an array', () => pm.expect(json).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Executions (Paginated, Tenant-Scoped)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/executions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "executions"
+              ]
+            },
+            "description": "Standard Spring Pageable query params (?page=0&size=20&status=SUCCEEDED) -- returns PagedModel<AgentExecutionStatusResponse>, not a raw Page."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Response has a content array', () => pm.expect(json.content).to.be.an('array'));",
+                  "pm.test('Response has page metadata', () => pm.expect(json.page).to.have.property('totalElements'));"
                 ]
               }
             }

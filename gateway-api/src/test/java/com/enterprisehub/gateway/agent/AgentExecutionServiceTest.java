@@ -1,14 +1,18 @@
 package com.enterprisehub.gateway.agent;
 
+import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
+import com.enterprisehub.gateway.entity.ToolExecution;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.AgentExecutionRepository;
+import com.enterprisehub.gateway.repository.ToolExecutionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,6 +27,7 @@ class AgentExecutionServiceTest {
 
     private AgentExecutionRepository repository;
     private AgentDefinitionRepository agentDefinitionRepository;
+    private ToolExecutionRepository toolExecutionRepository;
     private AgentExecutionService service;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -30,7 +35,8 @@ class AgentExecutionServiceTest {
     void setUp() {
         repository = mock(AgentExecutionRepository.class);
         agentDefinitionRepository = mock(AgentDefinitionRepository.class);
-        service = new AgentExecutionService(repository, agentDefinitionRepository, new ExecutionLimitProperties(5));
+        toolExecutionRepository = mock(ToolExecutionRepository.class);
+        service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));
@@ -281,5 +287,113 @@ class AgentExecutionServiceTest {
         when(repository.findByIdAndTenantId(id, tenantId)).thenReturn(Optional.of(execution));
 
         assertThat(service.findForTenant(tenantId, id)).contains(execution);
+    }
+
+    @Test
+    void list_noStatusFilter_delegatesToFindByTenantId() {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        AgentExecution execution = new AgentExecution();
+        org.springframework.data.domain.Page<AgentExecution> page =
+                new org.springframework.data.domain.PageImpl<>(java.util.List.of(execution));
+        when(repository.findByTenantId(tenantId, pageable)).thenReturn(page);
+
+        assertThat(service.list(tenantId, null, pageable).getContent()).containsExactly(execution);
+        verify(repository, never()).findByTenantIdAndStatus(any(), any(), any());
+    }
+
+    @Test
+    void list_blankStatusFilter_treatedAsNoFilter() {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(repository.findByTenantId(any(), any())).thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.list(tenantId, "  ", pageable);
+
+        verify(repository).findByTenantId(tenantId, pageable);
+        verify(repository, never()).findByTenantIdAndStatus(any(), any(), any());
+    }
+
+    @Test
+    void list_withStatusFilter_delegatesToFindByTenantIdAndStatus() {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        AgentExecution execution = new AgentExecution();
+        org.springframework.data.domain.Page<AgentExecution> page =
+                new org.springframework.data.domain.PageImpl<>(java.util.List.of(execution));
+        when(repository.findByTenantIdAndStatus(tenantId, "RUNNING", pageable)).thenReturn(page);
+
+        assertThat(service.list(tenantId, "RUNNING", pageable).getContent()).containsExactly(execution);
+        verify(repository, never()).findByTenantId(any(), any());
+    }
+
+    @Test
+    void getToolExecutions_knownExecution_returnsOrderedTrace() {
+        UUID executionId = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(executionId);
+        execution.setTenantId(tenantId);
+        when(repository.findByIdAndTenantId(executionId, tenantId)).thenReturn(Optional.of(execution));
+
+        ToolExecution first = new ToolExecution();
+        first.setToolName("git_clone");
+        first.setDurationMs(120);
+        first.setOutcome("SUCCESS");
+        first.setCreatedAt(Instant.now());
+        ToolExecution second = new ToolExecution();
+        second.setToolName("run_shell_command");
+        second.setDurationMs(45);
+        second.setOutcome("FAILURE");
+        second.setErrorMessage("exit code 1");
+        second.setCreatedAt(Instant.now());
+        when(toolExecutionRepository.findByTenantIdAndExecutionIdOrderByCreatedAtAsc(tenantId, executionId.toString()))
+                .thenReturn(List.of(first, second));
+
+        List<ToolExecutionRecord> trace = service.getToolExecutions(tenantId, executionId);
+
+        assertThat(trace).hasSize(2);
+        assertThat(trace.get(0).toolName()).isEqualTo("git_clone");
+        assertThat(trace.get(0).outcome()).isEqualTo("SUCCESS");
+        assertThat(trace.get(1).toolName()).isEqualTo("run_shell_command");
+        assertThat(trace.get(1).errorMessage()).isEqualTo("exit code 1");
+    }
+
+    @Test
+    void getToolExecutions_noExecution_throwsNotFound_neverQueriesToolExecutions() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByIdAndTenantId(executionId, tenantId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getToolExecutions(tenantId, executionId))
+                .isInstanceOf(AgentException.class)
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        verifyNoInteractions(toolExecutionRepository);
+    }
+
+    @Test
+    void getToolExecutions_noToolsRanYet_returnsEmptyList() {
+        UUID executionId = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(executionId);
+        when(repository.findByIdAndTenantId(executionId, tenantId)).thenReturn(Optional.of(execution));
+        when(toolExecutionRepository.findByTenantIdAndExecutionIdOrderByCreatedAtAsc(tenantId, executionId.toString()))
+                .thenReturn(List.of());
+
+        assertThat(service.getToolExecutions(tenantId, executionId)).isEmpty();
+    }
+
+    @Test
+    void getUsage_reflectsActiveCountAndConfiguredLimit() {
+        when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(3L);
+
+        var usage = service.getUsage(tenantId);
+
+        assertThat(usage.active()).isEqualTo(3L);
+        assertThat(usage.limit()).isEqualTo(5);
+    }
+
+    @Test
+    void getUsage_isScopedToTheCallingTenant_notGlobal() {
+        UUID otherTenant = UUID.randomUUID();
+        when(repository.countByTenantIdAndStatusIn(otherTenant, List.of("QUEUED", "RUNNING"))).thenReturn(5L);
+        // tenantId itself has nothing active (default 0 stub).
+
+        assertThat(service.getUsage(tenantId).active()).isZero();
     }
 }

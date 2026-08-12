@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.credential;
 
+import com.enterprisehub.dto.CredentialTestResult;
 import com.enterprisehub.dto.VendorCredentialSummary;
 import com.enterprisehub.gateway.error.GlobalExceptionHandler;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
@@ -27,13 +28,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class VendorCredentialControllerTest {
 
     private VendorCredentialService vendorCredentialService;
+    private VendorCredentialTestService vendorCredentialTestService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         vendorCredentialService = mock(VendorCredentialService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new VendorCredentialController(vendorCredentialService))
+        vendorCredentialTestService = mock(VendorCredentialTestService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new VendorCredentialController(vendorCredentialService, vendorCredentialTestService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -51,7 +54,7 @@ class VendorCredentialControllerTest {
     @Test
     void put_returns200_withNoTokenField() throws Exception {
         when(vendorCredentialService.put(eq(tenantId), any())).thenReturn(
-                new VendorCredentialSummary(UUID.randomUUID().toString(), "ANTHROPIC", true, Instant.now(), Instant.now()));
+                new VendorCredentialSummary(UUID.randomUUID().toString(), "ANTHROPIC", true, Instant.now(), Instant.now(), null, null));
 
         mockMvc.perform(put("/vendor-credentials")
                         .contentType("application/json")
@@ -77,7 +80,7 @@ class VendorCredentialControllerTest {
     @Test
     void list_returnsSummaries() throws Exception {
         when(vendorCredentialService.list(tenantId)).thenReturn(List.of(
-                new VendorCredentialSummary(UUID.randomUUID().toString(), "OPENAI", true, Instant.now(), Instant.now())));
+                new VendorCredentialSummary(UUID.randomUUID().toString(), "OPENAI", true, Instant.now(), Instant.now(), null, null)));
 
         mockMvc.perform(get("/vendor-credentials"))
                 .andExpect(status().isOk())
@@ -98,6 +101,44 @@ class VendorCredentialControllerTest {
                 .when(vendorCredentialService).delete(tenantId, "GEMINI");
 
         mockMvc.perform(delete("/vendor-credentials/GEMINI"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void test_validCredential_returnsValidTrue() throws Exception {
+        when(vendorCredentialTestService.test(tenantId, "ANTHROPIC"))
+                .thenReturn(new CredentialTestResult(true, "Anthropic credential is valid."));
+
+        mockMvc.perform(post("/vendor-credentials/test")
+                        .contentType("application/json")
+                        .content("""
+                                {"provider":"ANTHROPIC"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(true));
+    }
+
+    @Test
+    void test_rejectedCredential_returnsValidFalse_stillHttp200() throws Exception {
+        when(vendorCredentialTestService.test(tenantId, "ANTHROPIC"))
+                .thenReturn(new CredentialTestResult(false, "Anthropic rejected this credential: 401 Unauthorized"));
+
+        mockMvc.perform(post("/vendor-credentials/test")
+                        .contentType("application/json")
+                        .content("""
+                                {"provider":"ANTHROPIC"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false));
+    }
+
+    @Test
+    void test_noCredentialStored_returns404() throws Exception {
+        when(vendorCredentialTestService.test(tenantId, "ANTHROPIC"))
+                .thenThrow(new VendorCredentialException(HttpStatus.NOT_FOUND, "No active credential stored for provider ANTHROPIC"));
+
+        mockMvc.perform(post("/vendor-credentials/test")
+                        .contentType("application/json")
+                        .content("""
+                                {"provider":"ANTHROPIC"}"""))
                 .andExpect(status().isNotFound());
     }
 }

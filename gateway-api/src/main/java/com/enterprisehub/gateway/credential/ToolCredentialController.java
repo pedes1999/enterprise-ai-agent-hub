@@ -1,7 +1,9 @@
 package com.enterprisehub.gateway.credential;
 
 import com.enterprisehub.dto.CreateToolCredentialRequest;
+import com.enterprisehub.dto.CredentialTestResult;
 import com.enterprisehub.dto.ToolCredentialSummary;
+import com.enterprisehub.dto.ToolCredentialTestRequest;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,9 +19,11 @@ import java.util.UUID;
 public class ToolCredentialController {
 
     private final ToolCredentialService toolCredentialService;
+    private final ToolCredentialTestService toolCredentialTestService;
 
-    public ToolCredentialController(ToolCredentialService toolCredentialService) {
+    public ToolCredentialController(ToolCredentialService toolCredentialService, ToolCredentialTestService toolCredentialTestService) {
         this.toolCredentialService = toolCredentialService;
+        this.toolCredentialTestService = toolCredentialTestService;
     }
 
     @PutMapping
@@ -39,5 +43,12 @@ public class ToolCredentialController {
                                         @PathVariable String credentialKind) {
         toolCredentialService.delete(UUID.fromString(principal.tenantId()), credentialKind);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/test")
+    public ResponseEntity<CredentialTestResult> test(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                       @RequestBody ToolCredentialTestRequest request) {
+        var result = toolCredentialTestService.test(UUID.fromString(principal.tenantId()), request.credentialKind());
+        return ResponseEntity.ok(result);
     }
 }

@@ -1,15 +1,21 @@
 package com.enterprisehub.gateway.agent;
 
 import com.enterprisehub.core.llm.LlmProvider;
+import com.enterprisehub.dto.ExecutionUsage;
+import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
+import com.enterprisehub.gateway.entity.ToolExecution;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.AgentExecutionRepository;
+import com.enterprisehub.gateway.repository.ToolExecutionRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,13 +52,15 @@ public class AgentExecutionService {
 
     private final AgentExecutionRepository repository;
     private final AgentDefinitionRepository agentDefinitionRepository;
+    private final ToolExecutionRepository toolExecutionRepository;
     private final ExecutionLimitProperties executionLimitProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository,
-                                  ExecutionLimitProperties executionLimitProperties) {
+                                  ToolExecutionRepository toolExecutionRepository, ExecutionLimitProperties executionLimitProperties) {
         this.repository = repository;
         this.agentDefinitionRepository = agentDefinitionRepository;
+        this.toolExecutionRepository = toolExecutionRepository;
         this.executionLimitProperties = executionLimitProperties;
     }
 
@@ -83,8 +91,9 @@ public class AgentExecutionService {
 
         validateRequiredInputs(definition, prompt, repositoryUrl, inputParameters);
 
-        long activeCount = repository.countByTenantIdAndStatusIn(tenantId, ACTIVE_STATUSES);
-        int limit = executionLimitProperties.maxConcurrentPerTenant();
+        ExecutionUsage usage = getUsage(tenantId);
+        long activeCount = usage.active();
+        int limit = usage.limit();
         if (activeCount >= limit) {
             log.warn("Tenant {} rejected at the concurrency cap ({} active executions, limit {})", tenantId, activeCount, limit);
             throw new AgentException(HttpStatus.TOO_MANY_REQUESTS,
@@ -213,5 +222,52 @@ public class AgentExecutionService {
     @Transactional(readOnly = true)
     public Optional<AgentExecution> findForTenant(UUID tenantId, UUID executionId) {
         return repository.findByIdAndTenantId(executionId, tenantId);
+    }
+
+    /**
+     * Backs GET /agents/executions/usage -- lets the frontend show "3 / 5
+     * executions running" before a caller submits a trigger request. Same
+     * count enqueue()'s own concurrency check uses (QUEUED + RUNNING),
+     * extracted here so both stay in sync instead of two separate queries
+     * that could drift.
+     */
+    @Transactional(readOnly = true)
+    public ExecutionUsage getUsage(UUID tenantId) {
+        long active = repository.countByTenantIdAndStatusIn(tenantId, ACTIVE_STATUSES);
+        return new ExecutionUsage(active, executionLimitProperties.maxConcurrentPerTenant());
+    }
+
+    /** Backs GET /agents/executions -- status is optional (null/blank means "every status"). Tenant-scoped by RLS, same as every other query here. */
+    @Transactional(readOnly = true)
+    public Page<AgentExecution> list(UUID tenantId, String status, Pageable pageable) {
+        if (status == null || status.isBlank()) {
+            return repository.findByTenantId(tenantId, pageable);
+        }
+        return repository.findByTenantIdAndStatus(tenantId, status, pageable);
+    }
+
+    /**
+     * Backs GET /agents/executions/{id}/tool-executions -- the ordered
+     * trace a teammate opens to verify what an agent actually did. 404s if
+     * the execution itself doesn't exist or belongs to another tenant
+     * (checked explicitly for a clear error message; tool_executions' own
+     * RLS policy would also silently return nothing for a wrong tenant,
+     * but that's indistinguishable from "no tools ran yet").
+     */
+    @Transactional(readOnly = true)
+    public List<ToolExecutionRecord> getToolExecutions(UUID tenantId, UUID executionId) {
+        findForTenant(tenantId, executionId)
+                .orElseThrow(() -> new AgentException(HttpStatus.NOT_FOUND, "No execution with id " + executionId));
+
+        return toolExecutionRepository.findByTenantIdAndExecutionIdOrderByCreatedAtAsc(tenantId, executionId.toString())
+                .stream()
+                .map(this::toToolExecutionRecord)
+                .toList();
+    }
+
+    private ToolExecutionRecord toToolExecutionRecord(ToolExecution toolExecution) {
+        return new ToolExecutionRecord(
+                toolExecution.getToolName(), toolExecution.getDurationMs(), toolExecution.getOutcome(),
+                toolExecution.getErrorMessage(), toolExecution.getCreatedAt());
     }
 }
