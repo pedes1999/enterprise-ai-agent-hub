@@ -1,0 +1,103 @@
+/*
+ * Design tokens for Enterprise AI Agent Hub -- confirmed token system:
+ * cool-neutral base, one desaturated steel-blue accent, Inter for UI text,
+ * JetBrains Mono for technical content (repo URLs, execution IDs, tool
+ * output, PR links). Restrained, precise, quiet confidence -- Datadog/
+ * Linear/Vercel/Stripe dashboard energy, not marketing-site energy.
+ */
+
+:root {
+  /* Palette */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-border: #e1e4e9;
+  --color-text: #14171c;
+  --color-text-muted: #5b6472;
+  --color-accent: #35516f;
+  --color-accent-hover: #2a405a;
+
+  /* Status */
+  --color-status-queued: #8a93a3;
+  --color-status-running: #35516f;
+  --color-status-succeeded: #3f7d56;
+  --color-status-failed: #b1453e;
+
+  /* Status backgrounds (very light tint, used behind a dot+label pill) */
+  --color-status-queued-bg: #eef0f2;
+  --color-status-running-bg: #e8edf2;
+  --color-status-succeeded-bg: #e8f3ec;
+  --color-status-failed-bg: #f7eae9;
+
+  /* Typography */
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+
+  /* Layout */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --sidebar-width: 220px;
+  --header-height: 56px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 23, 28, 0.04);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.93em;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+}

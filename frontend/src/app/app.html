@@ -1,0 +1,19 @@
+@if (authService.isAuthenticated()) {
+  <header class="app-header">
+    <nav>
+      <a routerLink="/agents">Agents</a>
+      <a routerLink="/executions">Executions</a>
+      @if (authService.isAdmin()) {
+        <a routerLink="/credentials">Credentials</a>
+        <a routerLink="/team">Team</a>
+      }
+    </nav>
+    <div class="header-right">
+      <app-usage-indicator />
+      <span class="user-email mono">{{ authService.email() }}</span>
+      <button type="button" (click)="logout()">Sign out</button>
+    </div>
+  </header>
+}
+
+<router-outlet />

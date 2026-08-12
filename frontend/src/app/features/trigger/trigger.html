@@ -1,0 +1,58 @@
+<div class="trigger-page">
+  <a class="back" [routerLink]="['/agents', slug]">← Back to agent</a>
+
+  <h1>Run {{ definition()?.name ?? slug }}</h1>
+
+  @if (usage(); as u) {
+    <p class="usage mono">{{ u.active }} / {{ u.limit }} executions running</p>
+  }
+
+  <form (ngSubmit)="submit()">
+    <label for="prompt">Prompt (optional)</label>
+    <textarea id="prompt" rows="4" [(ngModel)]="prompt" name="prompt"></textarea>
+
+    <label for="repositoryUrl">Repository URL</label>
+    <input id="repositoryUrl" type="text" [(ngModel)]="repositoryUrl" name="repositoryUrl" placeholder="https://github.com/org/repo" />
+
+    <label>Input parameters</label>
+    @for (row of paramRows; track $index) {
+      <div class="param-row">
+        <input type="text" placeholder="key" [(ngModel)]="row.key" [name]="'key-' + $index" />
+        <input type="text" placeholder="value" [(ngModel)]="row.value" [name]="'value-' + $index" />
+        <button type="button" class="secondary" (click)="removeParamRow($index)">Remove</button>
+      </div>
+    }
+    <button type="button" class="secondary" (click)="addParamRow()">Add parameter</button>
+
+    @if (errorKind() === 'rate-limit') {
+      <p class="error" role="alert">Execution limit reached. {{ errorMessage() }}</p>
+    } @else if (errorKind() === 'required-inputs') {
+      <p class="error" role="alert">{{ errorMessage() }}</p>
+    } @else if (errorKind() === 'generic') {
+      <p class="error" role="alert">{{ errorMessage() }}</p>
+    }
+
+    <button type="submit" [disabled]="submitting()">
+      {{ submitting() ? 'Triggering…' : 'Trigger execution' }}
+    </button>
+  </form>
+
+  @if (execution(); as exec) {
+    <section class="execution-status">
+      <h2>Execution {{ exec.id }}</h2>
+      <p>
+        Status:
+        <span class="badge" [class]="'status-' + exec.status.toLowerCase()">{{ exec.status }}</span>
+      </p>
+      @if (exec.reply) {
+        <div>
+          <h3>Reply</h3>
+          <pre class="mono block">{{ exec.reply }}</pre>
+        </div>
+      }
+      @if (exec.errorMessage) {
+        <p class="error" role="alert">{{ exec.errorMessage }}</p>
+      }
+    </section>
+  }
+</div>

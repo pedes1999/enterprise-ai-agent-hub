@@ -1,0 +1,72 @@
+<div class="team-page">
+  <h1>Team members</h1>
+
+  <form class="invite-form" (ngSubmit)="createUser()">
+    <h2>Invite a member</h2>
+    <div class="row">
+      <div>
+        <label for="newName">Name</label>
+        <input id="newName" type="text" [(ngModel)]="newName" name="newName" />
+      </div>
+      <div>
+        <label for="newEmail">Email</label>
+        <input id="newEmail" type="email" [(ngModel)]="newEmail" name="newEmail" />
+      </div>
+      <div>
+        <label for="newRole">Role</label>
+        <select id="newRole" [(ngModel)]="newRole" name="newRole">
+          <option value="ADMIN">Admin</option>
+          <option value="DEVELOPER">Developer</option>
+          <option value="READONLY">Read only</option>
+        </select>
+      </div>
+      <button type="submit" [disabled]="creating() || !newEmail || !newName">
+        {{ creating() ? 'Inviting…' : 'Invite' }}
+      </button>
+    </div>
+    <p class="hint">A temporary password is generated and emailed automatically — it is never shown here.</p>
+    @if (createdMessage()) {
+      <p class="success">{{ createdMessage() }}</p>
+    }
+    @if (createError()) {
+      <p class="error">{{ createError() }}</p>
+    }
+  </form>
+
+  @if (loading()) {
+    <p class="empty">Loading…</p>
+  } @else {
+    <table class="team-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Joined</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (user of users(); track user.id) {
+          <tr>
+            <td>{{ user.name }}</td>
+            <td class="mono">{{ user.email }}</td>
+            <td>
+              <select [ngModel]="user.role" (ngModelChange)="changeRole(user, $event)">
+                <option value="ADMIN">Admin</option>
+                <option value="DEVELOPER">Developer</option>
+                <option value="READONLY">Read only</option>
+              </select>
+            </td>
+            <td class="mono">{{ user.createdAt }}</td>
+            <td>
+              @if (user.email !== currentUserEmail()) {
+                <button type="button" class="danger" (click)="removeUser(user)">Remove</button>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</div>

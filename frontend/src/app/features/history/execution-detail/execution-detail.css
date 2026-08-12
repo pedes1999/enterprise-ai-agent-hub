@@ -1,0 +1,129 @@
+.detail-page {
+  padding: var(--space-6);
+  max-width: 760px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+h1 {
+  font-size: var(--font-size-lg);
+}
+
+.agent-slug {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+section {
+  margin-top: var(--space-5);
+}
+
+h2 {
+  font-size: var(--font-size-md);
+  margin-bottom: var(--space-2);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+}
+
+dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+dd {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.block {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  white-space: pre-wrap;
+  font-size: var(--font-size-sm);
+}
+
+.error {
+  color: var(--color-status-failed);
+  font-size: var(--font-size-sm);
+}
+
+.error.small {
+  font-size: var(--font-size-xs);
+  margin-top: var(--space-1);
+}
+
+.trace-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.trace-table th,
+.trace-table td {
+  text-align: left;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+  vertical-align: top;
+}
+
+.trace-table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.badge {
+  display: inline-flex;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.status-queued {
+  color: var(--color-status-queued);
+  background: var(--color-status-queued-bg);
+}
+
+.status-running {
+  color: var(--color-status-running);
+  background: var(--color-status-running-bg);
+}
+
+.status-succeeded {
+  color: var(--color-status-succeeded);
+  background: var(--color-status-succeeded-bg);
+}
+
+.status-failed {
+  color: var(--color-status-failed);
+  background: var(--color-status-failed-bg);
+}

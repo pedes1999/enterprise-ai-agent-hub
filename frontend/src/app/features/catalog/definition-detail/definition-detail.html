@@ -1,0 +1,45 @@
+<div class="detail-page">
+  <a class="back" routerLink="/agents">← Back to catalog</a>
+
+  @if (loading()) {
+    <p class="empty">Loading…</p>
+  } @else if (notFound()) {
+    <p class="empty">This agent could not be found.</p>
+  } @else if (definition(); as def) {
+    <h1>{{ def.name }}</h1>
+    <p class="slug mono">{{ def.slug }}</p>
+    <p class="description">{{ def.description }}</p>
+    <a class="trigger-link" [routerLink]="['/agents', def.slug, 'trigger']">Trigger execution →</a>
+
+    <section>
+      <h2>System prompt</h2>
+      <pre class="mono block">{{ def.systemPrompt }}</pre>
+    </section>
+
+    <section>
+      <h2>Tools</h2>
+      @if (def.toolNames.length > 0) {
+        <div class="tools">
+          @for (tool of def.toolNames; track tool) {
+            <span class="tool-chip mono">{{ tool }}</span>
+          }
+        </div>
+      } @else {
+        <p class="empty">No tools configured.</p>
+      }
+    </section>
+
+    <section>
+      <h2>Input source</h2>
+      <p>{{ def.inputSourceType ?? 'None — this agent takes a free-form prompt only.' }}</p>
+      @if (def.requiredInputs.length > 0) {
+        <p>Required inputs:</p>
+        <ul>
+          @for (input of def.requiredInputs; track input) {
+            <li class="mono">{{ input }}</li>
+          }
+        </ul>
+      }
+    </section>
+  }
+</div>

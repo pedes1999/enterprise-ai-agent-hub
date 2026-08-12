@@ -1,0 +1,122 @@
+.trigger-page {
+  padding: var(--space-6);
+  max-width: 640px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+h1 {
+  font-size: var(--font-size-xl);
+}
+
+.usage {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: var(--space-2) 0 var(--space-5);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin-top: var(--space-2);
+}
+
+input,
+textarea {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.param-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.param-row input {
+  flex: 1;
+}
+
+button {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+button.secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--color-status-failed);
+  font-size: var(--font-size-sm);
+}
+
+.execution-status {
+  margin-top: var(--space-6);
+}
+
+.badge {
+  display: inline-flex;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.status-queued {
+  color: var(--color-status-queued);
+  background: var(--color-status-queued-bg);
+}
+
+.status-running {
+  color: var(--color-status-running);
+  background: var(--color-status-running-bg);
+}
+
+.status-succeeded {
+  color: var(--color-status-succeeded);
+  background: var(--color-status-succeeded-bg);
+}
+
+.status-failed {
+  color: var(--color-status-failed);
+  background: var(--color-status-failed-bg);
+}
+
+.block {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  white-space: pre-wrap;
+  font-size: var(--font-size-sm);
+}

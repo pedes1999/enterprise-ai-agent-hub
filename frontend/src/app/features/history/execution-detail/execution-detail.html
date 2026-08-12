@@ -1,0 +1,85 @@
+<div class="detail-page">
+  <a class="back" routerLink="/executions">← Back to history</a>
+
+  @if (loading()) {
+    <p class="empty">Loading…</p>
+  } @else if (execution(); as exec) {
+    <h1 class="mono">{{ exec.id }}</h1>
+    <p>
+      <span class="badge" [class]="'status-' + exec.status.toLowerCase()">{{ exec.status }}</span>
+      <span class="agent-slug">{{ exec.agentSlug }}</span>
+    </p>
+
+    <section>
+      <h2>Details</h2>
+      <dl>
+        <dt>LLM provider</dt>
+        <dd class="mono">{{ exec.llmProvider }}</dd>
+        <dt>Repository URL</dt>
+        <dd class="mono">{{ exec.repositoryUrl ?? '—' }}</dd>
+        <dt>Created</dt>
+        <dd class="mono">{{ exec.createdAt }}</dd>
+        <dt>Started</dt>
+        <dd class="mono">{{ exec.startedAt ?? '—' }}</dd>
+        <dt>Completed</dt>
+        <dd class="mono">{{ exec.completedAt ?? '—' }}</dd>
+      </dl>
+    </section>
+
+    @if (exec.prompt) {
+      <section>
+        <h2>Prompt</h2>
+        <pre class="mono block">{{ exec.prompt }}</pre>
+      </section>
+    }
+
+    @if (exec.reply) {
+      <section>
+        <h2>Reply</h2>
+        <pre class="mono block">{{ exec.reply }}</pre>
+      </section>
+    }
+
+    @if (exec.errorMessage) {
+      <section>
+        <h2>Error</h2>
+        <p class="error">{{ exec.errorMessage }}</p>
+      </section>
+    }
+
+    <section>
+      <h2>Tool-call trace</h2>
+      @if (toolExecutions().length === 0) {
+        <p class="empty">No tools were called during this execution.</p>
+      } @else {
+        <table class="trace-table">
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>Outcome</th>
+              <th>Duration</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (record of toolExecutions(); track $index) {
+              <tr>
+                <td class="mono">{{ record.toolName }}</td>
+                <td>
+                  <span class="badge" [class]="record.outcome === 'SUCCESS' ? 'status-succeeded' : 'status-failed'">
+                    {{ record.outcome }}
+                  </span>
+                  @if (record.errorMessage) {
+                    <div class="error small">{{ record.errorMessage }}</div>
+                  }
+                </td>
+                <td class="mono">{{ record.durationMs }}ms</td>
+                <td class="mono">{{ record.createdAt }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </section>
+  }
+</div>

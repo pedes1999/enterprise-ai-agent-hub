@@ -1,0 +1,25 @@
+<div class="auth-page">
+  <form class="auth-card" [formGroup]="form" (ngSubmit)="submit()">
+    <h1>Sign in</h1>
+    <p class="subtitle">Enterprise AI Agent Hub</p>
+
+    <label for="tenantSlug">Organization</label>
+    <input id="tenantSlug" type="text" formControlName="tenantSlug" autocomplete="organization" />
+
+    <label for="email">Email</label>
+    <input id="email" type="email" formControlName="email" autocomplete="email" />
+
+    <label for="password">Password</label>
+    <input id="password" type="password" formControlName="password" autocomplete="current-password" />
+
+    @if (errorMessage()) {
+      <p class="error" role="alert">{{ errorMessage() }}</p>
+    }
+
+    <button type="submit" [disabled]="submitting()">
+      {{ submitting() ? 'Signing in…' : 'Sign in' }}
+    </button>
+
+    <p class="switch">No account? <a routerLink="/register">Register your organization</a></p>
+  </form>
+</div>

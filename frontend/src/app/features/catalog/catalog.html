@@ -1,0 +1,30 @@
+<div class="catalog-page">
+  <h1>Agent catalog</h1>
+  <p class="subtitle">Browse the agents available to this organization.</p>
+
+  @if (loading()) {
+    <p class="empty">Loading…</p>
+  } @else if (definitions().length === 0) {
+    <p class="empty">No agents are configured yet.</p>
+  } @else {
+    <div class="grid">
+      @for (def of definitions(); track def.slug) {
+        <article class="card">
+          <h2>{{ def.name }}</h2>
+          <p class="slug mono">{{ def.slug }}</p>
+          <p class="description">{{ def.description }}</p>
+          @if (def.toolNames.length > 0) {
+            <div class="tools">
+              @for (tool of def.toolNames; track tool) {
+                <span class="tool-chip mono">{{ tool }}</span>
+              }
+            </div>
+          }
+          <div class="card-actions">
+            <a [routerLink]="['/agents', def.slug]">View configuration</a>
+          </div>
+        </article>
+      }
+    </div>
+  }
+</div>

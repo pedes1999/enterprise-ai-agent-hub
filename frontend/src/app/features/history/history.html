@@ -1,0 +1,51 @@
+<div class="history-page">
+  <h1>Execution history</h1>
+
+  <div class="toolbar">
+    <label for="statusFilter">Status</label>
+    <select id="statusFilter" [(ngModel)]="statusFilter" (ngModelChange)="onFilterChange()">
+      <option value="">All</option>
+      <option value="QUEUED">Queued</option>
+      <option value="RUNNING">Running</option>
+      <option value="SUCCEEDED">Succeeded</option>
+      <option value="FAILED">Failed</option>
+    </select>
+  </div>
+
+  @if (loading()) {
+    <p class="empty">Loading…</p>
+  } @else if (page(); as p) {
+    @if (p.content.length === 0) {
+      <p class="empty">No executions found.</p>
+    } @else {
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Agent</th>
+            <th>Status</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (exec of p.content; track exec.id) {
+            <tr [routerLink]="['/executions', exec.id]" class="row-link">
+              <td class="mono">{{ exec.id }}</td>
+              <td>{{ exec.agentSlug }}</td>
+              <td>
+                <span class="badge" [class]="'status-' + exec.status.toLowerCase()">{{ exec.status }}</span>
+              </td>
+              <td class="mono">{{ exec.createdAt }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+
+      <div class="pagination">
+        <button type="button" (click)="previousPage()" [disabled]="currentPage() === 0">Previous</button>
+        <span class="mono">Page {{ currentPage() + 1 }} of {{ p.page.totalPages || 1 }}</span>
+        <button type="button" (click)="nextPage()" [disabled]="currentPage() + 1 >= p.page.totalPages">Next</button>
+      </div>
+    }
+  }
+</div>

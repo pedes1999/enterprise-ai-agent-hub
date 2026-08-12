@@ -1,0 +1,5 @@
+@if (usage(); as u) {
+  <span class="usage-indicator mono" [class.near-limit]="u.active >= u.limit">
+    {{ u.active }} / {{ u.limit }} executions running
+  </span>
+}
