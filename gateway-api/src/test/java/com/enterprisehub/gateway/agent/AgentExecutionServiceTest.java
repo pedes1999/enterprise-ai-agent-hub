@@ -75,6 +75,91 @@ class AgentExecutionServiceTest {
         assertThat(service.deserializeInputParameters(saved)).isEmpty();
     }
 
+    private AgentDefinition definitionWithRequiredInputs(String slug, String... requiredInputs) {
+        AgentDefinition definition = new AgentDefinition();
+        definition.setSlug(slug);
+        definition.setRequiredInputs(List.of(requiredInputs));
+        return definition;
+    }
+
+    @Test
+    void enqueue_generalAssistantStyle_promptOnly_succeeds() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("general-assistant"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("general-assistant", "prompt")));
+
+        AgentExecution saved = service.enqueue(tenantId, "Hello", "general-assistant", null, null);
+
+        assertThat(saved.getStatus()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void enqueue_generalAssistantStyle_blankPrompt_rejected() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("general-assistant"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("general-assistant", "prompt")));
+
+        assertThatThrownBy(() -> service.enqueue(tenantId, "   ", "general-assistant", null, null))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("Missing required input(s): prompt")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void enqueue_codingAgentStyle_repositoryUrlOnly_succeeds() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));
+
+        AgentExecution saved = service.enqueue(tenantId, "", "coding-agent", "https://github.com/org/repo.git", Map.of());
+
+        assertThat(saved.getStatus()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void enqueue_codingAgentStyle_missingRepositoryUrl_rejected() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));
+
+        assertThatThrownBy(() -> service.enqueue(tenantId, "some prompt", "coding-agent", null, null))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("Missing required input(s): repositoryUrl")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void enqueue_requiredInputParametersKey_missing_rejected() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("ticket-agent"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("ticket-agent", "inputParameters:ticketKey")));
+
+        assertThatThrownBy(() -> service.enqueue(tenantId, "", "ticket-agent", null, Map.of()))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("Missing required input(s): inputParameters.ticketKey")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void enqueue_requiredInputParametersKey_present_succeeds() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("ticket-agent"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("ticket-agent", "inputParameters:ticketKey")));
+
+        AgentExecution saved = service.enqueue(tenantId, "", "ticket-agent", null, Map.of("ticketKey", "TICKET-123"));
+
+        assertThat(saved.getStatus()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void enqueue_multipleMissingRequiredInputs_allReportedTogether() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue("ticket-pr-agent"))
+                .thenReturn(Optional.of(definitionWithRequiredInputs("ticket-pr-agent", "repositoryUrl", "inputParameters:ticketKey")));
+
+        assertThatThrownBy(() -> service.enqueue(tenantId, "", "ticket-pr-agent", null, null))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("Missing required input(s): repositoryUrl, inputParameters.ticketKey")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(repository);
+    }
+
     @Test
     void enqueue_unknownAgentSlug_rejectedBeforePersisting() {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("does-not-exist")).thenReturn(Optional.empty());

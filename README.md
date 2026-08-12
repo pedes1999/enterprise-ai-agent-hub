@@ -146,6 +146,21 @@ at the database layer (Postgres RLS), not just in application code.
   isolation boundary). Every rejection is logged at WARN with the
   tenant id and current count — a tenant that regularly hits the ceiling
   is a real product signal worth seeing, not just an error to swallow.
+- **Per-agent required inputs, not a hardcoded field check**:
+  `AgentDefinition.requiredInputs` (migration `V10`, same array-column
+  pattern as `tool_names`) replaces what used to be a single ad hoc
+  `"prompt is required"` check in `AgentExecutionController`. A fixed
+  vocabulary — `"prompt"`, `"repositoryUrl"`, `"inputParameters:{key}"`
+  (e.g. `"inputParameters:ticketKey"`) — lets a definition declare
+  exactly which combination it needs; `AgentExecutionService.enqueue()`
+  resolves the definition (already loading it for the slug check anyway),
+  collects **every** unmet requirement rather than failing on the first,
+  and rejects with `400` and a message listing all of them:
+  `"Missing required input(s): repositoryUrl, inputParameters.ticketKey"`.
+  `general-assistant` requires `prompt`; `coding-agent` requires
+  `repositoryUrl`. An unrecognized requirement string on a definition row
+  is treated as a data-integrity problem (500), the same posture as
+  `ToolCatalog`'s unknown-tool-name error, not a caller mistake.
 - **Sandboxed tool execution is vendor-neutral at the API boundary**:
   `SandboxClient` (`agent-runtime`) knows nothing about E2B specifically —
   `SandboxClientHttpImpl` calls an internal HTTP sidecar
@@ -274,7 +289,7 @@ in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterpris
 | `PUT /tool-credentials` · `GET /tool-credentials` · `DELETE /tool-credentials/{credentialKind}` | ADMIN | Store/rotate/remove encrypted credentials sandboxed tools need — `credentialKind` is `GIT` (clone auth) or `GITHUB` (a PAT with repo/PR scope, used by `OpenPullRequestTool`) |
 | `POST /agents/ping` | ADMIN, DEVELOPER | Spike endpoint: real round-trip to the tenant's configured LLM, proves the credential → LangChain4j → provider chain works. Not the real agent execution model. |
 | `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Spike endpoint: runs a named `AgentDefinition` (`agentSlug` in the body, defaults to `general-assistant`) synchronously through `SharedExecutionContext` — proves the full multi-round tool-calling loop, real sandbox execution (via `SandboxSession` and whichever tools that agent's definition includes), and audit logging all work end to end. A prompt that chains several steps (e.g. "clone, then read the README, then write a new file, then cat it") works in one request now, as long as the chosen agent's tool list includes what it needs. |
-| `POST /agents/execute` | ADMIN, DEVELOPER | The real (durable, async) execution model: enqueues an `agent_executions` row (`QUEUED`, tagged with the resolved `agentSlug`) and returns its id immediately — `202 Accepted` — without waiting for the LLM or any tool. `AgentJobWorker` picks it up separately. Rejects an unknown/inactive `agentSlug` immediately (400), before persisting anything. `repositoryUrl`/`inputParameters` are optional — see the input source abstraction note above; both no-ops for an `AgentDefinition` with no `inputSourceType`. Rejects with `429` (before persisting) once the calling tenant already has `app.execution.max-concurrent-per-tenant` (default 5) executions `QUEUED`/`RUNNING`. |
+| `POST /agents/execute` | ADMIN, DEVELOPER | The real (durable, async) execution model: enqueues an `agent_executions` row (`QUEUED`, tagged with the resolved `agentSlug`) and returns its id immediately — `202 Accepted` — without waiting for the LLM or any tool. `AgentJobWorker` picks it up separately. Rejects an unknown/inactive `agentSlug` immediately (400), before persisting anything. `repositoryUrl`/`inputParameters` are optional — see the input source abstraction note above; both no-ops for an `AgentDefinition` with no `inputSourceType`. Rejects with `400` listing every unmet requirement (e.g. `"Missing required input(s): repositoryUrl"`) per that agent's own `requiredInputs` — see the generalized required-inputs note above. Rejects with `429` (before persisting) once the calling tenant already has `app.execution.max-concurrent-per-tenant` (default 5) executions `QUEUED`/`RUNNING`. |
 | `GET /agents/executions/{id}` | ADMIN, DEVELOPER, READONLY | Poll a queued/running/finished execution's current status, and once `SUCCEEDED`/`FAILED`, its reply/error. Tenant-isolated the same way as everything else (RLS + an explicit `tenant_id` filter). |
 | `GET /agents/definitions` | ADMIN, DEVELOPER, READONLY | The browsable agent catalog — slug, name, description, and tool list for every active `AgentDefinition`. This is how a caller discovers what `agentSlug` values are valid. |
 | `GET /actuator/health` | none | Health check |
@@ -290,8 +305,8 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-340 automated tests as of the last update (20 `agent-core` + 88
-`agent-runtime` + 232 `gateway-api`) — unit tests (mocked) for every
+347 automated tests as of the last update (20 `agent-core` + 88
+`agent-runtime` + 239 `gateway-api`) — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
@@ -338,6 +353,7 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **The Ticket-to-PR loop closes**: `OpenPullRequestTool` — commit, push, open a real GitHub pull request, gated on its own `testCommand` argument being mandatory and independently re-verified inside the sandbox (never trusts the model's say-so that it tested anything). New `GITHUB` `tool_credentials` kind. `coding-agent`'s tool list and system prompt updated (migration `V7`) to actually use it. **Live-verified end to end** against a real private GitHub repo: `git_clone` → `write_file` → `open_pull_request` → a real pull request opened via the GitHub REST API. Getting there surfaced a real sidecar bug — see the history note below.
 - [x] **Input source abstraction** (groundwork for a second real agent, log-to-fix-PR, alongside ticket-to-PR) — `InputSourceResolver`/`InputSourceResolverRegistry` (`gateway-api`) let an `AgentDefinition` declare an `inputSourceType` (migration `V8`) instead of every triggerable agent needing bespoke input plumbing; `ManualTextInputResolver` is the first (simplest) implementation. `TriggerAgentExecutionRequest` gained `repositoryUrl` + `inputParameters`, both additive/optional — `AgentPromptRunner` assembles `"Repository: {url}"` + resolved blob + free-text `prompt`, skipping blank sections, verified byte-identical to prior behavior when neither is used. Unit-tested only so far (not yet live-verified against the running app with a real trigger request).
 - [x] **Per-tenant execution concurrency cap** — `AgentExecutionService.enqueue()` rejects with `429` (before persisting anything) once a tenant already has `app.execution.max-concurrent-per-tenant` (default 5) executions `QUEUED`/`RUNNING`, logged at WARN. Protects a metered E2B/Anthropic account from a bug or a misbehaving loop, not from a hostile tenant (RLS remains the isolation boundary). A flat number today, not a per-tenant-tier setting — deliberately not built yet, just left room for it.
+- [x] **Generalized per-agent required inputs** — `AgentDefinition.requiredInputs` (migration `V10`) replaces the old hardcoded `"prompt is required"` check with a fixed vocabulary (`prompt`, `repositoryUrl`, `inputParameters:{key}`) a definition declares against; `AgentExecutionService.enqueue()` collects every unmet requirement and rejects with `400` listing all of them, not just the first. `general-assistant` requires `prompt`, `coding-agent` requires `repositoryUrl`.
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)
 - [ ] Multi-agent "Ticket → PR" pipeline — the actual end product this is building toward: a Planner/Coder/Reviewer sequence of agent executions per ticket (each a named `AgentDefinition` from the catalog above), using `agent_executions.agent_type` to distinguish stages, ending with the now-real `OpenPullRequestTool` step. Not started.

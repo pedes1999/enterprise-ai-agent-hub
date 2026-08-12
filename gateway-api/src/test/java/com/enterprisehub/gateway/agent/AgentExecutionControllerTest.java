@@ -102,13 +102,20 @@ class AgentExecutionControllerTest {
     }
 
     @Test
-    void execute_blankPrompt_returns400_neverEnqueues() throws Exception {
+    void execute_missingRequiredInput_returns400() throws Exception {
+        // No ad hoc "prompt is required" check in the controller anymore --
+        // this is now entirely AgentExecutionService.enqueue()'s call
+        // (see AgentExecutionServiceTest for the per-AgentDefinition
+        // required-inputs coverage); the controller's job is just to map
+        // whatever AgentException it throws to the right status code.
+        when(executionService.enqueue(eq(tenantId), eq(" "), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null)))
+                .thenThrow(new AgentException(org.springframework.http.HttpStatus.BAD_REQUEST, "Missing required input(s): prompt"));
+
         mockMvc.perform(post("/agents/execute")
                         .contentType("application/json")
                         .content("""
                                 {"prompt":" "}"""))
                 .andExpect(status().isBadRequest());
-        verifyNoInteractions(executionService);
     }
 
     @Test

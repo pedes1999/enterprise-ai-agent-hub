@@ -46,9 +46,10 @@ public class AgentExecutionController {
     @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER')")
     public ResponseEntity<AgentExecutionAccepted> execute(@AuthenticationPrincipal PlatformPrincipal principal,
                                                             @RequestBody TriggerAgentExecutionRequest request) {
-        if (request.prompt() == null || request.prompt().isBlank()) {
-            throw new AgentException(HttpStatus.BAD_REQUEST, "prompt is required");
-        }
+        // No ad hoc "prompt is required" check here anymore -- whether prompt,
+        // repositoryUrl, or a specific inputParameters key is required is
+        // entirely a property of the resolved AgentDefinition now (see
+        // AgentExecutionService.validateRequiredInputs()).
         String agentSlug = (request.agentSlug() == null || request.agentSlug().isBlank())
                 ? AgentPromptRunner.DEFAULT_AGENT_SLUG : request.agentSlug();
         AgentExecution execution = executionService.enqueue(

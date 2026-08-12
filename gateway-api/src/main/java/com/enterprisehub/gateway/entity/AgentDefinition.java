@@ -60,6 +60,19 @@ public class AgentDefinition {
     @Column(name = "input_source_type")
     private String inputSourceType;
 
+    /**
+     * Which of a fixed vocabulary this definition needs present on a
+     * trigger request before it's allowed to run at all: "prompt",
+     * "repositoryUrl", or "inputParameters:{key}" (e.g.
+     * "inputParameters:ticketKey") -- see
+     * AgentExecutionService.validateRequiredInputs(). Defaults to an empty
+     * list (Java-side, mirroring the column's own NOT NULL DEFAULT '{}')
+     * so a bare `new AgentDefinition()` in a test is never null here.
+     */
+    @Column(name = "required_inputs", nullable = false)
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    private List<String> requiredInputs = List.of();
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
