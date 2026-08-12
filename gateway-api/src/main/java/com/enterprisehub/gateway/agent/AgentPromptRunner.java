@@ -13,6 +13,7 @@ import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
@@ -69,6 +70,7 @@ public class AgentPromptRunner {
     private final VendorCredentialService vendorCredentialService;
     private final SharedExecutionContextFactory sharedExecutionContextFactory;
     private final LlmProperties llmProperties;
+    private final TenantLlmProviderResolver tenantLlmProviderResolver;
     private final SandboxClient sandboxClient;
     private final ToolExecutionListener toolExecutionListener;
     private final CredentialResolver credentialResolver;
@@ -80,6 +82,7 @@ public class AgentPromptRunner {
                               VendorCredentialService vendorCredentialService,
                               SharedExecutionContextFactory sharedExecutionContextFactory,
                               LlmProperties llmProperties,
+                              TenantLlmProviderResolver tenantLlmProviderResolver,
                               SandboxClient sandboxClient,
                               ToolExecutionListener toolExecutionListener,
                               CredentialResolver credentialResolver,
@@ -90,6 +93,7 @@ public class AgentPromptRunner {
         this.vendorCredentialService = vendorCredentialService;
         this.sharedExecutionContextFactory = sharedExecutionContextFactory;
         this.llmProperties = llmProperties;
+        this.tenantLlmProviderResolver = tenantLlmProviderResolver;
         this.sandboxClient = sandboxClient;
         this.toolExecutionListener = toolExecutionListener;
         this.credentialResolver = credentialResolver;
@@ -98,8 +102,9 @@ public class AgentPromptRunner {
         this.inputSourceResolverRegistry = inputSourceResolverRegistry;
     }
 
-    public String modelName() {
-        return llmProperties.modelName();
+    /** The model name depends on which provider the tenant resolves to -- see TenantLlmProviderResolver. */
+    public String modelName(UUID tenantId) {
+        return llmProperties.modelName(tenantLlmProviderResolver.resolve(tenantId));
     }
 
     /**
@@ -125,9 +130,9 @@ public class AgentPromptRunner {
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
                                                       String repositoryUrl, Map<String, String> inputParameters) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
-        LlmProvider provider = llmProperties.resolvedProvider();
+        LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
-        String modelName = llmProperties.modelName();
+        String modelName = llmProperties.modelName(provider);
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
         String assembledPrompt = assemblePrompt(repositoryUrl, resolvedInput, prompt);
 
@@ -135,7 +140,7 @@ public class AgentPromptRunner {
         try {
             List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver);
             SharedExecutionContext context = sharedExecutionContextFactory.create(
-                    tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(), llmProperties.baseUrl());
+                    tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(), llmProperties.baseUrl(provider));
 
             return context.chat(assembledPrompt);
         } finally {

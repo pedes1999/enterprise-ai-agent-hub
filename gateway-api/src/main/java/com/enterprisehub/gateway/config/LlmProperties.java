@@ -28,11 +28,21 @@ public record LlmProperties(String provider, String anthropicModelName, String l
     }
 
     public String modelName() {
-        return resolvedProvider() == LlmProvider.LOCAL ? localModelName : anthropicModelName;
+        return modelName(resolvedProvider());
+    }
+
+    /** Same as modelName() but for an explicitly resolved provider -- see TenantLlmProviderResolver, which may resolve to something other than resolvedProvider() when a tenant has its own preference set. */
+    public String modelName(LlmProvider provider) {
+        return provider == LlmProvider.LOCAL ? localModelName : anthropicModelName;
     }
 
     /** Null for every provider except LOCAL -- LlmEngineFactory only reads this for LOCAL, and defaults it itself if blank. */
     public String baseUrl() {
-        return resolvedProvider() == LlmProvider.LOCAL ? localBaseUrl : null;
+        return baseUrl(resolvedProvider());
+    }
+
+    /** Same as baseUrl() but for an explicitly resolved provider -- see modelName(LlmProvider)'s javadoc. */
+    public String baseUrl(LlmProvider provider) {
+        return provider == LlmProvider.LOCAL ? localBaseUrl : null;
     }
 }

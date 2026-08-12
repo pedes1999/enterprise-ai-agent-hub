@@ -9,6 +9,7 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,26 +35,29 @@ public class AgentPingService {
     private final VendorCredentialService vendorCredentialService;
     private final LlmEngineFactory llmEngineFactory;
     private final LlmProperties llmProperties;
+    private final TenantLlmProviderResolver tenantLlmProviderResolver;
     private final AgentPromptRunner agentPromptRunner;
 
     public AgentPingService(VendorCredentialRepository vendorCredentialRepository,
                              VendorCredentialService vendorCredentialService,
                              LlmEngineFactory llmEngineFactory,
                              LlmProperties llmProperties,
+                             TenantLlmProviderResolver tenantLlmProviderResolver,
                              AgentPromptRunner agentPromptRunner) {
         this.vendorCredentialRepository = vendorCredentialRepository;
         this.vendorCredentialService = vendorCredentialService;
         this.llmEngineFactory = llmEngineFactory;
         this.llmProperties = llmProperties;
+        this.tenantLlmProviderResolver = tenantLlmProviderResolver;
         this.agentPromptRunner = agentPromptRunner;
     }
 
     public AgentPingResponse ping(UUID tenantId, String prompt) {
         validatePrompt(prompt);
-        LlmProvider provider = llmProperties.resolvedProvider();
+        LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
-        String modelName = llmProperties.modelName();
-        ChatLanguageModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl());
+        String modelName = llmProperties.modelName(provider);
+        ChatLanguageModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl(provider));
 
         String reply;
         try {
@@ -75,16 +79,17 @@ public class AgentPingService {
         // AgentExecutionService/AgentJobWorker).
         String executionId = UUID.randomUUID().toString();
 
+        LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         ToolCallingChatEngine.ToolChatResult result;
         try {
             result = agentPromptRunner.run(tenantId, executionId, resolvedSlug, prompt);
         } catch (AgentException e) {
             throw e; // already the right status (e.g. unknown agent, no credential) -- don't relabel it as a provider failure
         } catch (RuntimeException e) {
-            throw new AgentException(HttpStatus.BAD_GATEWAY, llmProperties.resolvedProvider() + " call failed: " + e.getMessage());
+            throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + e.getMessage());
         }
 
-        return new AgentToolPingResponse(llmProperties.resolvedProvider().name(), agentPromptRunner.modelName(), result.reply(), result.toolWasUsed(), resolvedSlug);
+        return new AgentToolPingResponse(provider.name(), agentPromptRunner.modelName(tenantId), result.reply(), result.toolWasUsed(), resolvedSlug);
     }
 
     private void validatePrompt(String prompt) {

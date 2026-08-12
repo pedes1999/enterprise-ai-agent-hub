@@ -32,3 +32,13 @@ export interface CredentialTestResult {
   valid: boolean;
   message: string;
 }
+
+export interface LlmProviderAvailability {
+  provider: string;
+  hasActiveCredential: boolean;
+}
+
+export interface TenantSettings {
+  preferredLlmProvider: string | null;
+  availableProviders: LlmProviderAvailability[];
+}

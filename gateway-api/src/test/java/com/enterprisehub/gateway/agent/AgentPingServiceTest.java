@@ -9,6 +9,7 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ class AgentPingServiceTest {
     private VendorCredentialRepository vendorCredentialRepository;
     private VendorCredentialService vendorCredentialService;
     private LlmEngineFactory llmEngineFactory;
+    private TenantLlmProviderResolver tenantLlmProviderResolver;
     private AgentPromptRunner agentPromptRunner;
     private ChatLanguageModel chatLanguageModel;
     private AgentPingService service;
@@ -46,12 +48,14 @@ class AgentPingServiceTest {
         vendorCredentialRepository = mock(VendorCredentialRepository.class);
         vendorCredentialService = mock(VendorCredentialService.class);
         llmEngineFactory = mock(LlmEngineFactory.class);
+        tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
         LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
-        when(agentPromptRunner.modelName()).thenReturn("claude-3-5-sonnet-20240620");
+        when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
+        when(agentPromptRunner.modelName(tenantId)).thenReturn("claude-3-5-sonnet-20240620");
         service = new AgentPingService(vendorCredentialRepository, vendorCredentialService, llmEngineFactory,
-                properties, agentPromptRunner);
+                properties, tenantLlmProviderResolver, agentPromptRunner);
     }
 
     private VendorCredential activeCredential() {

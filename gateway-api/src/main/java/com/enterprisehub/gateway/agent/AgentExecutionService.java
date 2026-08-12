@@ -3,7 +3,7 @@ package com.enterprisehub.gateway.agent;
 import com.enterprisehub.dto.ExecutionUsage;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
-import com.enterprisehub.gateway.config.LlmProperties;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.entity.ToolExecution;
@@ -54,17 +54,17 @@ public class AgentExecutionService {
     private final AgentDefinitionRepository agentDefinitionRepository;
     private final ToolExecutionRepository toolExecutionRepository;
     private final ExecutionLimitProperties executionLimitProperties;
-    private final LlmProperties llmProperties;
+    private final TenantLlmProviderResolver tenantLlmProviderResolver;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository,
                                   ToolExecutionRepository toolExecutionRepository, ExecutionLimitProperties executionLimitProperties,
-                                  LlmProperties llmProperties) {
+                                  TenantLlmProviderResolver tenantLlmProviderResolver) {
         this.repository = repository;
         this.agentDefinitionRepository = agentDefinitionRepository;
         this.toolExecutionRepository = toolExecutionRepository;
         this.executionLimitProperties = executionLimitProperties;
-        this.llmProperties = llmProperties;
+        this.tenantLlmProviderResolver = tenantLlmProviderResolver;
     }
 
     /**
@@ -108,7 +108,7 @@ public class AgentExecutionService {
         execution.setTenantId(tenantId);
         execution.setAgentType(agentSlug);
         execution.setTriggerSource("API");
-        execution.setLlmProvider(llmProperties.resolvedProvider().name());
+        execution.setLlmProvider(tenantLlmProviderResolver.resolve(tenantId).name());
         // prompt is optional at the DTO/validation level (see validateRequiredInputs()) but
         // the column itself is NOT NULL (V5__agent_execution_queue.sql) -- coerce null to the
         // same "" sentinel that migration already uses, rather than letting a caller for any

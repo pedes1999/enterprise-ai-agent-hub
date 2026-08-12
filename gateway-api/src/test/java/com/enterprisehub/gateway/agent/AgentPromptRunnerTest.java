@@ -19,6 +19,7 @@ import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
@@ -49,6 +50,7 @@ class AgentPromptRunnerTest {
     private VendorCredentialRepository vendorCredentialRepository;
     private VendorCredentialService vendorCredentialService;
     private SharedExecutionContextFactory sharedExecutionContextFactory;
+    private TenantLlmProviderResolver tenantLlmProviderResolver;
     private ChatLanguageModel chatLanguageModel;
     private AgentPromptRunner runner;
     private CredentialResolver credentialResolver;
@@ -63,6 +65,8 @@ class AgentPromptRunnerTest {
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
         LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
+        tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
+        when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         sandboxClient = mock(SandboxClient.class);
         ToolExecutionListener toolExecutionListener = mock(ToolExecutionListener.class);
         credentialResolver = mock(CredentialResolver.class);
@@ -81,7 +85,7 @@ class AgentPromptRunnerTest {
                 new OpenPullRequestToolFactory()));
         InputSourceResolverRegistry inputSourceResolverRegistry = new InputSourceResolverRegistry(List.of(new ManualTextInputResolver()));
         runner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
-                sharedExecutionContextFactory, properties, sandboxClient, toolExecutionListener, credentialResolver,
+                sharedExecutionContextFactory, properties, tenantLlmProviderResolver, sandboxClient, toolExecutionListener, credentialResolver,
                 agentDefinitionRepository, toolCatalog, inputSourceResolverRegistry);
     }
 
@@ -155,6 +159,30 @@ class AgentPromptRunnerTest {
 
         assertThat(result.reply()).isEqualTo("Hi there!");
         assertThat(result.toolWasUsed()).isFalse();
+    }
+
+    @Test
+    void run_tenantPrefersLocal_resolvesLocalCredentialAndBaseUrl_notAnthropic() {
+        when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);
+        VendorCredential localCredential = activeCredential();
+        localCredential.setProvider("LOCAL");
+        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(localCredential));
+        when(vendorCredentialService.decryptToken(localCredential)).thenReturn("not-needed");
+        when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-local"), eq(LlmProvider.LOCAL),
+                eq("not-needed"), eq((String) null), any(), any(), eq((String) null)))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
+                    String systemPrompt = invocation.getArgument(6);
+                    return new SharedExecutionContext(tenantId.toString(), "exec-local", chatLanguageModel, tools, systemPrompt);
+                });
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("Hi from local!")));
+
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-local", AGENT_SLUG, "Hello");
+
+        assertThat(result.reply()).isEqualTo("Hi from local!");
+        verify(vendorCredentialRepository, never()).findByTenantIdAndProvider(tenantId, "ANTHROPIC");
     }
 
     @Test
@@ -375,7 +403,19 @@ class AgentPromptRunnerTest {
     }
 
     @Test
-    void modelName_returnsConfiguredModel() {
-        assertThat(runner.modelName()).isEqualTo("claude-3-5-sonnet-20240620");
+    void modelName_returnsConfiguredModelForTheTenantsResolvedProvider() {
+        assertThat(runner.modelName(tenantId)).isEqualTo("claude-3-5-sonnet-20240620");
+    }
+
+    @Test
+    void modelName_tenantResolvesToLocal_returnsLocalModelName() {
+        LlmProperties localProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", "llama3.1", "http://localhost:11434/v1");
+        when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);
+        AgentPromptRunner localRunner = new AgentPromptRunner(vendorCredentialRepository, vendorCredentialService,
+                sharedExecutionContextFactory, localProperties, tenantLlmProviderResolver, sandboxClient, mock(ToolExecutionListener.class),
+                credentialResolver, agentDefinitionRepository, new ToolCatalog(List.of(new CurrentDateTimeToolFactory())),
+                new InputSourceResolverRegistry(List.of(new ManualTextInputResolver())));
+
+        assertThat(localRunner.modelName(tenantId)).isEqualTo("llama3.1");
     }
 }

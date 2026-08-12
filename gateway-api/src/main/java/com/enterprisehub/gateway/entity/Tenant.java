@@ -39,4 +39,8 @@ public class Tenant {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
+
+    /** Null means "no override" -- falls back to the server-wide app.llm.provider default. See TenantLlmProviderResolver. */
+    @Column(name = "preferred_llm_provider")
+    private String preferredLlmProvider;
 }

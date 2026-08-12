@@ -1,14 +1,15 @@
 package com.enterprisehub.gateway.agent;
 
+import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
-import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.entity.ToolExecution;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.AgentExecutionRepository;
 import com.enterprisehub.gateway.repository.ToolExecutionRepository;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -29,6 +30,7 @@ class AgentExecutionServiceTest {
     private AgentExecutionRepository repository;
     private AgentDefinitionRepository agentDefinitionRepository;
     private ToolExecutionRepository toolExecutionRepository;
+    private TenantLlmProviderResolver tenantLlmProviderResolver;
     private AgentExecutionService service;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -37,8 +39,10 @@ class AgentExecutionServiceTest {
         repository = mock(AgentExecutionRepository.class);
         agentDefinitionRepository = mock(AgentDefinitionRepository.class);
         toolExecutionRepository = mock(ToolExecutionRepository.class);
+        tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
+        when(tenantLlmProviderResolver.resolve(any())).thenReturn(LlmProvider.ANTHROPIC);
         service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5),
-                new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null));
+                tenantLlmProviderResolver);
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));
@@ -57,6 +61,15 @@ class AgentExecutionServiceTest {
         assertThat(saved.getLlmProvider()).isEqualTo("ANTHROPIC");
         assertThat(saved.getAgentType()).isEqualTo("coding-agent");
         verify(repository).save(any(AgentExecution.class));
+    }
+
+    @Test
+    void enqueue_llmProvider_reflectsWhateverTheTenantResolvesTo_notAlwaysAnthropic() {
+        when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);
+
+        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null);
+
+        assertThat(saved.getLlmProvider()).isEqualTo("LOCAL");
     }
 
     @Test

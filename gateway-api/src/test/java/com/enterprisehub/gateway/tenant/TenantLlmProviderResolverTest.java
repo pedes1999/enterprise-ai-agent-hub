@@ -1,0 +1,73 @@
+package com.enterprisehub.gateway.tenant;
+
+import com.enterprisehub.core.llm.LlmProvider;
+import com.enterprisehub.gateway.config.LlmProperties;
+import com.enterprisehub.gateway.entity.Tenant;
+import com.enterprisehub.gateway.repository.TenantRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+class TenantLlmProviderResolverTest {
+
+    private TenantRepository tenantRepository;
+    private TenantLlmProviderResolver resolver;
+    private final UUID tenantId = UUID.randomUUID();
+
+    @BeforeEach
+    void setUp() {
+        tenantRepository = mock(TenantRepository.class);
+        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
+        resolver = new TenantLlmProviderResolver(tenantRepository, llmProperties);
+    }
+
+    private Tenant tenantWithPreference(String preferredLlmProvider) {
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Acme");
+        tenant.setSlug("acme");
+        tenant.setPreferredLlmProvider(preferredLlmProvider);
+        return tenant;
+    }
+
+    @Test
+    void resolve_tenantHasNoPreference_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference(null)));
+
+        assertThat(resolver.resolve(tenantId)).isEqualTo(LlmProvider.ANTHROPIC);
+    }
+
+    @Test
+    void resolve_tenantHasBlankPreference_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference("  ")));
+
+        assertThat(resolver.resolve(tenantId)).isEqualTo(LlmProvider.ANTHROPIC);
+    }
+
+    @Test
+    void resolve_tenantPrefersLocal_returnsLocalNotServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference("LOCAL")));
+
+        assertThat(resolver.resolve(tenantId)).isEqualTo(LlmProvider.LOCAL);
+    }
+
+    @Test
+    void resolve_tenantPreferenceIsUnparseable_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference("NOT_A_REAL_PROVIDER")));
+
+        assertThat(resolver.resolve(tenantId)).isEqualTo(LlmProvider.ANTHROPIC);
+    }
+
+    @Test
+    void resolve_unknownTenant_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+
+        assertThat(resolver.resolve(tenantId)).isEqualTo(LlmProvider.ANTHROPIC);
+    }
+}
