@@ -7,22 +7,19 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
 
 import java.util.UUID;
 
 /**
- * Backs POST /vendor-credentials/test. Only ANTHROPIC is actually wired up
- * (see LlmEngineFactory) -- OPENAI/GEMINI return a clear "not supported
- * yet" result rather than a confusing 500 from the underlying
- * UnsupportedOperationException.
- *
- * The "cheap" validation call is still a REAL, billed Anthropic API call
- * (a trivial prompt asking for a one-word reply) -- there is no free way
- * to validate an API key against Anthropic's API short of actually calling
- * it. Deliberately real, not a network-level "is this well-formed" check,
- * since a syntactically valid but revoked/wrong key needs to fail here.
+ * Backs POST /vendor-credentials/test. Every VendorProvider is wired up
+ * now (see LlmEngineFactory) -- the "cheap" validation call is still a
+ * REAL, billed API call to whichever vendor (a trivial prompt asking for a
+ * one-word reply), since there's no free way to validate an API key short
+ * of actually calling it. Deliberately real, not a network-level "is this
+ * well-formed" check, since a syntactically valid but revoked/wrong key
+ * needs to fail here.
  */
 @Service
 public class VendorCredentialTestService {
@@ -45,25 +42,24 @@ public class VendorCredentialTestService {
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.BAD_REQUEST,
                         "provider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
-        if (provider != VendorProvider.ANTHROPIC) {
-            return new CredentialTestResult(false, "Test connection is not supported for " + provider.name() + " yet.");
-        }
-
         VendorCredential credential = repository.findByTenantIdAndProvider(tenantId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.NOT_FOUND,
                         "No active credential stored for provider " + provider.name()));
 
         String apiKey = vendorCredentialService.decryptToken(credential);
+        // VendorProvider/LlmProvider are kept in sync by convention (same names) -- see LlmProvider's javadoc.
+        LlmProvider llmProvider = LlmProvider.valueOf(provider.name());
 
         try {
-            ChatLanguageModel model = llmEngineFactory.create(LlmProvider.ANTHROPIC, apiKey, llmProperties.anthropicModelName());
+            ChatLanguageModel model = llmEngineFactory.create(llmProvider, apiKey,
+                    llmProperties.modelName(llmProvider), llmProperties.baseUrl(llmProvider));
             model.generate("Reply with exactly one word: OK");
         } catch (RuntimeException e) {
-            return new CredentialTestResult(false, "Anthropic rejected this credential: " + e.getMessage());
+            return new CredentialTestResult(false, provider + " rejected this credential: " + e.getMessage());
         }
 
         vendorCredentialService.markValidated(tenantId, provider.name());
-        return new CredentialTestResult(true, "Anthropic credential is valid.");
+        return new CredentialTestResult(true, provider + " credential is valid.");
     }
 }

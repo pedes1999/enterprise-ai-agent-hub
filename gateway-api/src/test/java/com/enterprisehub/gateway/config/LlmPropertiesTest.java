@@ -7,7 +7,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class LlmPropertiesTest {
 
-    private final LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", "llama3.1", "http://localhost:11434/v1");
+    private final LlmProperties properties = new LlmProperties(
+            "ANTHROPIC", "claude-3-5-sonnet-20240620", "gpt-4o-mini", "gemini-1.5-flash", "llama3.1", "http://localhost:11434/v1");
 
     @Test
     void resolvedProvider_parsesConfiguredValue() {
@@ -16,7 +17,7 @@ class LlmPropertiesTest {
 
     @Test
     void resolvedProvider_unparseableValue_fallsBackToAnthropic() {
-        LlmProperties broken = new LlmProperties("not-a-provider", "claude-3-5-sonnet-20240620", null, null);
+        LlmProperties broken = new LlmProperties("not-a-provider", "claude-3-5-sonnet-20240620", null, null, null, null);
         assertThat(broken.resolvedProvider()).isEqualTo(LlmProvider.ANTHROPIC);
     }
 
@@ -28,6 +29,16 @@ class LlmPropertiesTest {
     @Test
     void modelName_explicitAnthropicProvider_returnsAnthropicModelName() {
         assertThat(properties.modelName(LlmProvider.ANTHROPIC)).isEqualTo("claude-3-5-sonnet-20240620");
+    }
+
+    @Test
+    void modelName_explicitOpenAiProvider_returnsOpenAiModelName_evenWhenServerDefaultIsAnthropic() {
+        assertThat(properties.modelName(LlmProvider.OPENAI)).isEqualTo("gpt-4o-mini");
+    }
+
+    @Test
+    void modelName_explicitGeminiProvider_returnsGeminiModelName_evenWhenServerDefaultIsAnthropic() {
+        assertThat(properties.modelName(LlmProvider.GEMINI)).isEqualTo("gemini-1.5-flash");
     }
 
     @Test
@@ -43,6 +54,16 @@ class LlmPropertiesTest {
     @Test
     void baseUrl_explicitAnthropicProvider_isNull() {
         assertThat(properties.baseUrl(LlmProvider.ANTHROPIC)).isNull();
+    }
+
+    @Test
+    void baseUrl_explicitOpenAiProvider_isNull() {
+        assertThat(properties.baseUrl(LlmProvider.OPENAI)).isNull();
+    }
+
+    @Test
+    void baseUrl_explicitGeminiProvider_isNull() {
+        assertThat(properties.baseUrl(LlmProvider.GEMINI)).isNull();
     }
 
     @Test

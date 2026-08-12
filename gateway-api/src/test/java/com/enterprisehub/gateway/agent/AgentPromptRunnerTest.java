@@ -64,7 +64,7 @@ class AgentPromptRunnerTest {
         vendorCredentialService = mock(VendorCredentialService.class);
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");

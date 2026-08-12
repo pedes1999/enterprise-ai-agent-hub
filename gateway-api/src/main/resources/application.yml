@@ -85,6 +85,10 @@ app:
     # LlmProperties javadoc. Override via env var as Anthropic ships newer
     # models; the API accepts any valid model id string.
     anthropic-model-name: ${ANTHROPIC_MODEL_NAME:claude-sonnet-4-5-20250929}
+    # Same idea, for OPENAI/GEMINI -- overridable per tenant regardless (see
+    # TenantSettingsService.preferredModelName).
+    openai-model-name: ${OPENAI_MODEL_NAME:gpt-4o-mini}
+    gemini-model-name: ${GEMINI_MODEL_NAME:gemini-1.5-flash}
     # Only read when provider=LOCAL. Must match a model already pulled in
     # your local server (e.g. `ollama pull llama3.1`).
     local-model-name: ${LLM_LOCAL_MODEL_NAME:llama3.1}

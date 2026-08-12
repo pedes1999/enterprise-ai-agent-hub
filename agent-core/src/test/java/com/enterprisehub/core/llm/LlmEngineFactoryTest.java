@@ -2,11 +2,11 @@ package com.enterprisehub.core.llm;
 
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LlmEngineFactoryTest {
 
@@ -23,17 +23,17 @@ class LlmEngineFactoryTest {
     }
 
     @Test
-    void create_openAi_throwsUnsupportedOperation() {
-        assertThatThrownBy(() -> factory.create(LlmProvider.OPENAI, "fake-key", "gpt-4"))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("OPENAI");
+    void create_openAi_returnsOpenAiChatModel() {
+        ChatLanguageModel model = factory.create(LlmProvider.OPENAI, "fake-test-key", "gpt-4o-mini");
+
+        assertThat(model).isInstanceOf(OpenAiChatModel.class);
     }
 
     @Test
-    void create_gemini_throwsUnsupportedOperation() {
-        assertThatThrownBy(() -> factory.create(LlmProvider.GEMINI, "fake-key", "gemini-pro"))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("GEMINI");
+    void create_gemini_returnsGoogleAiGeminiChatModel() {
+        ChatLanguageModel model = factory.create(LlmProvider.GEMINI, "fake-test-key", "gemini-1.5-flash");
+
+        assertThat(model).isInstanceOf(GoogleAiGeminiChatModel.class);
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.enterprisehub.core.llm;
 
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 
 /**
@@ -14,14 +15,13 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
  * (see its pom: langchain4j + lombok/slf4j only, no spring-boot-starter).
  * gateway-api wires an instance of this as a bean.
  *
- * OPENAI/GEMINI intentionally throw rather than half-implementing a second
- * and third provider before the first one has proven the abstraction is
- * even shaped correctly end to end. LOCAL is the exception: it deliberately
- * reuses langchain4j-open-ai (already a dependency) pointed at a caller-
- * supplied baseUrl instead of OpenAI's real API, since Ollama/LM Studio/vLLM
- * all speak the same OpenAI-compatible chat-completions wire format -- no
- * new SDK needed to let a tenant run entirely against their own machine
- * (e.g. for local testing without spending real Anthropic credits).
+ * All four VendorProvider values are implemented: ANTHROPIC and OPENAI call
+ * their real APIs directly; GEMINI uses langchain4j-google-ai-gemini
+ * (already a dependency); LOCAL reuses langchain4j-open-ai (same client as
+ * OPENAI) pointed at a caller-supplied baseUrl instead of OpenAI's real API,
+ * since Ollama/LM Studio/vLLM all speak the same OpenAI-compatible
+ * chat-completions wire format -- no new SDK needed to let a tenant run
+ * entirely against their own machine.
  */
 public class LlmEngineFactory {
 
@@ -52,6 +52,16 @@ public class LlmEngineFactory {
                     // costs the same as before.
                     .maxTokens(4096)
                     .build();
+            case OPENAI -> OpenAiChatModel.builder()
+                    .apiKey(apiKey)
+                    .modelName(modelName)
+                    .maxTokens(4096)
+                    .build();
+            case GEMINI -> GoogleAiGeminiChatModel.builder()
+                    .apiKey(apiKey)
+                    .modelName(modelName)
+                    .maxOutputTokens(4096)
+                    .build();
             case LOCAL -> OpenAiChatModel.builder()
                     .baseUrl(baseUrl != null && !baseUrl.isBlank() ? baseUrl : LOCAL_DEFAULT_BASE_URL)
                     // Most local servers (Ollama included) don't check this at
@@ -61,8 +71,6 @@ public class LlmEngineFactory {
                     .modelName(modelName)
                     .maxTokens(4096)
                     .build();
-            case OPENAI, GEMINI -> throw new UnsupportedOperationException(
-                    provider + " is not wired up yet -- only ANTHROPIC and LOCAL are implemented so far");
         };
     }
 }

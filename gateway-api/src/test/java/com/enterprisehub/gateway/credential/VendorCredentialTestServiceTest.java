@@ -35,23 +35,23 @@ class VendorCredentialTestServiceTest {
         vendorCredentialService = mock(VendorCredentialService.class);
         llmEngineFactory = mock(LlmEngineFactory.class);
         chatModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", null, null);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", "gpt-4o-mini", "gemini-1.5-flash", null, null);
         service = new VendorCredentialTestService(repository, vendorCredentialService, llmEngineFactory, properties);
     }
 
-    private VendorCredential activeCredential() {
+    private VendorCredential activeCredential(String provider) {
         VendorCredential credential = new VendorCredential();
-        credential.setProvider("ANTHROPIC");
+        credential.setProvider(provider);
         credential.setActive(true);
         return credential;
     }
 
     @Test
     void test_anthropic_validCredential_returnsValid_marksValidated() {
-        VendorCredential credential = activeCredential();
+        VendorCredential credential = activeCredential("ANTHROPIC");
         when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
-        when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-sonnet-4-5-20250929")).thenReturn(chatModel);
+        when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-sonnet-4-5-20250929", null)).thenReturn(chatModel);
         when(chatModel.generate(anyString())).thenReturn("OK");
 
         CredentialTestResult result = service.test(tenantId, "anthropic");
@@ -62,16 +62,46 @@ class VendorCredentialTestServiceTest {
 
     @Test
     void test_anthropic_rejectedCredential_returnsInvalid_neverMarksValidated() {
-        VendorCredential credential = activeCredential();
+        VendorCredential credential = activeCredential("ANTHROPIC");
         when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-bad-key");
-        when(llmEngineFactory.create(any(), any(), any())).thenReturn(chatModel);
+        when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatModel);
         when(chatModel.generate(anyString())).thenThrow(new RuntimeException("401 Unauthorized"));
 
         CredentialTestResult result = service.test(tenantId, "ANTHROPIC");
 
         assertThat(result.valid()).isFalse();
         assertThat(result.message()).contains("401 Unauthorized");
+        verify(vendorCredentialService, never()).markValidated(any(), any());
+    }
+
+    @Test
+    void test_openai_validCredential_returnsValid_marksValidated() {
+        VendorCredential credential = activeCredential("OPENAI");
+        when(repository.findByTenantIdAndProvider(tenantId, "OPENAI")).thenReturn(Optional.of(credential));
+        when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-openai-real-key");
+        when(llmEngineFactory.create(LlmProvider.OPENAI, "sk-openai-real-key", "gpt-4o-mini", null)).thenReturn(chatModel);
+        when(chatModel.generate(anyString())).thenReturn("OK");
+
+        CredentialTestResult result = service.test(tenantId, "OPENAI");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.message()).contains("OPENAI");
+        verify(vendorCredentialService).markValidated(tenantId, "OPENAI");
+    }
+
+    @Test
+    void test_gemini_rejectedCredential_returnsInvalid() {
+        VendorCredential credential = activeCredential("GEMINI");
+        when(repository.findByTenantIdAndProvider(tenantId, "GEMINI")).thenReturn(Optional.of(credential));
+        when(vendorCredentialService.decryptToken(credential)).thenReturn("bad-key");
+        when(llmEngineFactory.create(LlmProvider.GEMINI, "bad-key", "gemini-1.5-flash", null)).thenReturn(chatModel);
+        when(chatModel.generate(anyString())).thenThrow(new RuntimeException("API key not valid"));
+
+        CredentialTestResult result = service.test(tenantId, "GEMINI");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.message()).contains("GEMINI").contains("API key not valid");
         verify(vendorCredentialService, never()).markValidated(any(), any());
     }
 
@@ -86,7 +116,7 @@ class VendorCredentialTestServiceTest {
 
     @Test
     void test_inactiveCredential_throwsNotFound() {
-        VendorCredential credential = activeCredential();
+        VendorCredential credential = activeCredential("ANTHROPIC");
         credential.setActive(false);
         when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
 
@@ -100,15 +130,5 @@ class VendorCredentialTestServiceTest {
         assertThatThrownBy(() -> service.test(tenantId, "COHERE"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
-    }
-
-    @Test
-    void test_openaiProvider_notSupportedYet_neverCallsLlmFactory() {
-        CredentialTestResult result = service.test(tenantId, "OPENAI");
-
-        assertThat(result.valid()).isFalse();
-        assertThat(result.message()).contains("not supported");
-        verifyNoInteractions(llmEngineFactory);
-        verifyNoInteractions(vendorCredentialService);
     }
 }

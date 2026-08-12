@@ -23,7 +23,7 @@ class TenantLlmProviderResolverTest {
     @BeforeEach
     void setUp() {
         tenantRepository = mock(TenantRepository.class);
-        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null);
+        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null);
         resolver = new TenantLlmProviderResolver(tenantRepository, llmProperties);
     }
 

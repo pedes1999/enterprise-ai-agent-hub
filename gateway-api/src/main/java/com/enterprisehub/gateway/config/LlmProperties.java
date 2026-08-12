@@ -4,24 +4,24 @@ import com.enterprisehub.core.llm.LlmProvider;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * anthropicModelName is a plain string, deliberately NOT langchain4j's
- * bundled AnthropicChatModelName enum -- that enum ships frozen inside the
- * langchain4j-anthropic jar and, as of this dependency's version, only
- * knows models up to mid-2024. The Anthropic API itself accepts any valid
- * model id string, so pinning to the enum would silently cap which models
- * this platform could ever use until the library itself is upgraded.
+ * anthropicModelName/openaiModelName/geminiModelName are plain strings,
+ * deliberately NOT langchain4j's bundled per-vendor model-name enums --
+ * those ship frozen inside their jars and lag behind each vendor's real,
+ * ever-changing model catalog (see GET /vendor-credentials/{provider}/models,
+ * which lists the vendor's actual current models instead).
  *
  * provider is a server-wide switch (env var, not a database row) between
- * ANTHROPIC (the real default) and LOCAL (any OpenAI-compatible server on
- * this machine -- Ollama, LM Studio, vLLM) -- e.g. for local testing without
- * spending real Anthropic credits. Deliberately NOT a per-tenant or
- * per-execution choice: it's a whole-instance dev/ops setting, same shape
- * as app.job-worker.enabled, not a product feature with its own UI. To use
- * it, set LLM_PROVIDER=LOCAL and PUT a LOCAL vendor credential (any
- * non-blank token -- most local servers don't check it).
+ * ANTHROPIC (the real default), OPENAI, GEMINI, and LOCAL (any
+ * OpenAI-compatible server on this machine -- Ollama, LM Studio, vLLM) --
+ * e.g. for local testing without spending real Anthropic credits.
+ * Deliberately NOT a per-tenant or per-execution choice on its own: it's a
+ * whole-instance dev/ops default, same shape as app.job-worker.enabled --
+ * see TenantLlmProviderResolver/TenantSettingsService for the per-tenant
+ * override that sits on top of this default.
  */
 @ConfigurationProperties(prefix = "app.llm")
-public record LlmProperties(String provider, String anthropicModelName, String localModelName, String localBaseUrl) {
+public record LlmProperties(String provider, String anthropicModelName, String openaiModelName, String geminiModelName,
+                             String localModelName, String localBaseUrl) {
 
     public LlmProvider resolvedProvider() {
         return LlmProvider.parse(provider).orElse(LlmProvider.ANTHROPIC);
@@ -33,7 +33,12 @@ public record LlmProperties(String provider, String anthropicModelName, String l
 
     /** Same as modelName() but for an explicitly resolved provider -- see TenantLlmProviderResolver, which may resolve to something other than resolvedProvider() when a tenant has its own preference set. */
     public String modelName(LlmProvider provider) {
-        return provider == LlmProvider.LOCAL ? localModelName : anthropicModelName;
+        return switch (provider) {
+            case ANTHROPIC -> anthropicModelName;
+            case OPENAI -> openaiModelName;
+            case GEMINI -> geminiModelName;
+            case LOCAL -> localModelName;
+        };
     }
 
     /** Null for every provider except LOCAL -- LlmEngineFactory only reads this for LOCAL, and defaults it itself if blank. */
