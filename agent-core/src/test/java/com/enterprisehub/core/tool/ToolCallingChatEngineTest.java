@@ -725,4 +725,172 @@ class ToolCallingChatEngineTest {
         assertThat(captor.getValue().messages()).hasSize(1);
         assertThat(captor.getValue().messages().get(0)).isInstanceOf(UserMessage.class);
     }
+
+    // ---------- incremental conversation caching (cacheConversationHistory) ----------
+
+    private static Object cacheControlAttribute(ChatMessage message) {
+        if (message instanceof UserMessage m) {
+            return m.attributes().get("cache_control");
+        }
+        if (message instanceof AiMessage m) {
+            return m.attributes().get("cache_control");
+        }
+        if (message instanceof ToolExecutionResultMessage m) {
+            return m.attributes().get("cache_control");
+        }
+        return null;
+    }
+
+    @Test
+    void chat_cacheConversationHistoryDisabledByDefault_lastMessageNeverMarked() {
+        // Every pre-existing constructor (7-arg included, false not passed
+        // explicitly) must behave byte-identical to before this feature
+        // existed -- no provider other than Anthropic even looks at this
+        // attribute, but it should never be set unless explicitly enabled.
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null).chat("hi");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model).chat(captor.capture());
+        List<ChatMessage> messages = captor.getValue().messages();
+        assertThat(cacheControlAttribute(messages.get(messages.size() - 1))).isNull();
+    }
+
+    @Test
+    void chat_cacheConversationHistoryEnabled_firstCall_marksTheUserMessage() {
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null, true).chat("hi");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model).chat(captor.capture());
+        List<ChatMessage> messages = captor.getValue().messages();
+        assertThat(messages).hasSize(1);
+        assertThat(cacheControlAttribute(messages.get(0))).isEqualTo("ephemeral");
+    }
+
+    @Test
+    void chat_cacheConversationHistoryEnabled_multiRound_breakpointMovesForward_neverMoreThanOneMarked() {
+        // The Anthropic contract this exists for allows at most 4 cache_control
+        // breakpoints per request -- leaving every round's marker in place would
+        // accumulate one per round and risk exceeding that on a long-running
+        // execution. Exactly one non-system message may carry the attribute at
+        // any given call.
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("echo").arguments("{\"message\":\"hello\"}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(request))))
+                .thenReturn(response(AiMessage.from("final")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null, true).chat("Echo 'hello'");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(2)).chat(captor.capture());
+
+        List<ChatMessage> secondCallMessages = captor.getAllValues().get(1).messages();
+        // messages: [UserMessage, AiMessage(tool request), ToolExecutionResultMessage]
+        assertThat(cacheControlAttribute(secondCallMessages.get(0)))
+                .as("round 1's breakpoint (the user message) must be moved, not left behind")
+                .isNull();
+        assertThat(cacheControlAttribute(secondCallMessages.get(secondCallMessages.size() - 1)))
+                .as("the newest message becomes the new breakpoint")
+                .isEqualTo("ephemeral");
+        long markedCount = secondCallMessages.stream().filter(m -> cacheControlAttribute(m) != null).count();
+        assertThat(markedCount).isEqualTo(1);
+    }
+
+    @Test
+    void chat_cacheConversationHistoryEnabled_doesNotDropOtherAttributesOnTheMessageItUnmarks() {
+        // Un-marking the previous breakpoint must only remove the cache_control
+        // key, not wipe out any other attribute a message happens to carry.
+        ChatModel model = mock(ChatModel.class);
+        AiMessage toolRequestWithExtraAttribute = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("1").name("echo").arguments("{\"message\":\"hello\"}").build()))
+                .attributes(Map.of("some_other_key", "keep-me"))
+                .build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(toolRequestWithExtraAttribute))
+                .thenReturn(response(AiMessage.from("final")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null, true).chat("Echo 'hello'");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(2)).chat(captor.capture());
+        List<ChatMessage> secondCallMessages = captor.getAllValues().get(1).messages();
+        AiMessage unmarkedAiMessage = secondCallMessages.stream()
+                .filter(AiMessage.class::isInstance).map(AiMessage.class::cast).findFirst().orElseThrow();
+        assertThat(unmarkedAiMessage.attributes()).containsEntry("some_other_key", "keep-me");
+        assertThat(unmarkedAiMessage.attributes()).doesNotContainKey("cache_control");
+    }
+
+    // ---------- tool-result truncation (MAX_TOOL_RESULT_CHARS) ----------
+
+    @Test
+    void chat_toolResultUnderTheCap_fedBackUnchanged() {
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("echo").arguments("{\"message\":\"short\"}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(request))))
+                .thenReturn(response(AiMessage.from("done")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("Echo 'short'");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(2)).chat(captor.capture());
+        ToolExecutionResultMessage resultMessage = captor.getAllValues().get(1).messages().stream()
+                .filter(ToolExecutionResultMessage.class::isInstance)
+                .map(ToolExecutionResultMessage.class::cast)
+                .findFirst().orElseThrow();
+        assertThat(resultMessage.text()).isEqualTo("echo: short");
+    }
+
+    @Test
+    void chat_toolResultOverTheCap_truncatedBeforeEnteringHistory() {
+        String hugeMessage = "x".repeat(20_000);
+        AgentTool verboseTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "verbose";
+            }
+
+            @Override
+            public String description() {
+                return "returns a huge result";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                return hugeMessage;
+            }
+        };
+
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder().id("1").name("verbose").arguments("{}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(request))))
+                .thenReturn(response(AiMessage.from("done")));
+
+        new ToolCallingChatEngine(model, List.of(verboseTool), CONTEXT).chat("go");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(2)).chat(captor.capture());
+        ToolExecutionResultMessage resultMessage = captor.getAllValues().get(1).messages().stream()
+                .filter(ToolExecutionResultMessage.class::isInstance)
+                .map(ToolExecutionResultMessage.class::cast)
+                .findFirst().orElseThrow();
+        assertThat(resultMessage.text()).hasSizeLessThan(hugeMessage.length());
+        assertThat(resultMessage.text()).startsWith("x".repeat(100));
+        assertThat(resultMessage.text()).contains("truncated");
+    }
 }

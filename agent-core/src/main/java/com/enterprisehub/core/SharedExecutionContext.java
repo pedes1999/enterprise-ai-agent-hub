@@ -45,12 +45,19 @@ public class SharedExecutionContext {
     /** maxToolRounds: see ToolCallingChatEngine's javadoc -- null means "use its own DEFAULT_MAX_TOOL_ROUNDS". */
     public SharedExecutionContext(String tenantId, String executionId, ChatModel chatModel, List<AgentTool> tools,
                                    String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds) {
+        this(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget, maxToolRounds, false);
+    }
+
+    /** cacheConversationHistory: see ToolCallingChatEngine's javadoc -- SharedExecutionContextFactory decides this from the tenant's provider, false for every direct/test construction here. */
+    public SharedExecutionContext(String tenantId, String executionId, ChatModel chatModel, List<AgentTool> tools,
+                                   String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds,
+                                   boolean cacheConversationHistory) {
         this.tenantId = tenantId;
         this.executionId = executionId;
         this.chatModel = chatModel;
         this.tools = List.copyOf(tools);
         this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId),
-                systemPrompt, maxTokensBudget, maxToolRounds);
+                systemPrompt, maxTokensBudget, maxToolRounds, cacheConversationHistory);
     }
 
     public String tenantId() {

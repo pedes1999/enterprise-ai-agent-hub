@@ -51,6 +51,12 @@ public class SharedExecutionContextFactory {
                                           String modelName, List<AgentTool> tools, String systemPrompt, String baseUrl,
                                           Integer maxTokensBudget, Integer maxToolRounds) {
         ChatModel chatModel = llmEngineFactory.create(provider, apiKey, modelName, baseUrl);
-        return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget, maxToolRounds);
+        // Anthropic-only, same story as cacheSystemMessages/cacheTools in
+        // LlmEngineFactory -- decided here from the tenant's own provider
+        // rather than exposed as a caller-supplied flag, so nothing above
+        // this factory needs to know or care that it's Anthropic-specific.
+        boolean cacheConversationHistory = provider == LlmProvider.ANTHROPIC;
+        return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget,
+                maxToolRounds, cacheConversationHistory);
     }
 }

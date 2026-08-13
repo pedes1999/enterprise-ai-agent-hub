@@ -69,6 +69,21 @@ public class ToolCallingChatEngine {
      */
     public static final int DEFAULT_MAX_TOOL_ROUNDS = 100;
 
+    /**
+     * A single tool result (a file's contents, a shell command's stdout/
+     * stderr) is capped much tighter here than at the source -- each
+     * sandboxed tool already caps its OWN output around 64KB (see e.g.
+     * RunShellCommandTool.MAX_OUTPUT_BYTES), but that cap only bounds one
+     * call's size once. Every round after that, the SAME already-capped
+     * blob gets resent in full as part of the growing conversation history
+     * -- a single 64KB read_file result alone costs ~50x this cap on every
+     * subsequent round of a long-running execution. This is a second,
+     * centralized, provider-agnostic cap applied to what actually enters
+     * the conversation (not what the tool itself returns), so it protects
+     * every tool uniformly, including ones that don't cap themselves.
+     */
+    static final int MAX_TOOL_RESULT_CHARS = 8_000;
+
     private final ChatModel chatModel;
     private final Map<String, AgentTool> toolsByName;
     private final List<ToolSpecification> toolSpecifications;
@@ -76,6 +91,7 @@ public class ToolCallingChatEngine {
     private final String systemPrompt;
     private final Integer maxTokensBudget;
     private final int maxToolRounds;
+    private final boolean cacheConversationHistory;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
@@ -120,6 +136,31 @@ public class ToolCallingChatEngine {
      */
     public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
                                   String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds) {
+        this(chatModel, tools, executionContext, systemPrompt, maxTokensBudget, maxToolRounds, false);
+    }
+
+    /**
+     * cacheConversationHistory: Anthropic-only (see AnthropicMapper.CACHE_CONTROL
+     * in langchain4j-anthropic -- agent-core deliberately doesn't depend on
+     * that module, see LlmEngineFactory's javadoc, so the "cache_control"/
+     * "ephemeral" marker below is a hand-matched string, not a shared
+     * constant). false for every other provider/caller -- marking a message
+     * this way is a silent no-op for OpenAI/Gemini/Local since their
+     * langchain4j mappers don't look for this attribute at all, but there's
+     * no benefit to paying the (tiny) extra allocation cost of rebuilding a
+     * message on providers that will never read it.
+     *
+     * When true, the LAST message in the conversation is marked as a cache
+     * breakpoint before every generate() call, moving forward each round:
+     * round N's call caches everything through round N's newest message, so
+     * round N+1 only pays full price for what's actually new since then,
+     * instead of resending the entire growing history at full price every
+     * single round the same way the system prompt/tools already avoid via
+     * cacheSystemMessages/cacheTools.
+     */
+    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
+                                  String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds,
+                                  boolean cacheConversationHistory) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
@@ -128,6 +169,7 @@ public class ToolCallingChatEngine {
         this.systemPrompt = systemPrompt;
         this.maxTokensBudget = maxTokensBudget;
         this.maxToolRounds = maxToolRounds != null ? maxToolRounds : DEFAULT_MAX_TOOL_ROUNDS;
+        this.cacheConversationHistory = cacheConversationHistory;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
@@ -142,6 +184,14 @@ public class ToolCallingChatEngine {
         // some providers/mocks return none at all, and that's "unknown", not
         // "zero tokens spent" (see ToolChatResult's fields).
         TokenUsage totalUsage = null;
+        // -1 means "no message-level cache breakpoint placed yet". Anthropic
+        // allows at most 4 cache_control breakpoints per request (system +
+        // tools already use one each via cacheSystemMessages/cacheTools) --
+        // this index is where the CURRENT one lives, moved forward each
+        // round rather than left in place, so a long-running execution never
+        // accumulates more than a single extra breakpoint here regardless of
+        // how many rounds it takes.
+        int cacheBreakpointIndex = -1;
 
         for (int round = 0; round < maxToolRounds; round++) {
             if (budgetExceeded(totalUsage)) {
@@ -150,6 +200,7 @@ public class ToolCallingChatEngine {
                 // text-only answer" handling as the round-cap path below.
                 break;
             }
+            cacheBreakpointIndex = moveCacheBreakpointIfEnabled(messages, cacheBreakpointIndex);
             ChatResponse response = generate(messages, toolSpecifications);
             totalUsage = accumulate(totalUsage, response.tokenUsage());
             AiMessage aiMessage = response.aiMessage();
@@ -189,6 +240,7 @@ public class ToolCallingChatEngine {
                 // one final text-only answer instead, same mechanism as the
                 // round-cap path below but a genuine stopping point, so this
                 // is NOT incomplete.
+                cacheBreakpointIndex = moveCacheBreakpointIfEnabled(messages, cacheBreakpointIndex);
                 ChatResponse finalResponse = generate(messages, List.of());
                 totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
                 return new ToolChatResult(finalResponse.aiMessage().text(), toolWasUsed, false, null,
@@ -202,6 +254,7 @@ public class ToolCallingChatEngine {
         // are "not a real stopping point" the same way a truncated response
         // is. budgetExceeded() here re-checks the SAME totalUsage the break
         // (if any) just fired on, so it reliably tells the two apart.
+        moveCacheBreakpointIfEnabled(messages, cacheBreakpointIndex);
         ChatResponse finalResponse = generate(messages, List.of());
         totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
         String incompleteReason = budgetExceeded(totalUsage)
@@ -214,6 +267,61 @@ public class ToolCallingChatEngine {
     /** ChatModel's new (1.x) API takes tool specifications via ChatRequestParameters, not a positional arg -- this restores the old generate(messages, tools) call shape everywhere below it's used. */
     private ChatResponse generate(List<ChatMessage> messages, List<ToolSpecification> tools) {
         return chatModel.chat(ChatRequest.builder().messages(messages).toolSpecifications(tools).build());
+    }
+
+    private static final String ANTHROPIC_CACHE_CONTROL_KEY = "cache_control";
+    private static final String ANTHROPIC_CACHE_CONTROL_VALUE = "ephemeral";
+
+    /**
+     * Anthropic reads a "cache_control": "ephemeral" attribute on a message
+     * to mean "cache everything through here" (see AnthropicMapper in
+     * langchain4j-anthropic, which checks UserMessage/AiMessage/
+     * ToolExecutionResultMessage.attributes() for exactly this key/value --
+     * not part of the public langchain4j API, hand-matched here rather than
+     * adding a dependency on that module, see the constructor's javadoc).
+     * Un-marks whatever message previously held the breakpoint (if any)
+     * before marking the new last message, so exactly one of these exists
+     * in the request at a time -- see cacheBreakpointIndex's javadoc in
+     * chat() for why that matters. Returns the new breakpoint's index (or
+     * the unchanged previousIndex when disabled/empty).
+     */
+    private int moveCacheBreakpointIfEnabled(List<ChatMessage> messages, int previousIndex) {
+        if (!cacheConversationHistory || messages.isEmpty()) {
+            return previousIndex;
+        }
+        if (previousIndex >= 0 && previousIndex < messages.size()) {
+            messages.set(previousIndex, withCacheControlAttribute(messages.get(previousIndex), false));
+        }
+        int lastIndex = messages.size() - 1;
+        messages.set(lastIndex, withCacheControlAttribute(messages.get(lastIndex), true));
+        return lastIndex;
+    }
+
+    /** Adds or removes ONLY the cache-control key, preserving every other attribute a message might carry (e.g. thinking signatures) rather than wiping its whole attributes map. */
+    private static ChatMessage withCacheControlAttribute(ChatMessage message, boolean cacheable) {
+        if (message instanceof UserMessage userMessage) {
+            return userMessage.toBuilder().attributes(withCacheControlKey(userMessage.attributes(), cacheable)).build();
+        }
+        if (message instanceof AiMessage aiMessage) {
+            return aiMessage.toBuilder().attributes(withCacheControlKey(aiMessage.attributes(), cacheable)).build();
+        }
+        if (message instanceof ToolExecutionResultMessage toolResultMessage) {
+            return toolResultMessage.toBuilder().attributes(withCacheControlKey(toolResultMessage.attributes(), cacheable)).build();
+        }
+        // SystemMessage is never in this list (see chat()'s javadoc note on
+        // how it's split out) -- any other/future message type is returned
+        // unchanged rather than failing the whole call over a cache hint.
+        return message;
+    }
+
+    private static Map<String, Object> withCacheControlKey(Map<String, Object> existing, boolean cacheable) {
+        Map<String, Object> updated = new LinkedHashMap<>(existing);
+        if (cacheable) {
+            updated.put(ANTHROPIC_CACHE_CONTROL_KEY, ANTHROPIC_CACHE_CONTROL_VALUE);
+        } else {
+            updated.remove(ANTHROPIC_CACHE_CONTROL_KEY);
+        }
+        return updated;
     }
 
     /** null-safe TokenUsage.add() -- a provider/mock response with no usage data leaves the running total unchanged. */
@@ -262,10 +370,20 @@ public class ToolCallingChatEngine {
             return "Error: no tool registered with name '" + request.name() + "'";
         }
         try {
-            return tool.execute(executionContext, parseArguments(request.arguments()));
+            return truncateForHistory(tool.execute(executionContext, parseArguments(request.arguments())));
         } catch (Exception e) {
             return "Error executing tool '" + request.name() + "': " + e.getMessage();
         }
+    }
+
+    /** See MAX_TOOL_RESULT_CHARS' javadoc -- a second cap on top of whatever each tool already enforces on itself. */
+    private static String truncateForHistory(String result) {
+        if (result == null || result.length() <= MAX_TOOL_RESULT_CHARS) {
+            return result;
+        }
+        return result.substring(0, MAX_TOOL_RESULT_CHARS)
+                + "\n... (truncated " + (result.length() - MAX_TOOL_RESULT_CHARS) + " more characters -- "
+                + "re-run this tool with a narrower target if you need what was cut off)";
     }
 
     private Map<String, String> parseArguments(String argumentsJson) throws Exception {

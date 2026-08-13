@@ -61,6 +61,12 @@ public class LlmEngineFactory {
                     // on OPENAI/GEMINI/LOCAL -- this flag is Anthropic-specific and
                     // simply doesn't exist on those builders.
                     .cacheSystemMessages(true)
+                    // Every agent's tool specifications (name/description/JSON
+                    // schema for each of git_clone, read_file, run_shell_command,
+                    // etc.) are resent on every single round too, and are just as
+                    // static per-execution as the system message -- same cheap
+                    // cached-read win, same "no effect on other providers" story.
+                    .cacheTools(true)
                     .build();
             case OPENAI -> OpenAiChatModel.builder()
                     .apiKey(apiKey)
