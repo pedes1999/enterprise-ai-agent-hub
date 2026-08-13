@@ -75,7 +75,7 @@ public class AgentJobWorker {
         try {
             ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
                     job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt(),
-                    job.getRepositoryUrl(), executionService.deserializeInputParameters(job));
+                    job.getRepositoryUrl(), job.getRepositoryBranch(), executionService.deserializeInputParameters(job));
             if (result.incomplete()) {
                 executionService.fail(job.getId(), result.incompleteReason());
             } else if (result.toolWasUsed() && (result.reply() == null || result.reply().isBlank())) {

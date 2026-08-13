@@ -19,6 +19,7 @@ export interface TriggerAgentExecutionRequest {
   prompt: string | null;
   agentSlug: string | null;
   repositoryUrl: string | null;
+  repositoryBranch: string | null;
   inputParameters: Record<string, string> | null;
 }
 
@@ -36,6 +37,7 @@ export interface AgentExecutionStatusResponse {
   agentSlug: string;
   prompt: string | null;
   repositoryUrl: string | null;
+  repositoryBranch: string | null;
   inputParameters: Record<string, string> | null;
   reply: string | null;
   toolWasUsed: boolean | null;

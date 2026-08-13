@@ -356,7 +356,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.generate(anyList(), anyList()))
                 .thenReturn(Response.from(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-noop-input", AGENT_SLUG, "Hello", null, null);
+        runner.run(tenantId, "exec-noop-input", AGENT_SLUG, "Hello", null, null, null);
 
         assertThat(capturedUserMessageText()).isEqualTo("Hello");
     }
@@ -371,10 +371,38 @@ class AgentPromptRunnerTest {
                 .thenReturn(Response.from(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-ticket-style", AGENT_SLUG, "Also check the auth module",
-                "https://github.com/org/repo.git", Map.of("text", "Ticket: fix the login bug"));
+                "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
 
         assertThat(capturedUserMessageText()).isEqualTo(
                 "Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug\n\nAlso check the auth module");
+    }
+
+    @Test
+    void run_repositoryBranchGiven_appearsOnItsOwnLineRightAfterRepository() {
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG))
+                .thenReturn(Optional.of(testDefinitionWithInputSource("MANUAL_TEXT", "get_current_date_time")));
+        stubCredentialResolution();
+        stubContextFactory("exec-ticket-branch");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-ticket-branch", AGENT_SLUG, "Also check the auth module",
+                "https://github.com/org/repo.git", "feature/my-branch", Map.of("text", "Ticket: fix the login bug"));
+
+        assertThat(capturedUserMessageText()).isEqualTo(
+                "Repository: https://github.com/org/repo.git\nBranch: feature/my-branch\n\nTicket: fix the login bug\n\nAlso check the auth module");
+    }
+
+    @Test
+    void run_repositoryBranchGiven_butNoRepositoryUrl_ignoredEntirely() {
+        stubCredentialResolution();
+        stubContextFactory("exec-branch-no-repo");
+        when(chatLanguageModel.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from("ok")));
+
+        runner.run(tenantId, "exec-branch-no-repo", AGENT_SLUG, "Hello", null, "feature/my-branch", null);
+
+        assertThat(capturedUserMessageText()).isEqualTo("Hello");
     }
 
     @Test
@@ -387,7 +415,7 @@ class AgentPromptRunnerTest {
                 .thenReturn(Response.from(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-ticket-noprompt", AGENT_SLUG, "",
-                "https://github.com/org/repo.git", Map.of("text", "Ticket: fix the login bug"));
+                "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
 
         assertThat(capturedUserMessageText()).isEqualTo("Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug");
     }

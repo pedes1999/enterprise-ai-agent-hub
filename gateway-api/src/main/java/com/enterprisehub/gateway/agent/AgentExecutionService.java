@@ -88,7 +88,8 @@ public class AgentExecutionService {
      * not just an error to swallow).
      */
     @Transactional
-    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, Map<String, String> inputParameters) {
+    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
+                                   Map<String, String> inputParameters) {
         AgentDefinition definition = agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
 
@@ -117,6 +118,9 @@ public class AgentExecutionService {
         // guarantee -- this stays defensive for the next one that doesn't.
         execution.setPrompt(prompt == null ? "" : prompt);
         execution.setRepositoryUrl(repositoryUrl);
+        // Only meaningful paired with a repository -- never persisted on its own.
+        execution.setRepositoryBranch((repositoryUrl == null || repositoryUrl.isBlank() || repositoryBranch == null || repositoryBranch.isBlank())
+                ? null : repositoryBranch);
         execution.setInputParameters(serializeInputParameters(inputParameters));
         execution.setStatus("QUEUED");
         return repository.save(execution);

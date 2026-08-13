@@ -1,0 +1,12 @@
+-- V17__agent_execution_repository_branch.sql
+--
+-- Lets a caller (the frontend trigger form, in particular) specify which
+-- branch git_clone should check out instead of the model only finding out
+-- via free-text mention in the prompt (unreliable -- the model has to
+-- actually notice it in prose). Nullable and always optional, same as
+-- git_clone's own `branch` tool argument (see GitCloneTool) -- omitted
+-- means "clone the repository's default branch", exactly today's
+-- behavior. Paired with repository_url the same way AgentPromptRunner's
+-- assemblePrompt() already pairs them into one "Repository: ...\nBranch:
+-- ..." section instead of a separate top-level required_inputs entry.
+ALTER TABLE agent_executions ADD COLUMN repository_branch VARCHAR(255);

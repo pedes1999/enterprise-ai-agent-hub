@@ -30,6 +30,7 @@ describe('Trigger', () => {
       agentSlug: 'code-reviewer',
       prompt: 'hello',
       repositoryUrl: null,
+      repositoryBranch: null,
       inputParameters: null,
       reply: null,
       toolWasUsed: null,
@@ -218,6 +219,7 @@ describe('Trigger', () => {
       prompt: null,
       agentSlug: 'code-reviewer',
       repositoryUrl: null,
+      repositoryBranch: null,
       inputParameters: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
@@ -236,6 +238,7 @@ describe('Trigger', () => {
       prompt: 'What time is it?',
       agentSlug: 'code-reviewer',
       repositoryUrl: null,
+      repositoryBranch: null,
       inputParameters: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
@@ -254,10 +257,36 @@ describe('Trigger', () => {
       prompt: null,
       agentSlug: 'code-reviewer',
       repositoryUrl: 'https://github.com/octocat/Hello-World.git',
+      repositoryBranch: null,
       inputParameters: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('shows the branch field alongside repositoryUrl, and sends repositoryBranch when filled in', () => {
+    const fixture = createComponent(['repositoryUrl']);
+    expect(fixture.componentInstance.showBranchField()).toBe(true);
+
+    fixture.componentInstance.fieldValues['repositoryUrl'] = 'https://github.com/octocat/Hello-World.git';
+    fixture.componentInstance.branchValue = 'feature/my-branch';
+    fixture.componentInstance.submit();
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);
+    expect(req.request.body).toEqual({
+      prompt: null,
+      agentSlug: 'code-reviewer',
+      repositoryUrl: 'https://github.com/octocat/Hello-World.git',
+      repositoryBranch: 'feature/my-branch',
+      inputParameters: null,
+    });
+    req.flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('hides the branch field for an agent whose requiredInputs has no repositoryUrl', () => {
+    const fixture = createComponent(['prompt']);
+    expect(fixture.componentInstance.showBranchField()).toBe(false);
   });
 
   it('renders a generic labeled field, and sends it via inputParameters, for a non-fixed requiredInputs key', () => {
@@ -272,6 +301,7 @@ describe('Trigger', () => {
       prompt: null,
       agentSlug: 'code-reviewer',
       repositoryUrl: null,
+      repositoryBranch: null,
       inputParameters: { text: 'ticket body here' },
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });

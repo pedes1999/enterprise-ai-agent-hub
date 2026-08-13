@@ -117,24 +117,26 @@ public class AgentPromptRunner {
      * row for the async worker).
      */
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt) {
-        return run(tenantId, executionId, agentSlug, prompt, null, null);
+        return run(tenantId, executionId, agentSlug, prompt, null, null, null);
     }
 
     /**
-     * repositoryUrl/inputParameters are both optional and additive -- see
-     * TriggerAgentExecutionRequest's javadoc. An AgentDefinition with no
-     * inputSourceType (general-assistant, ticket-resolver today) ignores them
-     * entirely: assemblePrompt() reduces to exactly `prompt`, byte-identical
-     * to this method's behavior before either parameter existed.
+     * repositoryUrl/repositoryBranch/inputParameters are all optional and
+     * additive -- see TriggerAgentExecutionRequest's javadoc. An
+     * AgentDefinition with no inputSourceType (general-assistant,
+     * ticket-resolver today) ignores them entirely: assemblePrompt()
+     * reduces to exactly `prompt`, byte-identical to this method's behavior
+     * before any of these parameters existed. repositoryBranch is only
+     * meaningful alongside a non-blank repositoryUrl -- see assemblePrompt().
      */
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
-                                                      String repositoryUrl, Map<String, String> inputParameters) {
+                                                      String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
         String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
-        String assembledPrompt = assemblePrompt(repositoryUrl, resolvedInput, prompt);
+        String assembledPrompt = assemblePrompt(repositoryUrl, repositoryBranch, resolvedInput, prompt);
 
         SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId, definition));
         try {
@@ -161,18 +163,28 @@ public class AgentPromptRunner {
     }
 
     /**
-     * Joins whichever of "Repository: {url}", the resolved input blob, and
-     * the free-text prompt are actually non-blank, in that order, with a
-     * blank line between sections -- never a leftover "Repository: " with
-     * nothing after it, never a trailing blank line from a skipped section.
-     * When repositoryUrl/resolvedInput are both blank (no inputSourceType,
-     * no repo given), this reduces to exactly `prompt` -- the pre-existing
-     * behavior for general-assistant-style agents is untouched.
+     * Joins whichever of "Repository: {url}" (with a "Branch: {branch}"
+     * line folded into that same section when given), the resolved input
+     * blob, and the free-text prompt are actually non-blank, in that
+     * order, with a blank line between sections -- never a leftover
+     * "Repository: " with nothing after it, never a trailing blank line
+     * from a skipped section. Telling the model the branch explicitly here
+     * is deliberately more reliable than expecting it to notice a branch
+     * name mentioned in free-text prompt. repositoryBranch is ignored when
+     * repositoryUrl itself is blank -- a branch with no repository doesn't
+     * mean anything. When repositoryUrl/resolvedInput are both blank (no
+     * inputSourceType, no repo given), this reduces to exactly `prompt` --
+     * the pre-existing behavior for general-assistant-style agents is
+     * untouched.
      */
-    private String assemblePrompt(String repositoryUrl, String resolvedInput, String prompt) {
+    private String assemblePrompt(String repositoryUrl, String repositoryBranch, String resolvedInput, String prompt) {
         List<String> sections = new ArrayList<>();
         if (repositoryUrl != null && !repositoryUrl.isBlank()) {
-            sections.add("Repository: " + repositoryUrl);
+            String repositorySection = "Repository: " + repositoryUrl;
+            if (repositoryBranch != null && !repositoryBranch.isBlank()) {
+                repositorySection += "\nBranch: " + repositoryBranch;
+            }
+            sections.add(repositorySection);
         }
         if (resolvedInput != null && !resolvedInput.isBlank()) {
             sections.add(resolvedInput);

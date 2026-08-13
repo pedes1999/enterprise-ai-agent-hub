@@ -37,6 +37,7 @@ describe('AgentService', () => {
       prompt: 'hello',
       agentSlug: 'code-reviewer',
       repositoryUrl: 'https://github.com/acme/repo',
+      repositoryBranch: 'main',
       inputParameters: { branch: 'main' },
     };
     service.execute(request).subscribe();

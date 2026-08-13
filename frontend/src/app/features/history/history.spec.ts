@@ -16,6 +16,7 @@ describe('History', () => {
     agentSlug: 'code-reviewer',
     prompt: null,
     repositoryUrl: null,
+    repositoryBranch: null,
     inputParameters: null,
     reply: 'done',
     toolWasUsed: true,

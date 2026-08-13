@@ -41,7 +41,11 @@ export class Trigger implements OnInit, OnDestroy {
     (this.definition()?.requiredInputs ?? []).map((key) => ({ key, label: labelFor(key) })),
   );
 
+  /** Branch is never a required input (git_clone treats it as optional) -- shown alongside Repository URL whenever that field is, not gated by requiredInputs. */
+  readonly showBranchField = computed(() => this.fields().some((f) => f.key === 'repositoryUrl'));
+
   fieldValues: Record<string, string> = {};
+  branchValue = '';
 
   readonly submitting = signal(false);
   readonly errorKind = signal<TriggerErrorKind>(null);
@@ -96,6 +100,7 @@ export class Trigger implements OnInit, OnDestroy {
         prompt: this.fieldValues['prompt'] || null,
         agentSlug: this.slug,
         repositoryUrl: this.fieldValues['repositoryUrl'] || null,
+        repositoryBranch: this.branchValue || null,
         inputParameters: Object.keys(inputParameters).length > 0 ? inputParameters : null,
       })
       .subscribe({

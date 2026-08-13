@@ -41,6 +41,11 @@ label {
   margin-top: var(--space-2);
 }
 
+.optional {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
 input,
 textarea {
   padding: var(--space-2);

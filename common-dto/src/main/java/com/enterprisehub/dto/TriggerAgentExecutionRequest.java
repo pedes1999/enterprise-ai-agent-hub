@@ -15,11 +15,18 @@ import java.util.Map;
  * (along with repositoryUrl, if given) -- see AgentPromptRunner. A flat
  * string map rather than a typed field per resolver so adding resolver #2
  * (e.g. a future Jira ticket resolver) never requires reshaping this DTO.
+ *
+ * repositoryBranch is optional and only meaningful alongside repositoryUrl
+ * (ignored if repositoryUrl is blank) -- null/blank means "clone the
+ * repository's default branch", matching git_clone's own optional branch
+ * argument (see GitCloneTool). Not part of required_inputs' fixed
+ * vocabulary since it's never required on its own.
  */
 public record TriggerAgentExecutionRequest(
         String prompt,
         String agentSlug,
         String repositoryUrl,
+        String repositoryBranch,
         Map<String, String> inputParameters
 ) {
 }

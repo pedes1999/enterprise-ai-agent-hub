@@ -32,6 +32,17 @@
         }
       }
 
+      @if (showBranchField()) {
+        <label for="repositoryBranch">Branch <span class="optional">(optional)</span></label>
+        <input
+          id="repositoryBranch"
+          type="text"
+          [(ngModel)]="branchValue"
+          name="repositoryBranch"
+          placeholder="Defaults to the repository's default branch"
+        />
+      }
+
       @if (errorKind() === 'rate-limit') {
         <div class="banner banner-error" role="alert">Execution limit reached. {{ errorMessage() }}</div>
       } @else if (errorKind() === 'required-inputs') {

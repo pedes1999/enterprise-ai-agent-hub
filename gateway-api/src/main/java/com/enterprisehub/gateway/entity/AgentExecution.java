@@ -51,6 +51,10 @@ public class AgentExecution {
     @Column(name = "repository_url")
     private String repositoryUrl;
 
+    /** Optional, paired with repositoryUrl -- null means "clone the repository's default branch", see V17. */
+    @Column(name = "repository_branch")
+    private String repositoryBranch;
+
     // JSON-serialized Map<String, String> -- see V9's rationale. Null for
     // every execution whose AgentDefinition has no input_source_type.
     @Column(name = "input_parameters", columnDefinition = "TEXT")
