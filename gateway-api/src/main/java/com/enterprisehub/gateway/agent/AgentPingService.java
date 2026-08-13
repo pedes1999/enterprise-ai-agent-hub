@@ -52,10 +52,10 @@ public class AgentPingService {
         this.agentPromptRunner = agentPromptRunner;
     }
 
-    public AgentPingResponse ping(UUID tenantId, String prompt) {
+    public AgentPingResponse ping(UUID tenantId, UUID userId, String prompt) {
         validatePrompt(prompt);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
-        String apiKey = resolveApiKey(tenantId, provider);
+        String apiKey = resolveApiKey(tenantId, userId, provider);
         String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         ChatModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl(provider));
 
@@ -69,7 +69,7 @@ public class AgentPingService {
         return new AgentPingResponse(provider.name(), modelName, reply);
     }
 
-    public AgentToolPingResponse pingWithTools(UUID tenantId, String prompt, String agentSlug) {
+    public AgentToolPingResponse pingWithTools(UUID tenantId, UUID userId, String prompt, String agentSlug) {
         validatePrompt(prompt);
         String resolvedSlug = (agentSlug == null || agentSlug.isBlank()) ? AgentPromptRunner.DEFAULT_AGENT_SLUG : agentSlug;
 
@@ -82,7 +82,7 @@ public class AgentPingService {
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         ToolCallingChatEngine.ToolChatResult result;
         try {
-            result = agentPromptRunner.run(tenantId, executionId, resolvedSlug, prompt);
+            result = agentPromptRunner.run(tenantId, userId, executionId, resolvedSlug, prompt);
         } catch (AgentException e) {
             throw e; // already the right status (e.g. unknown agent, no credential) -- don't relabel it as a provider failure
         } catch (RuntimeException e) {
@@ -98,14 +98,14 @@ public class AgentPingService {
         }
     }
 
-    private String resolveApiKey(UUID tenantId, LlmProvider provider) {
+    private String resolveApiKey(UUID tenantId, UUID userId, LlmProvider provider) {
         if (tenantId == null) {
             throw new AgentException(HttpStatus.BAD_REQUEST, "tenantId is required");
         }
-        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, provider.name())
+        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST,
-                        "No active " + provider + " credential configured for this tenant -- PUT /vendor-credentials first"));
+                        "No active " + provider + " credential configured for you -- PUT /vendor-credentials first"));
         return vendorCredentialService.decryptToken(credential);
     }
 }

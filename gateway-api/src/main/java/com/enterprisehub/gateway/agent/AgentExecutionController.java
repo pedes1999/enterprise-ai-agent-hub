@@ -62,7 +62,7 @@ public class AgentExecutionController {
                 ? AgentPromptRunner.DEFAULT_AGENT_SLUG : request.agentSlug();
         AgentExecution execution = executionService.enqueue(
                 UUID.fromString(principal.tenantId()), request.prompt(), agentSlug, request.repositoryUrl(),
-                request.repositoryBranch(), request.inputParameters(), request.maxTokens());
+                request.repositoryBranch(), request.inputParameters(), request.maxTokens(), UUID.fromString(principal.userId()));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new AgentExecutionAccepted(execution.getId(), execution.getStatus()));
     }

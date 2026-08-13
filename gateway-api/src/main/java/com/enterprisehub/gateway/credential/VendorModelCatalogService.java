@@ -59,12 +59,12 @@ public class VendorModelCatalogService {
         this.llmProperties = llmProperties;
     }
 
-    public List<ModelOption> list(UUID tenantId, String providerValue) {
+    public List<ModelOption> list(UUID tenantId, UUID userId, String providerValue) {
         VendorProvider provider = VendorProvider.parse(providerValue)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.BAD_REQUEST,
                         "provider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
-        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, provider.name())
+        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.NOT_FOUND,
                         "No active credential stored for provider " + provider.name()));

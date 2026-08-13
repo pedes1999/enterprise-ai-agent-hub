@@ -116,14 +116,14 @@ public class AgentPromptRunner {
      * 4xx/502 HTTP response for the sync spike, a FAILED agent_executions
      * row for the async worker).
      */
-    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt) {
-        return run(tenantId, executionId, agentSlug, prompt, null, null, null, null);
+    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, UUID userId, String executionId, String agentSlug, String prompt) {
+        return run(tenantId, userId, executionId, agentSlug, prompt, null, null, null, null);
     }
 
-    /** Same as the 8-arg overload, with no per-execution token budget override (uses the tenant's/server's default). */
-    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
+    /** Same as the 9-arg overload, with no per-execution token budget override (uses the tenant's/server's default). */
+    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, UUID userId, String executionId, String agentSlug, String prompt,
                                                       String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters) {
-        return run(tenantId, executionId, agentSlug, prompt, repositoryUrl, repositoryBranch, inputParameters, null);
+        return run(tenantId, userId, executionId, agentSlug, prompt, repositoryUrl, repositoryBranch, inputParameters, null);
     }
 
     /**
@@ -138,14 +138,16 @@ public class AgentPromptRunner {
      * maxTokensOverride, when null, falls back to this tenant's own default
      * (TenantLlmProviderResolver.resolveMaxTokens()) -- the same
      * "execution overrides tenant overrides server" layering repositoryUrl/
-     * modelName already use elsewhere in this class.
+     * modelName already use elsewhere in this class. userId is who this
+     * runs the LLM call as (see resolveApiKey()) -- there's no tenant-wide
+     * fallback credential, so a null/unknown userId always fails.
      */
-    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
+    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, UUID userId, String executionId, String agentSlug, String prompt,
                                                       String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters,
                                                       Integer maxTokensOverride) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
-        String apiKey = resolveApiKey(tenantId, provider);
+        String apiKey = resolveApiKey(tenantId, userId, provider);
         String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         Integer maxTokens = maxTokensOverride != null ? maxTokensOverride : tenantLlmProviderResolver.resolveMaxTokens(tenantId);
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
@@ -233,11 +235,22 @@ public class AgentPromptRunner {
         return new SandboxSpec(tenantId.toString(), executionId, credentials, SESSION_MAX_LIFETIME, SESSION_MAX_OUTPUT_BYTES);
     }
 
-    private String resolveApiKey(UUID tenantId, LlmProvider provider) {
-        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, provider.name())
+    /**
+     * userId is nullable in signature only for the legacy call sites this
+     * class's own backward-compat run() overloads still support (tests
+     * predating triggeredBy) -- a real execution always has one now that
+     * credentials are per-user (see V22/V23). A null userId here always
+     * fails: there is deliberately no tenant-wide fallback credential.
+     */
+    private String resolveApiKey(UUID tenantId, UUID userId, LlmProvider provider) {
+        if (userId == null) {
+            throw new AgentException(HttpStatus.BAD_REQUEST,
+                    "This execution has no triggering user recorded -- cannot resolve a per-user " + provider + " credential.");
+        }
+        VendorCredential credential = vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST,
-                        "No active " + provider + " credential configured for this tenant -- PUT /vendor-credentials first"));
+                        "No active " + provider + " credential configured for you -- PUT /vendor-credentials first"));
         return vendorCredentialService.decryptToken(credential);
     }
 }

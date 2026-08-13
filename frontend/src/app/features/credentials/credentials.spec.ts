@@ -1,12 +1,20 @@
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Credentials } from './credentials';
+import { AuthService } from '../../core/services/auth.service';
 import { environment } from '../../../environments/environment';
-import { ModelOption, TenantSettings, VendorCredentialSummary } from '../../core/models/credential.model';
+import { ModelOption, TeamVendorCredentialSummary, TenantSettings, VendorCredentialSummary } from '../../core/models/credential.model';
 
 describe('Credentials', () => {
   let httpMock: HttpTestingController;
+  // Most tests below exercise the full admin page (agent defaults, tool
+  // credentials, team view) -- only fetched when isAdmin() is true (see
+  // ngOnInit's javadoc comment: those endpoints are still ADMIN-only
+  // server-side). The DEVELOPER-specific behavior gets its own describe
+  // block further down, toggling this to false.
+  let isAdmin = true;
 
   const activeAnthropic: VendorCredentialSummary = {
     id: 'vc-1',
@@ -37,13 +45,19 @@ describe('Credentials', () => {
     httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
     httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
     httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(settings);
+    httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([]);
     return fixture;
   }
 
   beforeEach(async () => {
+    isAdmin = true;
     await TestBed.configureTestingModule({
       imports: [Credentials],
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: AuthService, useValue: { isAdmin: () => isAdmin } },
+      ],
     }).compileComponents();
     httpMock = TestBed.inject(HttpTestingController);
   });
@@ -214,6 +228,7 @@ describe('Credentials', () => {
       .flush({ message: 'Access denied' }, { status: 403, statusText: 'Forbidden' });
     httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
     httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush([]);
+    httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([]);
 
     expect(fixture.componentInstance.loadError()).toBe('Access denied');
     expect(fixture.componentInstance.loading()).toBe(false);
@@ -238,6 +253,26 @@ describe('Credentials', () => {
     expect(component.effectiveMaxTokens()).toBe(75000);
     expect(component.hasActiveCredential('ANTHROPIC')).toBe(true);
     expect(component.hasActiveCredential('OPENAI')).toBe(false);
+  });
+
+  it('isDirty is false right after load, true once a field changes, false again after a successful save', () => {
+    const fixture = createComponent();
+    const component = fixture.componentInstance;
+    expect(component.isDirty()).toBe(false);
+
+    component.maxTokensSelection.set('50000');
+    expect(component.isDirty()).toBe(true);
+
+    component.savePreferredProvider();
+    httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush({
+      preferredLlmProvider: null,
+      preferredModelName: null,
+      maxTokensPerExecution: 50000,
+      effectiveMaxTokensPerExecution: 50000,
+      availableProviders: [],
+    });
+
+    expect(component.isDirty()).toBe(false);
   });
 
   it('saves the preferred provider, model, and max tokens, reflecting the server response', () => {
@@ -375,5 +410,99 @@ describe('Credentials', () => {
 
     expect(component.modelIsInOptions('gpt-4o')).toBe(true);
     expect(component.modelIsInOptions('gpt-3.5')).toBe(false);
+  });
+
+  describe('team credentials (ADMIN only)', () => {
+    const teamRow: TeamVendorCredentialSummary = {
+      userId: 'user-2',
+      userEmail: 'dev@acme.com',
+      provider: 'OPENAI',
+      active: true,
+      lastUsedAt: null,
+      lastValidatedAt: null,
+    };
+
+    it('loads the team list for an admin', () => {
+      const fixture = TestBed.createComponent(Credentials);
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(noPreference);
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([teamRow]);
+
+      expect(fixture.componentInstance.teamCredentials()).toEqual([teamRow]);
+    });
+
+    it('deactivates a teammate credential and refreshes the team list', () => {
+      isAdmin = true;
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const fixture = TestBed.createComponent(Credentials);
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(noPreference);
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([teamRow]);
+
+      fixture.componentInstance.deactivateTeamCredential(teamRow);
+
+      const deactivateReq = httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team/user-2/OPENAI/deactivate`);
+      expect(deactivateReq.request.method).toBe('POST');
+      deactivateReq.flush(null);
+
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([{ ...teamRow, active: false }]);
+
+      expect(fixture.componentInstance.teamCredentials()[0].active).toBe(false);
+      expect(fixture.componentInstance.deactivatingKey()).toBeNull();
+    });
+
+    it('skips the deactivate request when the confirmation is declined', () => {
+      isAdmin = true;
+      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const fixture = TestBed.createComponent(Credentials);
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(noPreference);
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([teamRow]);
+
+      fixture.componentInstance.deactivateTeamCredential(teamRow);
+
+      httpMock.expectNone(`${environment.apiBaseUrl}/vendor-credentials/team/user-2/OPENAI/deactivate`);
+    });
+  });
+
+  describe('as a DEVELOPER (non-admin)', () => {
+    beforeEach(() => {
+      isAdmin = false;
+    });
+
+    it('only requests its own vendor credentials -- tool credentials, agent defaults, and team are ADMIN-only and never called', () => {
+      const fixture = TestBed.createComponent(Credentials);
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([activeAnthropic]);
+
+      httpMock.expectNone(`${environment.apiBaseUrl}/tool-credentials`);
+      httpMock.expectNone(`${environment.apiBaseUrl}/tenant-settings`);
+      httpMock.expectNone(`${environment.apiBaseUrl}/vendor-credentials/team`);
+      expect(fixture.componentInstance.loadError()).toBeNull();
+      expect(fixture.componentInstance.loading()).toBe(false);
+      expect(fixture.componentInstance.vendorSummary('ANTHROPIC')?.active).toBe(true);
+    });
+
+    it('can still save its own vendor credential', () => {
+      const fixture = TestBed.createComponent(Credentials);
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
+      const component = fixture.componentInstance;
+      component.vendorInputs['ANTHROPIC'] = 'sk-new-key';
+
+      component.saveVendorCredential('ANTHROPIC');
+
+      const putReq = httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`);
+      putReq.flush(activeAnthropic);
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([activeAnthropic]);
+
+      expect(component.vendorSummary('ANTHROPIC')?.active).toBe(true);
+    });
   });
 });

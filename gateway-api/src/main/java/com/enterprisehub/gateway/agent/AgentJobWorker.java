@@ -74,7 +74,7 @@ public class AgentJobWorker {
         TenantContext.set(job.getTenantId().toString());
         try {
             ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
-                    job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt(),
+                    job.getTenantId(), job.getTriggeredBy(), job.getId().toString(), job.getAgentType(), job.getPrompt(),
                     job.getRepositoryUrl(), job.getRepositoryBranch(), executionService.deserializeInputParameters(job),
                     job.getMaxTokensOverride());
             if (result.incomplete()) {

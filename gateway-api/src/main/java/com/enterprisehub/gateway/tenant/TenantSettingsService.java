@@ -5,7 +5,6 @@ import com.enterprisehub.dto.TenantSettingsResponse;
 import com.enterprisehub.dto.UpdateTenantSettingsRequest;
 import com.enterprisehub.gateway.credential.VendorProvider;
 import com.enterprisehub.gateway.entity.Tenant;
-import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.TenantRepository;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import org.springframework.http.HttpStatus;
@@ -13,9 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Backs GET/PUT /tenant-settings -- the ADMIN-only place a tenant with
@@ -57,9 +54,7 @@ public class TenantSettingsService {
                     .orElseThrow(() -> new TenantSettingsException(HttpStatus.BAD_REQUEST,
                             "preferredLlmProvider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
-            boolean hasActiveCredential = vendorCredentialRepository.findByTenantIdAndProvider(tenantId, provider.name())
-                    .filter(VendorCredential::isActive)
-                    .isPresent();
+            boolean hasActiveCredential = vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, provider.name());
             if (!hasActiveCredential) {
                 throw new TenantSettingsException(HttpStatus.BAD_REQUEST,
                         "No active " + provider + " credential configured for this tenant -- PUT /vendor-credentials first");
@@ -82,12 +77,9 @@ public class TenantSettingsService {
     }
 
     private List<LlmProviderAvailability> availableProviders(UUID tenantId) {
-        Set<String> activeProviders = vendorCredentialRepository.findByTenantId(tenantId).stream()
-                .filter(VendorCredential::isActive)
-                .map(VendorCredential::getProvider)
-                .collect(Collectors.toSet());
         return Arrays.stream(VendorProvider.values())
-                .map(provider -> new LlmProviderAvailability(provider.name(), activeProviders.contains(provider.name())))
+                .map(provider -> new LlmProviderAvailability(provider.name(),
+                        vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, provider.name())))
                 .toList();
     }
 

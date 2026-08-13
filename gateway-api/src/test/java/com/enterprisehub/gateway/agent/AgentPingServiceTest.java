@@ -42,6 +42,7 @@ class AgentPingServiceTest {
     private ChatModel chatLanguageModel;
     private AgentPingService service;
     private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -73,13 +74,13 @@ class AgentPingServiceTest {
     @Test
     void ping_happyPath_decryptsCredentialAndReturnsReply() {
         VendorCredential credential = activeCredential();
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620", null))
                 .thenReturn(chatLanguageModel);
         when(chatLanguageModel.chat("Hello")).thenReturn("Hi there!");
 
-        AgentPingResponse response = service.ping(tenantId, "Hello");
+        AgentPingResponse response = service.ping(tenantId, userId, "Hello");
 
         assertThat(response.reply()).isEqualTo("Hi there!");
         assertThat(response.provider()).isEqualTo("ANTHROPIC");
@@ -89,12 +90,12 @@ class AgentPingServiceTest {
     @Test
     void ping_neverLeaksDecryptedKeyIntoRequestToFactory_exceptAsIntendedParam() {
         VendorCredential credential = activeCredential();
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatLanguageModel);
         when(chatLanguageModel.chat(any(String.class))).thenReturn("ok");
 
-        service.ping(tenantId, "Hello");
+        service.ping(tenantId, userId, "Hello");
 
         verify(llmEngineFactory).create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620", null);
         verify(llmEngineFactory, never()).create(any(), eq("ciphertext"), any(), any());
@@ -102,7 +103,7 @@ class AgentPingServiceTest {
 
     @Test
     void ping_blankPrompt_throwsBadRequest() {
-        assertThatThrownBy(() -> service.ping(tenantId, "  "))
+        assertThatThrownBy(() -> service.ping(tenantId, userId, "  "))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(vendorCredentialRepository);
@@ -110,14 +111,14 @@ class AgentPingServiceTest {
 
     @Test
     void ping_nullPrompt_throwsBadRequest() {
-        assertThatThrownBy(() -> service.ping(tenantId, null)).isInstanceOf(AgentException.class);
+        assertThatThrownBy(() -> service.ping(tenantId, userId, null)).isInstanceOf(AgentException.class);
     }
 
     @Test
     void ping_noCredentialConfigured_throwsBadRequestWithActionableMessage() {
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.empty());
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.ping(tenantId, "Hello"))
+        assertThatThrownBy(() -> service.ping(tenantId, userId, "Hello"))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("PUT /vendor-credentials")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -128,21 +129,21 @@ class AgentPingServiceTest {
     void ping_inactiveCredential_treatedAsMissing() {
         VendorCredential credential = activeCredential();
         credential.setActive(false);
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
 
-        assertThatThrownBy(() -> service.ping(tenantId, "Hello")).isInstanceOf(AgentException.class);
+        assertThatThrownBy(() -> service.ping(tenantId, userId, "Hello")).isInstanceOf(AgentException.class);
         verifyNoInteractions(vendorCredentialService);
     }
 
     @Test
     void ping_providerCallThrows_mapsTo502BadGateway() {
         VendorCredential credential = activeCredential();
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatLanguageModel);
         when(chatLanguageModel.chat(any(String.class))).thenThrow(new RuntimeException("401 unauthorized from Anthropic"));
 
-        assertThatThrownBy(() -> service.ping(tenantId, "Hello"))
+        assertThatThrownBy(() -> service.ping(tenantId, userId, "Hello"))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("ANTHROPIC call failed")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
@@ -152,10 +153,10 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_delegatesToRunner_returnsItsResult() {
-        when(agentPromptRunner.run(eq(tenantId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
+        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", false, false, null));
 
-        AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello", null);
+        AgentToolPingResponse result = service.pingWithTools(tenantId, userId, "Hello", null);
 
         assertThat(result.reply()).isEqualTo("Hi there!");
         assertThat(result.toolWasUsed()).isFalse();
@@ -166,17 +167,17 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_explicitAgentSlug_passedThroughToRunner() {
-        when(agentPromptRunner.run(eq(tenantId), any(), eq("coding-agent"), eq("Hello")))
+        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq("coding-agent"), eq("Hello")))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", true, false, null));
 
-        AgentToolPingResponse result = service.pingWithTools(tenantId, "Hello", "coding-agent");
+        AgentToolPingResponse result = service.pingWithTools(tenantId, userId, "Hello", "coding-agent");
 
         assertThat(result.agentSlug()).isEqualTo("coding-agent");
     }
 
     @Test
     void pingWithTools_blankPrompt_rejectedBeforeDelegating() {
-        assertThatThrownBy(() -> service.pingWithTools(tenantId, " ", null))
+        assertThatThrownBy(() -> service.pingWithTools(tenantId, userId, " ", null))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(agentPromptRunner);
@@ -184,20 +185,20 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_runnerThrowsGenericRuntimeException_mapsTo502BadGateway() {
-        when(agentPromptRunner.run(eq(tenantId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
+        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
                 .thenThrow(new RuntimeException("timeout"));
 
-        assertThatThrownBy(() -> service.pingWithTools(tenantId, "Hello", null))
+        assertThatThrownBy(() -> service.pingWithTools(tenantId, userId, "Hello", null))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
     }
 
     @Test
     void pingWithTools_runnerThrowsAgentException_statusPreserved_notRelabeledAs502() {
-        when(agentPromptRunner.run(eq(tenantId), any(), eq("unknown-agent"), eq("Hello")))
+        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq("unknown-agent"), eq("Hello")))
                 .thenThrow(new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: unknown-agent"));
 
-        assertThatThrownBy(() -> service.pingWithTools(tenantId, "Hello", "unknown-agent"))
+        assertThatThrownBy(() -> service.pingWithTools(tenantId, userId, "Hello", "unknown-agent"))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("Unknown or inactive agent")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));

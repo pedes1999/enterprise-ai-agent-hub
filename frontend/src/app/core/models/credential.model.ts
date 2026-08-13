@@ -18,6 +18,15 @@ export interface ToolCredentialSummary {
   lastValidatedAt: string | null;
 }
 
+export interface TeamVendorCredentialSummary {
+  userId: string;
+  userEmail: string;
+  provider: string;
+  active: boolean;
+  lastUsedAt: string | null;
+  lastValidatedAt: string | null;
+}
+
 export interface CreateVendorCredentialRequest {
   provider: string;
   token: string;

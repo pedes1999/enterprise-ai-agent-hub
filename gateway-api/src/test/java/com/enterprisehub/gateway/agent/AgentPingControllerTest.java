@@ -29,6 +29,7 @@ class AgentPingControllerTest {
     private AgentPingService agentPingService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -38,7 +39,7 @@ class AgentPingControllerTest {
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
 
-        PlatformPrincipal principal = new PlatformPrincipal("dev-1", tenantId.toString(), "DEVELOPER");
+        PlatformPrincipal principal = new PlatformPrincipal(userId.toString(), tenantId.toString(), "DEVELOPER");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, List.of()));
     }
@@ -50,7 +51,7 @@ class AgentPingControllerTest {
 
     @Test
     void ping_returns200WithReply() throws Exception {
-        when(agentPingService.ping(eq(tenantId), eq("Hello"))).thenReturn(
+        when(agentPingService.ping(eq(tenantId), eq(userId), eq("Hello"))).thenReturn(
                 new AgentPingResponse("ANTHROPIC", "claude-3-5-sonnet-20240620", "Hi there!"));
 
         mockMvc.perform(post("/agents/ping")
@@ -64,8 +65,8 @@ class AgentPingControllerTest {
 
     @Test
     void ping_noCredential_returns400() throws Exception {
-        when(agentPingService.ping(any(), any())).thenThrow(
-                new AgentException(HttpStatus.BAD_REQUEST, "No active ANTHROPIC credential configured for this tenant -- PUT /vendor-credentials first"));
+        when(agentPingService.ping(any(), any(), any())).thenThrow(
+                new AgentException(HttpStatus.BAD_REQUEST, "No active ANTHROPIC credential configured for you -- PUT /vendor-credentials first"));
 
         mockMvc.perform(post("/agents/ping")
                         .contentType("application/json")
@@ -76,7 +77,7 @@ class AgentPingControllerTest {
 
     @Test
     void ping_providerFailure_returns502() throws Exception {
-        when(agentPingService.ping(any(), any())).thenThrow(
+        when(agentPingService.ping(any(), any(), any())).thenThrow(
                 new AgentException(HttpStatus.BAD_GATEWAY, "Anthropic API call failed: timeout"));
 
         mockMvc.perform(post("/agents/ping")
@@ -88,7 +89,7 @@ class AgentPingControllerTest {
 
     @Test
     void pingWithTools_returns200WithReplyAndToolUsageFlag() throws Exception {
-        when(agentPingService.pingWithTools(eq(tenantId), eq("What time is it?"), any())).thenReturn(
+        when(agentPingService.pingWithTools(eq(tenantId), eq(userId), eq("What time is it?"), any())).thenReturn(
                 new AgentToolPingResponse("ANTHROPIC", "claude-3-5-sonnet-20240620", "It is noon", true, "general-assistant"));
 
         mockMvc.perform(post("/agents/ping-with-tools")
@@ -102,8 +103,8 @@ class AgentPingControllerTest {
 
     @Test
     void pingWithTools_noCredential_returns400() throws Exception {
-        when(agentPingService.pingWithTools(any(), any(), any())).thenThrow(
-                new AgentException(HttpStatus.BAD_REQUEST, "No active ANTHROPIC credential configured for this tenant -- PUT /vendor-credentials first"));
+        when(agentPingService.pingWithTools(any(), any(), any(), any())).thenThrow(
+                new AgentException(HttpStatus.BAD_REQUEST, "No active ANTHROPIC credential configured for you -- PUT /vendor-credentials first"));
 
         mockMvc.perform(post("/agents/ping-with-tools")
                         .contentType("application/json")

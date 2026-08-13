@@ -38,6 +38,17 @@ public class AgentExecution {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
+    /**
+     * Which app_user queued this execution -- null for rows created before
+     * V23, or if that user has since been removed from the tenant (ON
+     * DELETE SET NULL). AgentJobWorker runs asynchronously with no HTTP
+     * principal available, so this is how it knows whose vendor credential
+     * to resolve (see AgentPromptRunner.resolveApiKey()) now that
+     * credentials are per-user, not per-tenant -- see V22.
+     */
+    @Column(name = "triggered_by")
+    private UUID triggeredBy;
+
     // Repurposed from its original Week 1 meaning (a category like
     // SECURITY_PATCH) -- now holds the resolved AgentDefinition.slug this
     // execution ran with (e.g. "coding-agent"), set by

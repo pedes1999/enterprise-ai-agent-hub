@@ -7,6 +7,7 @@ import {
   CreateVendorCredentialRequest,
   CredentialTestResult,
   ModelOption,
+  TeamVendorCredentialSummary,
   ToolCredentialSummary,
   VendorCredentialSummary,
 } from '../models/credential.model';
@@ -33,6 +34,16 @@ export class CredentialService {
 
   listModels(provider: string): Observable<ModelOption[]> {
     return this.http.get<ModelOption[]>(`${environment.apiBaseUrl}/vendor-credentials/${provider}/models`);
+  }
+
+  /** ADMIN-only read-only view across every teammate's vendor credentials -- see VendorCredentialController's /team endpoint. */
+  listTeamCredentials(): Observable<TeamVendorCredentialSummary[]> {
+    return this.http.get<TeamVendorCredentialSummary[]>(`${environment.apiBaseUrl}/vendor-credentials/team`);
+  }
+
+  /** Blind deactivate -- flips active=false without ever reading the underlying token. */
+  deactivateTeamCredential(userId: string, provider: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiBaseUrl}/vendor-credentials/team/${userId}/${provider}/deactivate`, {});
   }
 
   listToolCredentials(): Observable<ToolCredentialSummary[]> {

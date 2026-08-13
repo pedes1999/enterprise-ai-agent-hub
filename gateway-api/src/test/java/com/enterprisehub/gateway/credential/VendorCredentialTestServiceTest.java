@@ -31,6 +31,7 @@ class VendorCredentialTestServiceTest {
     private ChatModel chatModel;
     private VendorCredentialTestService service;
     private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -58,36 +59,36 @@ class VendorCredentialTestServiceTest {
     @Test
     void test_anthropic_validCredential_returnsValid_marksValidated() {
         VendorCredential credential = activeCredential("ANTHROPIC");
-        when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-sonnet-4-5-20250929", null)).thenReturn(chatModel);
         when(chatModel.chat(anyString())).thenReturn("OK");
 
-        CredentialTestResult result = service.test(tenantId, "anthropic");
+        CredentialTestResult result = service.test(tenantId, userId, "anthropic");
 
         assertThat(result.valid()).isTrue();
-        verify(vendorCredentialService).markValidated(tenantId, "ANTHROPIC");
+        verify(vendorCredentialService).markValidated(tenantId, userId, "ANTHROPIC");
     }
 
     @Test
     void test_anthropic_rejectedCredential_returnsInvalid_neverMarksValidated() {
         VendorCredential credential = activeCredential("ANTHROPIC");
-        when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-bad-key");
         when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatModel);
         when(chatModel.chat(anyString())).thenThrow(new RuntimeException("401 Unauthorized"));
 
-        CredentialTestResult result = service.test(tenantId, "ANTHROPIC");
+        CredentialTestResult result = service.test(tenantId, userId, "ANTHROPIC");
 
         assertThat(result.valid()).isFalse();
         assertThat(result.message()).contains("401 Unauthorized");
-        verify(vendorCredentialService, never()).markValidated(any(), any());
+        verify(vendorCredentialService, never()).markValidated(any(), any(), any());
     }
 
     @Test
     void test_local_tenantHasPreferredModelName_testsAgainstThatModelNotTheServerDefault() {
         VendorCredential credential = activeCredential("LOCAL");
-        when(repository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(credential));
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "LOCAL")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("not-needed");
         // Tenant pulled "llama3.1:8b" locally, not the server-wide default
         // ("llama3.1" -- see LlmProperties in setUp()) -- the test call must
@@ -97,7 +98,7 @@ class VendorCredentialTestServiceTest {
         when(llmEngineFactory.create(LlmProvider.LOCAL, "not-needed", "llama3.1:8b", null)).thenReturn(chatModel);
         when(chatModel.chat(anyString())).thenReturn("OK");
 
-        CredentialTestResult result = service.test(tenantId, "LOCAL");
+        CredentialTestResult result = service.test(tenantId, userId, "LOCAL");
 
         assertThat(result.valid()).isTrue();
         verify(llmEngineFactory).create(LlmProvider.LOCAL, "not-needed", "llama3.1:8b", null);
@@ -106,38 +107,38 @@ class VendorCredentialTestServiceTest {
     @Test
     void test_openai_validCredential_returnsValid_marksValidated() {
         VendorCredential credential = activeCredential("OPENAI");
-        when(repository.findByTenantIdAndProvider(tenantId, "OPENAI")).thenReturn(Optional.of(credential));
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "OPENAI")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-openai-real-key");
         when(llmEngineFactory.create(LlmProvider.OPENAI, "sk-openai-real-key", "gpt-4o-mini", null)).thenReturn(chatModel);
         when(chatModel.chat(anyString())).thenReturn("OK");
 
-        CredentialTestResult result = service.test(tenantId, "OPENAI");
+        CredentialTestResult result = service.test(tenantId, userId, "OPENAI");
 
         assertThat(result.valid()).isTrue();
         assertThat(result.message()).contains("OPENAI");
-        verify(vendorCredentialService).markValidated(tenantId, "OPENAI");
+        verify(vendorCredentialService).markValidated(tenantId, userId, "OPENAI");
     }
 
     @Test
     void test_gemini_rejectedCredential_returnsInvalid() {
         VendorCredential credential = activeCredential("GEMINI");
-        when(repository.findByTenantIdAndProvider(tenantId, "GEMINI")).thenReturn(Optional.of(credential));
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "GEMINI")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("bad-key");
         when(llmEngineFactory.create(LlmProvider.GEMINI, "bad-key", "gemini-1.5-flash", null)).thenReturn(chatModel);
         when(chatModel.chat(anyString())).thenThrow(new RuntimeException("API key not valid"));
 
-        CredentialTestResult result = service.test(tenantId, "GEMINI");
+        CredentialTestResult result = service.test(tenantId, userId, "GEMINI");
 
         assertThat(result.valid()).isFalse();
         assertThat(result.message()).contains("GEMINI").contains("API key not valid");
-        verify(vendorCredentialService, never()).markValidated(any(), any());
+        verify(vendorCredentialService, never()).markValidated(any(), any(), any());
     }
 
     @Test
     void test_noCredentialStored_throwsNotFound() {
-        when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.empty());
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.test(tenantId, "ANTHROPIC"))
+        assertThatThrownBy(() -> service.test(tenantId, userId, "ANTHROPIC"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
     }
@@ -146,16 +147,16 @@ class VendorCredentialTestServiceTest {
     void test_inactiveCredential_throwsNotFound() {
         VendorCredential credential = activeCredential("ANTHROPIC");
         credential.setActive(false);
-        when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
 
-        assertThatThrownBy(() -> service.test(tenantId, "ANTHROPIC"))
+        assertThatThrownBy(() -> service.test(tenantId, userId, "ANTHROPIC"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
     }
 
     @Test
     void test_invalidProvider_throwsBadRequest() {
-        assertThatThrownBy(() -> service.test(tenantId, "COHERE"))
+        assertThatThrownBy(() -> service.test(tenantId, userId, "COHERE"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
     }

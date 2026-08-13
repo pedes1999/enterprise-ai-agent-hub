@@ -98,6 +98,21 @@ public class AgentExecutionService {
     @Transactional
     public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
                                    Map<String, String> inputParameters, Integer maxTokens) {
+        return enqueue(tenantId, prompt, agentSlug, repositoryUrl, repositoryBranch, inputParameters, maxTokens, null);
+    }
+
+    /**
+     * Same as the 7-arg overload, additionally recording WHICH app_user
+     * triggered this -- AgentJobWorker runs asynchronously with no HTTP
+     * principal available, so this is how it (via AgentPromptRunner) later
+     * knows whose vendor credential to resolve, now that credentials are
+     * per-user, not per-tenant (see V22/V23 and AgentExecution.triggeredBy's
+     * javadoc). Null is a legitimate value here (e.g. a future non-HTTP
+     * caller), not just "old test predating this param".
+     */
+    @Transactional
+    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
+                                   Map<String, String> inputParameters, Integer maxTokens, UUID triggeredBy) {
         AgentDefinition definition = agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
 
@@ -134,6 +149,7 @@ public class AgentExecutionService {
                 ? null : repositoryBranch);
         execution.setInputParameters(serializeInputParameters(inputParameters));
         execution.setMaxTokensOverride(maxTokens);
+        execution.setTriggeredBy(triggeredBy);
         execution.setStatus("QUEUED");
         return repository.save(execution);
     }

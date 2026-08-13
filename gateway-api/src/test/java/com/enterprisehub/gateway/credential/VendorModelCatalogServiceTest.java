@@ -29,6 +29,7 @@ class VendorModelCatalogServiceTest {
     private VendorCredentialService vendorCredentialService;
     private VendorModelCatalogService service;
     private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -40,7 +41,7 @@ class VendorModelCatalogServiceTest {
 
     @Test
     void list_invalidProvider_throwsBadRequest_neverResolvesCredential() {
-        assertThatThrownBy(() -> service.list(tenantId, "COHERE"))
+        assertThatThrownBy(() -> service.list(tenantId, userId, "COHERE"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(vendorCredentialRepository, vendorCredentialService);
@@ -48,9 +49,9 @@ class VendorModelCatalogServiceTest {
 
     @Test
     void list_noCredentialConfigured_throwsNotFound() {
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.empty());
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.list(tenantId, "ANTHROPIC"))
+        assertThatThrownBy(() -> service.list(tenantId, userId, "ANTHROPIC"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
         verifyNoInteractions(vendorCredentialService);
@@ -61,9 +62,9 @@ class VendorModelCatalogServiceTest {
         VendorCredential inactive = new VendorCredential();
         inactive.setProvider("ANTHROPIC");
         inactive.setActive(false);
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(inactive));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(inactive));
 
-        assertThatThrownBy(() -> service.list(tenantId, "ANTHROPIC"))
+        assertThatThrownBy(() -> service.list(tenantId, userId, "ANTHROPIC"))
                 .isInstanceOf(VendorCredentialException.class)
                 .satisfies(e -> assertThat(((VendorCredentialException) e).getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
         verifyNoInteractions(vendorCredentialService);

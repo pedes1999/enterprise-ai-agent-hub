@@ -57,7 +57,7 @@ class TenantSettingsServiceTest {
     @Test
     void get_noPreferenceSet_returnsNullPreferenceAndAvailabilityForEveryProvider() {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
-        when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of(activeCredential("ANTHROPIC")));
+        when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "ANTHROPIC")).thenReturn(true);
 
         TenantSettingsResponse response = service.get(tenantId);
 
@@ -89,8 +89,7 @@ class TenantSettingsServiceTest {
     void update_validProviderWithActiveCredential_savesPreference() {
         Tenant tenant = tenant();
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(activeCredential("LOCAL")));
-        when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of(activeCredential("LOCAL")));
+        when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "LOCAL")).thenReturn(true);
 
         TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest("local", null, null));
 
@@ -137,7 +136,7 @@ class TenantSettingsServiceTest {
     @Test
     void update_validProviderButNoActiveCredential_throwsBadRequestWithActionableMessage() {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.empty());
+        when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "LOCAL")).thenReturn(false);
 
         assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("LOCAL", null, null)))
                 .isInstanceOf(TenantSettingsException.class)
@@ -172,10 +171,8 @@ class TenantSettingsServiceTest {
 
     @Test
     void update_credentialExistsButInactive_throwsBadRequest() {
-        VendorCredential inactive = activeCredential("LOCAL");
-        inactive.setActive(false);
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(inactive));
+        when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "LOCAL")).thenReturn(false);
 
         assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("LOCAL", null, null)))
                 .isInstanceOf(TenantSettingsException.class)

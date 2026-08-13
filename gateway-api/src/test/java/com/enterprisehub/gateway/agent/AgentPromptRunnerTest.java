@@ -59,6 +59,7 @@ class AgentPromptRunnerTest {
     private SandboxClient sandboxClient;
     private AgentDefinitionRepository agentDefinitionRepository;
     private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -133,7 +134,7 @@ class AgentPromptRunnerTest {
 
     private void stubCredentialResolution() {
         VendorCredential credential = activeCredential();
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
     }
 
@@ -162,7 +163,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("Hi there!")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-1", AGENT_SLUG, "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-1", AGENT_SLUG, "Hello");
 
         assertThat(result.reply()).isEqualTo("Hi there!");
         assertThat(result.toolWasUsed()).isFalse();
@@ -173,7 +174,7 @@ class AgentPromptRunnerTest {
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);
         VendorCredential localCredential = activeCredential();
         localCredential.setProvider("LOCAL");
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(localCredential));
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "LOCAL")).thenReturn(Optional.of(localCredential));
         when(vendorCredentialService.decryptToken(localCredential)).thenReturn("not-needed");
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-local"), eq(LlmProvider.LOCAL),
                 eq("not-needed"), eq((String) null), any(), any(), eq((String) null), any(), any()))
@@ -186,10 +187,10 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("Hi from local!")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-local", AGENT_SLUG, "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-local", AGENT_SLUG, "Hello");
 
         assertThat(result.reply()).isEqualTo("Hi from local!");
-        verify(vendorCredentialRepository, never()).findByTenantIdAndProvider(tenantId, "ANTHROPIC");
+        verify(vendorCredentialRepository, never()).findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC");
     }
 
     @Test
@@ -207,7 +208,7 @@ class AgentPromptRunnerTest {
                 .thenReturn(response(AiMessage.from(List.of(toolRequest))))
                 .thenReturn(response(AiMessage.from("It is currently 2026-01-01T00:00:00Z")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-2", AGENT_SLUG, "What time is it in UTC?");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-2", AGENT_SLUG, "What time is it in UTC?");
 
         assertThat(result.toolWasUsed()).isTrue();
         assertThat(result.reply()).contains("2026-01-01");
@@ -234,7 +235,7 @@ class AgentPromptRunnerTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(new com.enterprisehub.runtime.sandbox.CommandResult(0, "ok", "", false, java.time.Duration.ZERO));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-shared", AGENT_SLUG, "clone then list files");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-shared", AGENT_SLUG, "clone then list files");
 
         assertThat(result.toolWasUsed()).isTrue();
         // Two sandboxed tool calls happened, but only ONE real sandbox was
@@ -251,16 +252,16 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("no tool needed")));
 
-        runner.run(tenantId, "exec-notools", AGENT_SLUG, "just answer directly");
+        runner.run(tenantId, userId, "exec-notools", AGENT_SLUG, "just answer directly");
 
         verifyNoInteractions(sandboxClient);
     }
 
     @Test
     void run_noCredentialConfigured_throwsBadRequest() {
-        when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.empty());
+        when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> runner.run(tenantId, "exec-3", AGENT_SLUG, "Hello"))
+        assertThatThrownBy(() -> runner.run(tenantId, userId, "exec-3", AGENT_SLUG, "Hello"))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(sharedExecutionContextFactory);
@@ -270,7 +271,7 @@ class AgentPromptRunnerTest {
     void run_unknownAgentSlug_throwsBadRequest_neverResolvesCredential() {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("does-not-exist")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> runner.run(tenantId, "exec-unknown", "does-not-exist", "Hello"))
+        assertThatThrownBy(() -> runner.run(tenantId, userId, "exec-unknown", "does-not-exist", "Hello"))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("does-not-exist")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -286,7 +287,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-no-git", AGENT_SLUG, "Hello");
+        runner.run(tenantId, userId, "exec-no-git", AGENT_SLUG, "Hello");
 
         verifyNoInteractions(credentialResolver);
     }
@@ -300,7 +301,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-with-git", AGENT_SLUG, "Hello");
+        runner.run(tenantId, userId, "exec-with-git", AGENT_SLUG, "Hello");
 
         verify(credentialResolver).resolve(tenantId.toString(), "GIT");
     }
@@ -314,7 +315,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-no-pr", AGENT_SLUG, "Hello");
+        runner.run(tenantId, userId, "exec-no-pr", AGENT_SLUG, "Hello");
 
         verifyNoInteractions(credentialResolver);
     }
@@ -328,7 +329,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-with-pr", AGENT_SLUG, "Hello");
+        runner.run(tenantId, userId, "exec-with-pr", AGENT_SLUG, "Hello");
 
         verify(credentialResolver).resolve(tenantId.toString(), "GIT");
         verify(credentialResolver).resolve(tenantId.toString(), "GITHUB");
@@ -341,7 +342,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-sysprompt", AGENT_SLUG, "Hello");
+        runner.run(tenantId, userId, "exec-sysprompt", AGENT_SLUG, "Hello");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(chatLanguageModel).chat(captor.capture());
@@ -361,7 +362,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-noop-input", AGENT_SLUG, "Hello", null, null, null);
+        runner.run(tenantId, userId, "exec-noop-input", AGENT_SLUG, "Hello", null, null, null);
 
         assertThat(capturedUserMessageText()).isEqualTo("Hello");
     }
@@ -375,7 +376,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-ticket-style", AGENT_SLUG, "Also check the auth module",
+        runner.run(tenantId, userId, "exec-ticket-style", AGENT_SLUG, "Also check the auth module",
                 "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
 
         assertThat(capturedUserMessageText()).isEqualTo(
@@ -391,7 +392,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-ticket-branch", AGENT_SLUG, "Also check the auth module",
+        runner.run(tenantId, userId, "exec-ticket-branch", AGENT_SLUG, "Also check the auth module",
                 "https://github.com/org/repo.git", "feature/my-branch", Map.of("text", "Ticket: fix the login bug"));
 
         assertThat(capturedUserMessageText()).isEqualTo(
@@ -405,7 +406,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-branch-no-repo", AGENT_SLUG, "Hello", null, "feature/my-branch", null);
+        runner.run(tenantId, userId, "exec-branch-no-repo", AGENT_SLUG, "Hello", null, "feature/my-branch", null);
 
         assertThat(capturedUserMessageText()).isEqualTo("Hello");
     }
@@ -419,7 +420,7 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, "exec-ticket-noprompt", AGENT_SLUG, "",
+        runner.run(tenantId, userId, "exec-ticket-noprompt", AGENT_SLUG, "",
                 "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
 
         assertThat(capturedUserMessageText()).isEqualTo("Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug");
@@ -431,7 +432,7 @@ class AgentPromptRunnerTest {
         stubContextFactory("exec-4");
         when(chatLanguageModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("timeout"));
 
-        assertThatThrownBy(() -> runner.run(tenantId, "exec-4", AGENT_SLUG, "Hello"))
+        assertThatThrownBy(() -> runner.run(tenantId, userId, "exec-4", AGENT_SLUG, "Hello"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("timeout");
     }

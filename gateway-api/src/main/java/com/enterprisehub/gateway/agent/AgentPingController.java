@@ -32,14 +32,14 @@ public class AgentPingController {
     @PostMapping("/ping")
     public ResponseEntity<AgentPingResponse> ping(@AuthenticationPrincipal PlatformPrincipal principal,
                                                     @RequestBody AgentPingRequest request) {
-        var response = agentPingService.ping(UUID.fromString(principal.tenantId()), request.prompt());
+        var response = agentPingService.ping(UUID.fromString(principal.tenantId()), UUID.fromString(principal.userId()), request.prompt());
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/ping-with-tools")
     public ResponseEntity<AgentToolPingResponse> pingWithTools(@AuthenticationPrincipal PlatformPrincipal principal,
                                                                   @RequestBody AgentPingRequest request) {
-        var response = agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), request.prompt(), request.agentSlug());
+        var response = agentPingService.pingWithTools(UUID.fromString(principal.tenantId()), UUID.fromString(principal.userId()), request.prompt(), request.agentSlug());
         return ResponseEntity.ok(response);
     }
 }

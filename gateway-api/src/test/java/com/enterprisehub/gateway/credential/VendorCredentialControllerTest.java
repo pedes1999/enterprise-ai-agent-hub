@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.credential;
 
 import com.enterprisehub.dto.CredentialTestResult;
+import com.enterprisehub.dto.TeamVendorCredentialSummary;
 import com.enterprisehub.dto.VendorCredentialSummary;
 import com.enterprisehub.gateway.error.GlobalExceptionHandler;
 import com.enterprisehub.gateway.security.PlatformPrincipal;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,6 +34,7 @@ class VendorCredentialControllerTest {
     private VendorModelCatalogService vendorModelCatalogService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -43,9 +46,14 @@ class VendorCredentialControllerTest {
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
 
-        PlatformPrincipal principal = new PlatformPrincipal("admin-1", tenantId.toString(), "ADMIN");
+        authenticateAs("ADMIN");
+    }
+
+    /** DEVELOPER-role tests re-authenticate via this -- see put/list/delete/test/models being open to DEVELOPER now, unlike the old ADMIN-only gate. */
+    private void authenticateAs(String role) {
+        PlatformPrincipal principal = new PlatformPrincipal(userId.toString(), tenantId.toString(), role);
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, List.of()));
+                new UsernamePasswordAuthenticationToken(principal, null, List.of(new SimpleGrantedAuthority("ROLE_" + role))));
     }
 
     @AfterEach
@@ -55,7 +63,7 @@ class VendorCredentialControllerTest {
 
     @Test
     void put_returns200_withNoTokenField() throws Exception {
-        when(vendorCredentialService.put(eq(tenantId), any())).thenReturn(
+        when(vendorCredentialService.put(eq(tenantId), eq(userId), any())).thenReturn(
                 new VendorCredentialSummary(UUID.randomUUID().toString(), "ANTHROPIC", true, Instant.now(), Instant.now(), null, null));
 
         mockMvc.perform(put("/vendor-credentials")
@@ -68,8 +76,23 @@ class VendorCredentialControllerTest {
     }
 
     @Test
+    void put_asDeveloper_alsoAllowed() throws Exception {
+        // Was ADMIN-only before -- the whole point of this change is that a
+        // DEVELOPER can bring their own key now.
+        authenticateAs("DEVELOPER");
+        when(vendorCredentialService.put(eq(tenantId), eq(userId), any())).thenReturn(
+                new VendorCredentialSummary(UUID.randomUUID().toString(), "ANTHROPIC", true, Instant.now(), Instant.now(), null, null));
+
+        mockMvc.perform(put("/vendor-credentials")
+                        .contentType("application/json")
+                        .content("""
+                                {"provider":"anthropic","token":"sk-ant-secret"}"""))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void put_invalidProvider_returns400() throws Exception {
-        when(vendorCredentialService.put(eq(tenantId), any()))
+        when(vendorCredentialService.put(eq(tenantId), eq(userId), any()))
                 .thenThrow(new VendorCredentialException(HttpStatus.BAD_REQUEST, "provider must be one of ANTHROPIC, OPENAI, GEMINI"));
 
         mockMvc.perform(put("/vendor-credentials")
@@ -80,8 +103,8 @@ class VendorCredentialControllerTest {
     }
 
     @Test
-    void list_returnsSummaries() throws Exception {
-        when(vendorCredentialService.list(tenantId)).thenReturn(List.of(
+    void list_returnsCallersOwnSummaries() throws Exception {
+        when(vendorCredentialService.list(tenantId, userId)).thenReturn(List.of(
                 new VendorCredentialSummary(UUID.randomUUID().toString(), "OPENAI", true, Instant.now(), Instant.now(), null, null)));
 
         mockMvc.perform(get("/vendor-credentials"))
@@ -94,13 +117,13 @@ class VendorCredentialControllerTest {
         mockMvc.perform(delete("/vendor-credentials/GEMINI"))
                 .andExpect(status().isNoContent());
 
-        verify(vendorCredentialService).delete(tenantId, "GEMINI");
+        verify(vendorCredentialService).delete(tenantId, userId, "GEMINI");
     }
 
     @Test
     void delete_notFound_returns404() throws Exception {
         doThrow(new VendorCredentialException(HttpStatus.NOT_FOUND, "No credential stored for provider GEMINI"))
-                .when(vendorCredentialService).delete(tenantId, "GEMINI");
+                .when(vendorCredentialService).delete(tenantId, userId, "GEMINI");
 
         mockMvc.perform(delete("/vendor-credentials/GEMINI"))
                 .andExpect(status().isNotFound());
@@ -108,7 +131,7 @@ class VendorCredentialControllerTest {
 
     @Test
     void test_validCredential_returnsValidTrue() throws Exception {
-        when(vendorCredentialTestService.test(tenantId, "ANTHROPIC"))
+        when(vendorCredentialTestService.test(tenantId, userId, "ANTHROPIC"))
                 .thenReturn(new CredentialTestResult(true, "Anthropic credential is valid."));
 
         mockMvc.perform(post("/vendor-credentials/test")
@@ -121,7 +144,7 @@ class VendorCredentialControllerTest {
 
     @Test
     void test_rejectedCredential_returnsValidFalse_stillHttp200() throws Exception {
-        when(vendorCredentialTestService.test(tenantId, "ANTHROPIC"))
+        when(vendorCredentialTestService.test(tenantId, userId, "ANTHROPIC"))
                 .thenReturn(new CredentialTestResult(false, "Anthropic rejected this credential: 401 Unauthorized"));
 
         mockMvc.perform(post("/vendor-credentials/test")
@@ -134,7 +157,7 @@ class VendorCredentialControllerTest {
 
     @Test
     void test_noCredentialStored_returns404() throws Exception {
-        when(vendorCredentialTestService.test(tenantId, "ANTHROPIC"))
+        when(vendorCredentialTestService.test(tenantId, userId, "ANTHROPIC"))
                 .thenThrow(new VendorCredentialException(HttpStatus.NOT_FOUND, "No active credential stored for provider ANTHROPIC"));
 
         mockMvc.perform(post("/vendor-credentials/test")
@@ -146,7 +169,7 @@ class VendorCredentialControllerTest {
 
     @Test
     void listModels_delegatesToService_returnsOptions() throws Exception {
-        when(vendorModelCatalogService.list(tenantId, "ANTHROPIC"))
+        when(vendorModelCatalogService.list(tenantId, userId, "ANTHROPIC"))
                 .thenReturn(List.of(new com.enterprisehub.dto.ModelOption("claude-opus-4-1-20250805", "Claude Opus 4.1")));
 
         mockMvc.perform(get("/vendor-credentials/ANTHROPIC/models"))
@@ -157,10 +180,34 @@ class VendorCredentialControllerTest {
 
     @Test
     void listModels_noActiveCredential_returns404() throws Exception {
-        when(vendorModelCatalogService.list(tenantId, "LOCAL"))
+        when(vendorModelCatalogService.list(tenantId, userId, "LOCAL"))
                 .thenThrow(new VendorCredentialException(HttpStatus.NOT_FOUND, "No active credential stored for provider LOCAL"));
 
         mockMvc.perform(get("/vendor-credentials/LOCAL/models"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listTeam_admin_returnsCrossUserSummaries() throws Exception {
+        when(vendorCredentialService.listForTeam(tenantId)).thenReturn(List.of(
+                new TeamVendorCredentialSummary(userId.toString(), "me@acme.com", "ANTHROPIC", true, null, null)));
+
+        mockMvc.perform(get("/vendor-credentials/team"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].userEmail").value("me@acme.com"));
+    }
+
+    // Role enforcement (@PreAuthorize) isn't active under standaloneSetup --
+    // covered instead by RolesAndCredentialsIntegrationTest's full Spring
+    // Security context.
+
+    @Test
+    void deactivateTeamCredential_admin_returns204() throws Exception {
+        UUID targetUserId = UUID.randomUUID();
+
+        mockMvc.perform(post("/vendor-credentials/team/" + targetUserId + "/ANTHROPIC/deactivate"))
+                .andExpect(status().isNoContent());
+
+        verify(vendorCredentialService).deactivateForUser(tenantId, targetUserId, "ANTHROPIC");
     }
 }

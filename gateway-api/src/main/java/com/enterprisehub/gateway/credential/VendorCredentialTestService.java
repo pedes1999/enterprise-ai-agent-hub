@@ -41,12 +41,12 @@ public class VendorCredentialTestService {
         this.tenantLlmProviderResolver = tenantLlmProviderResolver;
     }
 
-    public CredentialTestResult test(UUID tenantId, String providerValue) {
+    public CredentialTestResult test(UUID tenantId, UUID userId, String providerValue) {
         VendorProvider provider = VendorProvider.parse(providerValue)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.BAD_REQUEST,
                         "provider must be one of ANTHROPIC, OPENAI, GEMINI, LOCAL"));
 
-        VendorCredential credential = repository.findByTenantIdAndProvider(tenantId, provider.name())
+        VendorCredential credential = repository.findByTenantIdAndUserIdAndProvider(tenantId, userId, provider.name())
                 .filter(VendorCredential::isActive)
                 .orElseThrow(() -> new VendorCredentialException(HttpStatus.NOT_FOUND,
                         "No active credential stored for provider " + provider.name()));
@@ -72,7 +72,7 @@ public class VendorCredentialTestService {
             return new CredentialTestResult(false, provider + " rejected this credential: " + e.getMessage());
         }
 
-        vendorCredentialService.markValidated(tenantId, provider.name());
+        vendorCredentialService.markValidated(tenantId, userId, provider.name());
         return new CredentialTestResult(true, provider + " credential is valid.");
     }
 }

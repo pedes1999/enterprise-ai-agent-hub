@@ -70,15 +70,17 @@ class AgentJobWorkerTest {
     @Test
     void pollAndProcessOne_success_switchesToRealTenantAndCompletes() {
         UUID tenantId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
         UUID executionId = UUID.randomUUID();
         AgentExecution job = new AgentExecution();
         job.setId(executionId);
         job.setTenantId(tenantId);
+        job.setTriggeredBy(userId);
         job.setPrompt("list files");
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
 
-        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("coding-agent"), eq("list files"), eq(null), any(), eq(Map.of()), any()))
+        when(agentPromptRunner.run(eq(tenantId), eq(userId), eq(executionId.toString()), eq("coding-agent"), eq("list files"), eq(null), any(), eq(Map.of()), any()))
                 .thenAnswer(invocation -> {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
@@ -107,7 +109,7 @@ class AgentJobWorkerTest {
         job.setPrompt("fix the bug");
         job.setAgentType("ticket-resolver");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(
                 new ToolCallingChatEngine.ToolChatResult("Let me check if there's a", true, true,
                         "Agent used all 14 allowed tool-call rounds without finishing."));
 
@@ -133,7 +135,7 @@ class AgentJobWorkerTest {
         job.setPrompt("fix the bug");
         job.setAgentType("ticket-resolver");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("", true, false, null));
 
         worker.pollAndProcessOne();
@@ -156,7 +158,7 @@ class AgentJobWorkerTest {
         job.setPrompt("say nothing");
         job.setAgentType("general-assistant");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("", false, false, null));
 
         worker.pollAndProcessOne();
@@ -175,7 +177,7 @@ class AgentJobWorkerTest {
         job.setPrompt("do something");
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
 
         worker.pollAndProcessOne(); // must not throw out of the scheduled method

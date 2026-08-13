@@ -1,8 +1,15 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CredentialService } from '../../core/services/credential.service';
 import { TenantSettingsService } from '../../core/services/tenant-settings.service';
-import { LlmProviderAvailability, ModelOption, ToolCredentialSummary, VendorCredentialSummary } from '../../core/models/credential.model';
+import { AuthService } from '../../core/services/auth.service';
+import {
+  LlmProviderAvailability,
+  ModelOption,
+  TeamVendorCredentialSummary,
+  ToolCredentialSummary,
+  VendorCredentialSummary,
+} from '../../core/models/credential.model';
 import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
 
 interface VendorProviderDef {
@@ -48,14 +55,21 @@ const PAIRED_TOOL_KIND: Record<string, string> = { GIT: 'GITHUB', GITHUB: 'GIT' 
 export class Credentials implements OnInit {
   private readonly credentialService = inject(CredentialService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
+  private readonly authService = inject(AuthService);
 
   readonly vendorProviders = VENDOR_PROVIDERS;
   readonly toolKinds = TOOL_KINDS;
+  readonly isAdmin = this.authService.isAdmin;
 
   readonly vendorCredentials = signal<VendorCredentialSummary[]>([]);
   readonly toolCredentials = signal<ToolCredentialSummary[]>([]);
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
+
+  readonly teamCredentials = signal<TeamVendorCredentialSummary[]>([]);
+  readonly teamLoading = signal(false);
+  readonly teamError = signal<string | null>(null);
+  readonly deactivatingKey = signal<string | null>(null);
 
   /** '' means "no override -- use the server default", matching a null preferredLlmProvider. */
   readonly preferredProviderSelection = signal('');
@@ -68,6 +82,24 @@ export class Credentials implements OnInit {
   readonly availableProviders = signal<LlmProviderAvailability[]>([]);
   readonly savingPreference = signal(false);
   readonly preferenceMessage = signal<RowMessage | null>(null);
+
+  /**
+   * Last-saved values, so the UI can tell "you changed something" apart from "nothing to save" --
+   * see isDirty(). These must be signals themselves, not plain fields: computed() only re-evaluates
+   * when a SIGNAL it read last time changes, so comparing against a plain mutable field would leave
+   * isDirty() stuck on its last cached result even after markSaved() updates it.
+   */
+  private readonly savedProvider = signal('');
+  private readonly savedModel = signal('');
+  private readonly savedMaxTokens = signal('');
+
+  /** Drives the Save button's enabled state and the "Unsaved changes" hint -- recomputes live as any of the three fields change. */
+  readonly isDirty = computed(
+    () =>
+      this.preferredProviderSelection() !== this.savedProvider() ||
+      this.preferredModelSelection() !== this.savedModel() ||
+      this.maxTokensSelection() !== this.savedMaxTokens(),
+  );
 
   readonly modelOptions = signal<ModelOption[]>([]);
   readonly loadingModels = signal(false);
@@ -87,7 +119,12 @@ export class Credentials implements OnInit {
   ngOnInit(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    let pending = 3;
+    // Tool credentials (GIT/GITHUB) and agent defaults (tenant-wide LLM
+    // preference) are deliberately still ADMIN-only server-side -- unlike
+    // vendor credentials, they were never part of the per-user model (see
+    // V22__vendor_credentials_per_user.sql's javadoc). A DEVELOPER fetching
+    // either 403s, so only fire them for an admin.
+    let pending = this.isAdmin() ? 3 : 1;
     const done = () => {
       pending -= 1;
       if (pending === 0) {
@@ -104,30 +141,75 @@ export class Credentials implements OnInit {
         done();
       },
     });
-    this.credentialService.listToolCredentials().subscribe({
+
+    if (this.isAdmin()) {
+      this.credentialService.listToolCredentials().subscribe({
+        next: (list) => {
+          this.toolCredentials.set(list);
+          done();
+        },
+        error: (err) => {
+          this.loadError.set(this.extractMessage(err, 'Failed to load tool credentials.'));
+          done();
+        },
+      });
+      this.tenantSettingsService.getSettings().subscribe({
+        next: (settings) => {
+          this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
+          this.preferredModelSelection.set(settings.preferredModelName ?? '');
+          this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
+          this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
+          this.availableProviders.set(settings.availableProviders);
+          this.markSaved();
+          done();
+        },
+        error: (err) => {
+          this.loadError.set(this.extractMessage(err, 'Failed to load LLM provider preference.'));
+          done();
+        },
+      });
+      this.refreshTeamCredentials();
+    }
+  }
+
+  private refreshTeamCredentials(): void {
+    this.teamLoading.set(true);
+    this.teamError.set(null);
+    this.credentialService.listTeamCredentials().subscribe({
       next: (list) => {
-        this.toolCredentials.set(list);
-        done();
+        this.teamLoading.set(false);
+        this.teamCredentials.set(list);
       },
       error: (err) => {
-        this.loadError.set(this.extractMessage(err, 'Failed to load tool credentials.'));
-        done();
+        this.teamLoading.set(false);
+        this.teamError.set(this.extractMessage(err, 'Failed to load team credentials.'));
       },
     });
-    this.tenantSettingsService.getSettings().subscribe({
-      next: (settings) => {
-        this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
-        this.preferredModelSelection.set(settings.preferredModelName ?? '');
-        this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
-        this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
-        this.availableProviders.set(settings.availableProviders);
-        done();
+  }
+
+  deactivateTeamCredential(row: TeamVendorCredentialSummary): void {
+    if (!confirm(`Deactivate ${row.provider} for ${row.userEmail}? They will need to add a new key before triggering executions with it again.`)) {
+      return;
+    }
+    const key = row.userId + ':' + row.provider;
+    this.deactivatingKey.set(key);
+    this.credentialService.deactivateTeamCredential(row.userId, row.provider).subscribe({
+      next: () => {
+        this.deactivatingKey.set(null);
+        this.refreshTeamCredentials();
       },
       error: (err) => {
-        this.loadError.set(this.extractMessage(err, 'Failed to load LLM provider preference.'));
-        done();
+        this.deactivatingKey.set(null);
+        this.teamError.set(this.extractMessage(err, 'Failed to deactivate credential.'));
       },
     });
+  }
+
+  /** Snapshots the current field values as "saved" -- isDirty() goes false until one of them changes again. */
+  private markSaved(): void {
+    this.savedProvider.set(this.preferredProviderSelection());
+    this.savedModel.set(this.preferredModelSelection());
+    this.savedMaxTokens.set(this.maxTokensSelection());
   }
 
   private refreshVendorCredentials(): void {
@@ -200,6 +282,7 @@ export class Credentials implements OnInit {
         this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
         this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
         this.availableProviders.set(settings.availableProviders);
+        this.markSaved();
         this.preferenceMessage.set({ kind: 'success', text: 'Preference saved.' });
       },
       error: (err) => {

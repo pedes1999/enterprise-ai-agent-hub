@@ -17,7 +17,11 @@ import java.util.UUID;
  * service that reads/writes this entity.
  *
  * RLS-scoped by tenant_id — the highest-sensitivity table in the schema,
- * so this is the one where DB-level enforcement matters most.
+ * so this is the one where DB-level enforcement matters most. Per-user
+ * within a tenant (see V22__vendor_credentials_per_user.sql): each
+ * app_user owns their own key per provider, not one shared tenant-wide
+ * credential -- scoping to the owning user is an application-query
+ * concern (VendorCredentialRepository), not a second RLS policy.
  */
 @Entity
 @Table(name = "vendor_credentials")
@@ -32,6 +36,10 @@ public class VendorCredential {
 
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
+
+    /** The app_user who owns this key -- see V22__vendor_credentials_per_user.sql. Unique together with tenantId+provider, not just tenantId+provider anymore. */
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
 
     @Column(nullable = false)
     private String provider; // ANTHROPIC, OPENAI, GEMINI, LOCAL
