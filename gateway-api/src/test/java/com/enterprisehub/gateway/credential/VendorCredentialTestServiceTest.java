@@ -6,6 +6,7 @@ import com.enterprisehub.dto.CredentialTestResult;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class VendorCredentialTestServiceTest {
@@ -25,6 +27,7 @@ class VendorCredentialTestServiceTest {
     private VendorCredentialRepository repository;
     private VendorCredentialService vendorCredentialService;
     private LlmEngineFactory llmEngineFactory;
+    private TenantLlmProviderResolver tenantLlmProviderResolver;
     private ChatLanguageModel chatModel;
     private VendorCredentialTestService service;
     private final UUID tenantId = UUID.randomUUID();
@@ -34,9 +37,15 @@ class VendorCredentialTestServiceTest {
         repository = mock(VendorCredentialRepository.class);
         vendorCredentialService = mock(VendorCredentialService.class);
         llmEngineFactory = mock(LlmEngineFactory.class);
+        tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         chatModel = mock(ChatLanguageModel.class);
         LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", "gpt-4o-mini", "gemini-1.5-flash", null, null);
-        service = new VendorCredentialTestService(repository, vendorCredentialService, llmEngineFactory, properties);
+        service = new VendorCredentialTestService(repository, vendorCredentialService, llmEngineFactory, properties, tenantLlmProviderResolver);
+        // Default stub: no tenant override, resolveModelName falls back to
+        // whatever the server default would have been -- matches every
+        // existing test's expectations unless a test overrides this.
+        when(tenantLlmProviderResolver.resolveModelName(eq(tenantId), any()))
+                .thenAnswer(invocation -> properties.modelName(invocation.getArgument(1)));
     }
 
     private VendorCredential activeCredential(String provider) {
@@ -73,6 +82,25 @@ class VendorCredentialTestServiceTest {
         assertThat(result.valid()).isFalse();
         assertThat(result.message()).contains("401 Unauthorized");
         verify(vendorCredentialService, never()).markValidated(any(), any());
+    }
+
+    @Test
+    void test_local_tenantHasPreferredModelName_testsAgainstThatModelNotTheServerDefault() {
+        VendorCredential credential = activeCredential("LOCAL");
+        when(repository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(credential));
+        when(vendorCredentialService.decryptToken(credential)).thenReturn("not-needed");
+        // Tenant pulled "llama3.1:8b" locally, not the server-wide default
+        // ("llama3.1" -- see LlmProperties in setUp()) -- the test call must
+        // use the tenant's actual model, or it fails against a model that
+        // was never pulled even though the credential itself is fine.
+        when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.LOCAL)).thenReturn("llama3.1:8b");
+        when(llmEngineFactory.create(LlmProvider.LOCAL, "not-needed", "llama3.1:8b", null)).thenReturn(chatModel);
+        when(chatModel.generate(anyString())).thenReturn("OK");
+
+        CredentialTestResult result = service.test(tenantId, "LOCAL");
+
+        assertThat(result.valid()).isTrue();
+        verify(llmEngineFactory).create(LlmProvider.LOCAL, "not-needed", "llama3.1:8b", null);
     }
 
     @Test
