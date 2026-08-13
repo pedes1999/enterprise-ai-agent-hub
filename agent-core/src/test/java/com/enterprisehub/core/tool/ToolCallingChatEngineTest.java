@@ -429,6 +429,108 @@ class ToolCallingChatEngineTest {
     }
 
     @Test
+    void chat_toolReportsTerminalSuccess_stopsImmediatelyInsteadOfOfferingAnotherRound() {
+        AgentTool prLikeTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "open_pull_request";
+            }
+
+            @Override
+            public String description() {
+                return "opens a PR";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                return "Pull request opened successfully: https://github.com/acme/repo/pull/1";
+            }
+
+            @Override
+            public boolean isTerminalSuccess(String result) {
+                return result != null && result.startsWith("Pull request opened successfully:");
+            }
+        };
+
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder().id("1").name("open_pull_request").arguments("{}").build();
+        // If the loop didn't force a stop, this stub would keep returning
+        // another tool request forever -- exactly the live-observed failure
+        // (the model kept calling run_shell_command after the PR was already
+        // opened, burning the rest of the round budget).
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request))))
+                .thenReturn(Response.from(AiMessage.from(List.of(request))))
+                .thenReturn(Response.from(AiMessage.from("should never be reached this way")));
+        when(model.generate(anyList(), eq(List.of()))).thenReturn(Response.from(AiMessage.from("PR opened, done.")));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(prLikeTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("open a PR");
+
+        // One round offering tools (which returns the PR-opening call), then
+        // one forced text-only call -- not the infinite/near-cap loop.
+        verify(model, times(2)).generate(anyList(), anyList());
+        verify(model, times(1)).generate(anyList(), eq(List.of()));
+        assertThat(result.reply()).isEqualTo("PR opened, done.");
+        assertThat(result.toolWasUsed()).isTrue();
+        // This IS a genuine stopping point -- the goal was achieved -- unlike
+        // hitting the round cap, so it must not be flagged incomplete.
+        assertThat(result.incomplete()).isFalse();
+        assertThat(result.incompleteReason()).isNull();
+    }
+
+    @Test
+    void chat_toolReportsNonTerminalResult_loopContinuesNormally() {
+        AgentTool prLikeTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "open_pull_request";
+            }
+
+            @Override
+            public String description() {
+                return "opens a PR";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                return "Tests FAILED -- pull request was NOT opened.";
+            }
+
+            @Override
+            public boolean isTerminalSuccess(String result) {
+                return result != null && result.startsWith("Pull request opened successfully:");
+            }
+        };
+
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder().id("1").name("open_pull_request").arguments("{}").build();
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request))))
+                .thenReturn(Response.from(AiMessage.from("tests failed, giving up")));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(prLikeTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("open a PR");
+
+        // A failed PR attempt is not terminal success -- the model gets
+        // offered tools again and decides for itself when to stop, same as
+        // any other tool.
+        verify(model, times(2)).generate(anyList(), anyList());
+        assertThat(result.reply()).isEqualTo("tests failed, giving up");
+        assertThat(result.incomplete()).isFalse();
+    }
+
+    @Test
     void chat_withSystemPrompt_prependsSystemMessage() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));

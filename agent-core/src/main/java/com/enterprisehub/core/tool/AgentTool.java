@@ -52,4 +52,21 @@ public interface AgentTool {
      * values came from the LLM, not from authenticated request state.
      */
     String execute(ToolExecutionContext context, Map<String, String> arguments);
+
+    /**
+     * Whether the given result string from a call to this tool represents a
+     * genuine terminal success that should end ToolCallingChatEngine's loop
+     * immediately, instead of offering the model another round of tools.
+     * False by default -- most tools (read a file, run a shell command) are
+     * intermediate steps with no single result that means "the task is
+     * done." A tool like open_pull_request overrides this because a
+     * successfully opened PR IS the goal for ticket-resolver/test-fixer
+     * -shaped agents, and a "stop after this succeeds" instruction in a
+     * system prompt alone is not reliably honored by every model (smaller
+     * ones especially) -- see ToolCallingChatEngine for where this is
+     * enforced.
+     */
+    default boolean isTerminalSuccess(String result) {
+        return false;
+    }
 }

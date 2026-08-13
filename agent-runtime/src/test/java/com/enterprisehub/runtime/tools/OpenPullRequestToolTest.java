@@ -107,6 +107,26 @@ class OpenPullRequestToolTest {
     }
 
     @Test
+    void isTerminalSuccess_pullRequestOpenedResult_true() {
+        assertThat(tool.isTerminalSuccess("Pull request opened successfully: https://github.com/octocat/Hello-World/pull/42 (#42)")).isTrue();
+    }
+
+    @Test
+    void isTerminalSuccess_testsFailedResult_false() {
+        assertThat(tool.isTerminalSuccess("Tests FAILED -- pull request was NOT opened. Nothing was committed or pushed.")).isFalse();
+    }
+
+    @Test
+    void isTerminalSuccess_pushSucceededButPrFailedResult_false() {
+        assertThat(tool.isTerminalSuccess("Branch pushed successfully, but opening the pull request failed: Validation Failed")).isFalse();
+    }
+
+    @Test
+    void isTerminalSuccess_null_false() {
+        assertThat(tool.isTerminalSuccess(null)).isFalse();
+    }
+
+    @Test
     void execute_githubApiReturnsError_reportsMessageNotRawJson() {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(ok("tests passed"))

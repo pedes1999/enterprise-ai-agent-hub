@@ -61,6 +61,18 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
                 + "this once you believe the change is complete and ready for review.";
     }
 
+    /**
+     * "Pull request opened successfully: ..." (see formatPullRequestResult
+     * below) is the one result shape from this tool that means the task's
+     * actual goal was achieved -- ToolCallingChatEngine uses this to force
+     * the loop to stop right there instead of trusting the model to notice
+     * and stop calling tools on its own.
+     */
+    @Override
+    public boolean isTerminalSuccess(String result) {
+        return result != null && result.startsWith("Pull request opened successfully:");
+    }
+
     @Override
     public Map<String, String> parameterDescriptions() {
         Map<String, String> params = new LinkedHashMap<>();

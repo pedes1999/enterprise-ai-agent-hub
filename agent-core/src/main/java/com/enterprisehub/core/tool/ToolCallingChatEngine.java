@@ -112,9 +112,25 @@ public class ToolCallingChatEngine {
 
             toolWasUsed = true;
             messages.add(aiMessage);
+            boolean terminalSuccess = false;
             for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
                 String result = executeTool(request);
                 messages.add(ToolExecutionResultMessage.from(request, result));
+                if (isTerminalSuccess(request.name(), result)) {
+                    terminalSuccess = true;
+                }
+            }
+
+            if (terminalSuccess) {
+                // A tool like open_pull_request just reported that the actual
+                // goal was achieved -- don't offer the model another round of
+                // tools and trust it to notice and stop on its own (it often
+                // won't, see AgentTool.isTerminalSuccess()'s javadoc); force
+                // one final text-only answer instead, same mechanism as the
+                // round-cap path below but a genuine stopping point, so this
+                // is NOT incomplete.
+                Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
+                return new ToolChatResult(finalResponse.content().text(), toolWasUsed, false, null);
             }
         }
 
@@ -125,6 +141,11 @@ public class ToolCallingChatEngine {
         Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
         return new ToolChatResult(finalResponse.content().text(), toolWasUsed, true,
                 "Agent used all " + MAX_TOOL_ROUNDS + " allowed tool-call rounds without finishing.");
+    }
+
+    private boolean isTerminalSuccess(String toolName, String result) {
+        AgentTool tool = toolsByName.get(toolName);
+        return tool != null && tool.isTerminalSuccess(result);
     }
 
     private String executeTool(ToolExecutionRequest request) {
