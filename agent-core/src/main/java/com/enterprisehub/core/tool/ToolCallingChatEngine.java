@@ -43,12 +43,16 @@ public class ToolCallingChatEngine {
      * open_pull_request) alone needs ~5; ticket-resolver's system prompt
      * additionally allows one corrected attempt if open_pull_request
      * reports the test run failed, which costs a read/write/retry cycle
-     * on top of that -- 6 was measured too tight for that combined shape
-     * (the cap would hit mid-retry, forcing a text-only answer with no
-     * tool calls left rather than a real PR or a clear stop reason), so
-     * this leaves real headroom instead of the exact minimum.
+     * on top of that. 14 was already headroom over that shape, but
+     * test-fixer's prompt asks for a full-suite re-run after EACH
+     * individual fix (read failing test, read source, fix, re-run --
+     * repeated per failure, potentially several times on a repo with
+     * multiple genuine failures) -- 30 leaves room for that multi-fix
+     * loop without still being unbounded; a model that never converges
+     * still gets cut off and reported honestly (see the incomplete/
+     * incompleteReason handling below) rather than looping forever.
      */
-    static final int MAX_TOOL_ROUNDS = 14;
+    static final int MAX_TOOL_ROUNDS = 30;
 
     private final ChatLanguageModel chatModel;
     private final Map<String, AgentTool> toolsByName;
