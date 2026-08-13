@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (Maven)
+    runs-on: ubuntu-latest
+    services:
+      # Started as the default postgres superuser, matching docker/postgres/init.sh's
+      # assumption -- the "create hub_user" step below then mirrors that script so
+      # tests run against the same non-superuser role prod does (superuser bypasses
+      # RLS entirely, which would silently hide a real RLS bug from these tests).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Create app role and test database
+        # See docker/postgres/init.sh -- gateway-api's tests connect as
+        # hub_user/password against agent_hub_test (application-test.yml),
+        # never as the postgres superuser.
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c \
+            "CREATE ROLE hub_user LOGIN PASSWORD 'password'; CREATE DATABASE agent_hub_test OWNER hub_user;"
+
+      - name: mvn test
+        run: mvn -B -ntp test
+        env:
+          TEST_DB_URL: jdbc:postgresql://localhost:5432/agent_hub_test
+
+  frontend:
+    name: Frontend (Angular)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build -- --configuration production

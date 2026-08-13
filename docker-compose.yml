@@ -13,10 +13,18 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # Only the postgres init.sh admin step (create the app role/db) ever
+      # authenticates as this superuser -- gateway-api never does. Still
+      # published on the host below, so override it in .env for anything
+      # beyond local dev.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Read by docker/postgres/init.sh to create the app's own (non-superuser)
+      # role -- must match gateway-api's DB_USERNAME/DB_PASSWORD below.
+      DB_USERNAME: ${DB_USERNAME:-hub_user}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./docker/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -34,6 +42,14 @@ services:
     environment:
       E2B_API_KEY: "${E2B_API_KEY:?set E2B_API_KEY in .env -- see agent-runtime/sidecar/README.md}"
       PORT: 8090
+    healthcheck:
+      # node:20-slim has no curl/wget -- Node 20's built-in global fetch avoids
+      # pulling in an extra package just for this.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     ports:
       - "8090:8090"
 
@@ -45,11 +61,13 @@ services:
       postgres:
         condition: service_healthy
       sidecar:
-        condition: service_started
+        condition: service_healthy
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/agent_hub
-      DB_USERNAME: hub_user
-      DB_PASSWORD: password
+      # Must match postgres's DB_USERNAME/DB_PASSWORD above -- init.sh creates
+      # exactly this role.
+      DB_USERNAME: ${DB_USERNAME:-hub_user}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
       # Must be >= 256 bits (32 bytes) for HS256 -- JwtService rejects anything shorter at startup.
       JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-override-me-must-be-at-least-32-bytes-long}
       CREDENTIAL_LOCAL_KEY: "${CREDENTIAL_LOCAL_KEY:?generate one -- python3 -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())'}"
@@ -73,6 +91,14 @@ services:
     # plain Docker Engine on Linux needs this explicit mapping to do the same.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      # eclipse-temurin-alpine ships busybox wget; no curl. --spider makes it
+      # a HEAD-only request instead of downloading the body.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     ports:
       - "8080:8080"
 
@@ -85,7 +111,14 @@ services:
         # gateway-api is published on a different host/port.
         API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://localhost:8080}
     depends_on:
-      - gateway-api
+      gateway-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     ports:
       - "4200:80"
 
