@@ -97,11 +97,28 @@ app:
     local-base-url: ${LLM_LOCAL_BASE_URL:http://localhost:11434/v1}
     # Server-wide fallback token budget per execution -- ToolCallingChatEngine
     # forces a final answer once a run's cumulative TokenUsage crosses this,
-    # same idea as MAX_TOOL_ROUNDS but priced in tokens instead of rounds. A
+    # same idea as maxToolRounds but priced in tokens instead of rounds. A
     # tenant can override it (TenantSettingsService), and a single trigger
     # request can override THAT (TriggerAgentExecutionRequest.maxTokens) --
     # see TenantLlmProviderResolver.resolveMaxTokens().
-    max-tokens-per-execution: ${MAX_TOKENS_PER_EXECUTION:500000}
+    #
+    # 500,000 (the original default) is too tight for test-fixer/ticket-resolver:
+    # ToolCallingChatEngine resends the FULL conversation history on every
+    # round, so cumulative billed tokens across a long run grow roughly with
+    # the SQUARE of the round count, not linearly -- a genuine 100-round
+    # monorepo run (the exact shape DEFAULT_MAX_TOOL_ROUNDS=100 was raised
+    # for, see its javadoc) can plausibly bill several million cumulative
+    # tokens well before any single call approaches the model's own context
+    # window. Raised well above that so the budget catches a runaway/
+    # misconfigured tenant, not a legitimately deep task -- tightening this
+    # further should wait on trimming/summarizing old tool results out of
+    # the resent history (not yet built), not just a smaller number here.
+    max-tokens-per-execution: ${MAX_TOKENS_PER_EXECUTION:3000000}
+    # Overrides ToolCallingChatEngine.DEFAULT_MAX_TOOL_ROUNDS (100) -- see
+    # LlmProperties' javadoc. No tenant/execution-level override yet, unlike
+    # max-tokens-per-execution above -- this is a runaway-loop backstop, not
+    # a per-run cost dial.
+    max-tool-rounds: ${MAX_TOOL_ROUNDS:100}
   sandbox:
     # Points at agent-runtime/sidecar (see its README) -- must be running
     # separately (node --env-file=.env server.js, or the Dockerfile) for

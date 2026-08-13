@@ -3,7 +3,7 @@ package com.enterprisehub.core;
 import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.core.tool.ToolExecutionContext;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 
 import java.util.List;
 
@@ -23,27 +23,34 @@ public class SharedExecutionContext {
 
     private final String tenantId;
     private final String executionId;
-    private final ChatLanguageModel chatModel;
+    private final ChatModel chatModel;
     private final List<AgentTool> tools;
     private final ToolCallingChatEngine chatEngine;
 
-    public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools) {
+    public SharedExecutionContext(String tenantId, String executionId, ChatModel chatModel, List<AgentTool> tools) {
         this(tenantId, executionId, chatModel, tools, null);
     }
 
     /** systemPrompt: see ToolCallingChatEngine's javadoc -- an AgentDefinition's persona/instructions, nullable. */
-    public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools, String systemPrompt) {
+    public SharedExecutionContext(String tenantId, String executionId, ChatModel chatModel, List<AgentTool> tools, String systemPrompt) {
         this(tenantId, executionId, chatModel, tools, systemPrompt, null);
     }
 
-    /** maxTokensBudget: see ToolCallingChatEngine's javadoc -- null means "no budget, rely on MAX_TOOL_ROUNDS alone". */
-    public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools,
+    /** maxTokensBudget: see ToolCallingChatEngine's javadoc -- null means "no budget, rely on maxToolRounds alone". */
+    public SharedExecutionContext(String tenantId, String executionId, ChatModel chatModel, List<AgentTool> tools,
                                    String systemPrompt, Integer maxTokensBudget) {
+        this(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget, null);
+    }
+
+    /** maxToolRounds: see ToolCallingChatEngine's javadoc -- null means "use its own DEFAULT_MAX_TOOL_ROUNDS". */
+    public SharedExecutionContext(String tenantId, String executionId, ChatModel chatModel, List<AgentTool> tools,
+                                   String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds) {
         this.tenantId = tenantId;
         this.executionId = executionId;
         this.chatModel = chatModel;
         this.tools = List.copyOf(tools);
-        this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId), systemPrompt, maxTokensBudget);
+        this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId),
+                systemPrompt, maxTokensBudget, maxToolRounds);
     }
 
     public String tenantId() {
@@ -54,7 +61,7 @@ public class SharedExecutionContext {
         return executionId;
     }
 
-    public ChatLanguageModel chatModel() {
+    public ChatModel chatModel() {
         return chatModel;
     }
 

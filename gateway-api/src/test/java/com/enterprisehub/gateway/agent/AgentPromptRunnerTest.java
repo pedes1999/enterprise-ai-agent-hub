@@ -25,10 +25,12 @@ import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
 import java.util.List;
@@ -51,7 +53,7 @@ class AgentPromptRunnerTest {
     private VendorCredentialService vendorCredentialService;
     private SharedExecutionContextFactory sharedExecutionContextFactory;
     private TenantLlmProviderResolver tenantLlmProviderResolver;
-    private ChatLanguageModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
     private AgentPromptRunner runner;
     private CredentialResolver credentialResolver;
     private SandboxClient sandboxClient;
@@ -63,8 +65,8 @@ class AgentPromptRunnerTest {
         vendorCredentialRepository = mock(VendorCredentialRepository.class);
         vendorCredentialService = mock(VendorCredentialService.class);
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
-        chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000);
+        chatLanguageModel = mock(ChatModel.class);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000, 100);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");
@@ -108,10 +110,14 @@ class AgentPromptRunnerTest {
 
     /** Captures the actual UserMessage text sent to the model -- index 1 because every test agent here has a non-null systemPrompt (index 0). */
     private String capturedUserMessageText() {
-        org.mockito.ArgumentCaptor<List<dev.langchain4j.data.message.ChatMessage>> captor =
-                org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(chatLanguageModel).generate(captor.capture(), anyList());
-        return ((dev.langchain4j.data.message.UserMessage) captor.getValue().get(1)).singleText();
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(chatLanguageModel).chat(captor.capture());
+        return ((dev.langchain4j.data.message.UserMessage) captor.getValue().messages().get(1)).singleText();
+    }
+
+    /** langchain4j 1.x's ChatModel.chat(ChatRequest) replaced the old generate(messages, tools) two-arg call -- builds the ChatResponse a stub returns. */
+    private static ChatResponse response(AiMessage aiMessage) {
+        return ChatResponse.builder().aiMessage(aiMessage).build();
     }
 
     private VendorCredential activeCredential() {
@@ -140,7 +146,7 @@ class AgentPromptRunnerTest {
      */
     private void stubContextFactory(String executionId) {
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(executionId), eq(LlmProvider.ANTHROPIC),
-                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any(), any()))
+                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
@@ -153,8 +159,8 @@ class AgentPromptRunnerTest {
     void run_modelAnswersDirectly_noToolNeeded() {
         stubCredentialResolution();
         stubContextFactory("exec-1");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("Hi there!")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("Hi there!")));
 
         ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-1", AGENT_SLUG, "Hello");
 
@@ -170,15 +176,15 @@ class AgentPromptRunnerTest {
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(localCredential));
         when(vendorCredentialService.decryptToken(localCredential)).thenReturn("not-needed");
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-local"), eq(LlmProvider.LOCAL),
-                eq("not-needed"), eq((String) null), any(), any(), eq((String) null), any()))
+                eq("not-needed"), eq((String) null), any(), any(), eq((String) null), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
                     String systemPrompt = invocation.getArgument(6);
                     return new SharedExecutionContext(tenantId.toString(), "exec-local", chatLanguageModel, tools, systemPrompt);
                 });
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("Hi from local!")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("Hi from local!")));
 
         ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-local", AGENT_SLUG, "Hello");
 
@@ -197,15 +203,15 @@ class AgentPromptRunnerTest {
                 .arguments("{\"timezone\":\"UTC\"}")
                 .build();
 
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from(List.of(toolRequest))))
-                .thenReturn(Response.from(AiMessage.from("It is currently 2026-01-01T00:00:00Z")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(toolRequest))))
+                .thenReturn(response(AiMessage.from("It is currently 2026-01-01T00:00:00Z")));
 
         ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, "exec-2", AGENT_SLUG, "What time is it in UTC?");
 
         assertThat(result.toolWasUsed()).isTrue();
         assertThat(result.reply()).contains("2026-01-01");
-        verify(chatLanguageModel, times(2)).generate(anyList(), anyList());
+        verify(chatLanguageModel, times(2)).chat(any(ChatRequest.class));
     }
 
     @Test
@@ -218,10 +224,10 @@ class AgentPromptRunnerTest {
         ToolExecutionRequest shellRequest = ToolExecutionRequest.builder()
                 .id("call-2").name("run_shell_command").arguments("{\"command\":\"ls\"}").build();
 
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from(List.of(cloneRequest))))
-                .thenReturn(Response.from(AiMessage.from(List.of(shellRequest))))
-                .thenReturn(Response.from(AiMessage.from("Cloned and listed files")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(cloneRequest))))
+                .thenReturn(response(AiMessage.from(List.of(shellRequest))))
+                .thenReturn(response(AiMessage.from("Cloned and listed files")));
 
         com.enterprisehub.runtime.sandbox.SandboxHandle handle = new com.enterprisehub.runtime.sandbox.SandboxHandle("shared-1");
         when(sandboxClient.create(any())).thenReturn(handle);
@@ -242,8 +248,8 @@ class AgentPromptRunnerTest {
     void run_sandboxNeverTouched_endSessionStillSafe_noDestroyCall() {
         stubCredentialResolution();
         stubContextFactory("exec-notools");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("no tool needed")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("no tool needed")));
 
         runner.run(tenantId, "exec-notools", AGENT_SLUG, "just answer directly");
 
@@ -277,8 +283,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinition("get_current_date_time")));
         stubCredentialResolution();
         stubContextFactory("exec-no-git");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-no-git", AGENT_SLUG, "Hello");
 
@@ -291,8 +297,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinition("git_clone")));
         stubCredentialResolution();
         stubContextFactory("exec-with-git");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-with-git", AGENT_SLUG, "Hello");
 
@@ -305,8 +311,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinition("get_current_date_time")));
         stubCredentialResolution();
         stubContextFactory("exec-no-pr");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-no-pr", AGENT_SLUG, "Hello");
 
@@ -319,8 +325,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinition("git_clone", "open_pull_request")));
         stubCredentialResolution();
         stubContextFactory("exec-with-pr");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-with-pr", AGENT_SLUG, "Hello");
 
@@ -332,16 +338,15 @@ class AgentPromptRunnerTest {
     void run_passesDefinitionsSystemPromptThrough() {
         stubCredentialResolution();
         stubContextFactory("exec-sysprompt");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-sysprompt", AGENT_SLUG, "Hello");
 
-        org.mockito.ArgumentCaptor<List<dev.langchain4j.data.message.ChatMessage>> captor =
-                org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(chatLanguageModel).generate(captor.capture(), anyList());
-        assertThat(captor.getValue().get(0)).isInstanceOf(dev.langchain4j.data.message.SystemMessage.class);
-        assertThat(((dev.langchain4j.data.message.SystemMessage) captor.getValue().get(0)).text())
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(chatLanguageModel).chat(captor.capture());
+        assertThat(captor.getValue().messages().get(0)).isInstanceOf(dev.langchain4j.data.message.SystemMessage.class);
+        assertThat(((dev.langchain4j.data.message.SystemMessage) captor.getValue().messages().get(0)).text())
                 .isEqualTo("You are a test agent.");
     }
 
@@ -353,8 +358,8 @@ class AgentPromptRunnerTest {
         // stray "Repository: " prefix, no leftover blank lines.
         stubCredentialResolution();
         stubContextFactory("exec-noop-input");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-noop-input", AGENT_SLUG, "Hello", null, null, null);
 
@@ -367,8 +372,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinitionWithInputSource("MANUAL_TEXT", "get_current_date_time")));
         stubCredentialResolution();
         stubContextFactory("exec-ticket-style");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-ticket-style", AGENT_SLUG, "Also check the auth module",
                 "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
@@ -383,8 +388,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinitionWithInputSource("MANUAL_TEXT", "get_current_date_time")));
         stubCredentialResolution();
         stubContextFactory("exec-ticket-branch");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-ticket-branch", AGENT_SLUG, "Also check the auth module",
                 "https://github.com/org/repo.git", "feature/my-branch", Map.of("text", "Ticket: fix the login bug"));
@@ -397,8 +402,8 @@ class AgentPromptRunnerTest {
     void run_repositoryBranchGiven_butNoRepositoryUrl_ignoredEntirely() {
         stubCredentialResolution();
         stubContextFactory("exec-branch-no-repo");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-branch-no-repo", AGENT_SLUG, "Hello", null, "feature/my-branch", null);
 
@@ -411,8 +416,8 @@ class AgentPromptRunnerTest {
                 .thenReturn(Optional.of(testDefinitionWithInputSource("MANUAL_TEXT", "get_current_date_time")));
         stubCredentialResolution();
         stubContextFactory("exec-ticket-noprompt");
-        when(chatLanguageModel.generate(anyList(), anyList()))
-                .thenReturn(Response.from(AiMessage.from("ok")));
+        when(chatLanguageModel.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from("ok")));
 
         runner.run(tenantId, "exec-ticket-noprompt", AGENT_SLUG, "",
                 "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
@@ -424,7 +429,7 @@ class AgentPromptRunnerTest {
     void run_providerCallThrows_propagatesRuntimeException() {
         stubCredentialResolution();
         stubContextFactory("exec-4");
-        when(chatLanguageModel.generate(anyList(), anyList())).thenThrow(new RuntimeException("timeout"));
+        when(chatLanguageModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("timeout"));
 
         assertThatThrownBy(() -> runner.run(tenantId, "exec-4", AGENT_SLUG, "Hello"))
                 .isInstanceOf(RuntimeException.class)

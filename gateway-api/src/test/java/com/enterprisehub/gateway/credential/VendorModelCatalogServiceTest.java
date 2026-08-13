@@ -34,7 +34,7 @@ class VendorModelCatalogServiceTest {
     void setUp() {
         vendorCredentialRepository = mock(VendorCredentialRepository.class);
         vendorCredentialService = mock(VendorCredentialService.class);
-        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000);
+        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000, 100);
         service = new VendorModelCatalogService(vendorCredentialRepository, vendorCredentialService, llmProperties);
     }
 

@@ -7,7 +7,7 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 
@@ -65,9 +65,9 @@ public class VendorCredentialTestService {
         String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, llmProvider);
 
         try {
-            ChatLanguageModel model = llmEngineFactory.create(llmProvider, apiKey,
+            ChatModel model = llmEngineFactory.create(llmProvider, apiKey,
                     modelName, llmProperties.baseUrl(llmProvider));
-            model.generate("Reply with exactly one word: OK");
+            model.chat("Reply with exactly one word: OK");
         } catch (RuntimeException e) {
             return new CredentialTestResult(false, provider + " rejected this credential: " + e.getMessage());
         }

@@ -7,7 +7,7 @@ import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -28,7 +28,7 @@ class VendorCredentialTestServiceTest {
     private VendorCredentialService vendorCredentialService;
     private LlmEngineFactory llmEngineFactory;
     private TenantLlmProviderResolver tenantLlmProviderResolver;
-    private ChatLanguageModel chatModel;
+    private ChatModel chatModel;
     private VendorCredentialTestService service;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -38,8 +38,8 @@ class VendorCredentialTestServiceTest {
         vendorCredentialService = mock(VendorCredentialService.class);
         llmEngineFactory = mock(LlmEngineFactory.class);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
-        chatModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", "gpt-4o-mini", "gemini-1.5-flash", null, null, 500_000);
+        chatModel = mock(ChatModel.class);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", "gpt-4o-mini", "gemini-1.5-flash", null, null, 500_000, 100);
         service = new VendorCredentialTestService(repository, vendorCredentialService, llmEngineFactory, properties, tenantLlmProviderResolver);
         // Default stub: no tenant override, resolveModelName falls back to
         // whatever the server default would have been -- matches every
@@ -61,7 +61,7 @@ class VendorCredentialTestServiceTest {
         when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-sonnet-4-5-20250929", null)).thenReturn(chatModel);
-        when(chatModel.generate(anyString())).thenReturn("OK");
+        when(chatModel.chat(anyString())).thenReturn("OK");
 
         CredentialTestResult result = service.test(tenantId, "anthropic");
 
@@ -75,7 +75,7 @@ class VendorCredentialTestServiceTest {
         when(repository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-bad-key");
         when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatModel);
-        when(chatModel.generate(anyString())).thenThrow(new RuntimeException("401 Unauthorized"));
+        when(chatModel.chat(anyString())).thenThrow(new RuntimeException("401 Unauthorized"));
 
         CredentialTestResult result = service.test(tenantId, "ANTHROPIC");
 
@@ -95,7 +95,7 @@ class VendorCredentialTestServiceTest {
         // was never pulled even though the credential itself is fine.
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.LOCAL)).thenReturn("llama3.1:8b");
         when(llmEngineFactory.create(LlmProvider.LOCAL, "not-needed", "llama3.1:8b", null)).thenReturn(chatModel);
-        when(chatModel.generate(anyString())).thenReturn("OK");
+        when(chatModel.chat(anyString())).thenReturn("OK");
 
         CredentialTestResult result = service.test(tenantId, "LOCAL");
 
@@ -109,7 +109,7 @@ class VendorCredentialTestServiceTest {
         when(repository.findByTenantIdAndProvider(tenantId, "OPENAI")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-openai-real-key");
         when(llmEngineFactory.create(LlmProvider.OPENAI, "sk-openai-real-key", "gpt-4o-mini", null)).thenReturn(chatModel);
-        when(chatModel.generate(anyString())).thenReturn("OK");
+        when(chatModel.chat(anyString())).thenReturn("OK");
 
         CredentialTestResult result = service.test(tenantId, "OPENAI");
 
@@ -124,7 +124,7 @@ class VendorCredentialTestServiceTest {
         when(repository.findByTenantIdAndProvider(tenantId, "GEMINI")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("bad-key");
         when(llmEngineFactory.create(LlmProvider.GEMINI, "bad-key", "gemini-1.5-flash", null)).thenReturn(chatModel);
-        when(chatModel.generate(anyString())).thenThrow(new RuntimeException("API key not valid"));
+        when(chatModel.chat(anyString())).thenThrow(new RuntimeException("API key not valid"));
 
         CredentialTestResult result = service.test(tenantId, "GEMINI");
 

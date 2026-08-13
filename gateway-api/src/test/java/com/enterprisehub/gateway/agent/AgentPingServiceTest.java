@@ -10,7 +10,7 @@ import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -39,7 +39,7 @@ class AgentPingServiceTest {
     private LlmEngineFactory llmEngineFactory;
     private TenantLlmProviderResolver tenantLlmProviderResolver;
     private AgentPromptRunner agentPromptRunner;
-    private ChatLanguageModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
     private AgentPingService service;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -50,8 +50,8 @@ class AgentPingServiceTest {
         llmEngineFactory = mock(LlmEngineFactory.class);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
-        chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000);
+        chatLanguageModel = mock(ChatModel.class);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000, 100);
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");
         when(agentPromptRunner.modelName(tenantId)).thenReturn("claude-3-5-sonnet-20240620");
@@ -77,7 +77,7 @@ class AgentPingServiceTest {
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(LlmProvider.ANTHROPIC, "sk-ant-real-key", "claude-3-5-sonnet-20240620", null))
                 .thenReturn(chatLanguageModel);
-        when(chatLanguageModel.generate("Hello")).thenReturn("Hi there!");
+        when(chatLanguageModel.chat("Hello")).thenReturn("Hi there!");
 
         AgentPingResponse response = service.ping(tenantId, "Hello");
 
@@ -92,7 +92,7 @@ class AgentPingServiceTest {
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatLanguageModel);
-        when(chatLanguageModel.generate(any(String.class))).thenReturn("ok");
+        when(chatLanguageModel.chat(any(String.class))).thenReturn("ok");
 
         service.ping(tenantId, "Hello");
 
@@ -140,7 +140,7 @@ class AgentPingServiceTest {
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "ANTHROPIC")).thenReturn(Optional.of(credential));
         when(vendorCredentialService.decryptToken(credential)).thenReturn("sk-ant-real-key");
         when(llmEngineFactory.create(any(), any(), any(), any())).thenReturn(chatLanguageModel);
-        when(chatLanguageModel.generate(any(String.class))).thenThrow(new RuntimeException("401 unauthorized from Anthropic"));
+        when(chatLanguageModel.chat(any(String.class))).thenThrow(new RuntimeException("401 unauthorized from Anthropic"));
 
         assertThatThrownBy(() -> service.ping(tenantId, "Hello"))
                 .isInstanceOf(AgentException.class)

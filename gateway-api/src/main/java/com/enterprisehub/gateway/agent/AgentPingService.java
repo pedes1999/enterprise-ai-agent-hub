@@ -10,7 +10,7 @@ import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -57,11 +57,11 @@ public class AgentPingService {
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
         String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
-        ChatLanguageModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl(provider));
+        ChatModel model = llmEngineFactory.create(provider, apiKey, modelName, llmProperties.baseUrl(provider));
 
         String reply;
         try {
-            reply = model.generate(prompt);
+            reply = model.chat(prompt);
         } catch (RuntimeException e) {
             throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + e.getMessage());
         }

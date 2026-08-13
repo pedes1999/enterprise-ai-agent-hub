@@ -115,6 +115,22 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Without a real HTTP client library on the classpath, Spring Boot's
+             TestRestTemplate auto-configuration falls back to JDK HttpURLConnection
+             (SimpleClientHttpRequestFactory), which cannot retry a POST request
+             after a 401/error response (a longstanding JDK bug: "cannot retry due
+             to server authentication, in streaming mode"; not this codebase's).
+             langchain4j:0.35.0 used to pull in OkHttp transitively, which
+             incidentally gave TestRestTemplate a working factory instead; the
+             1.x line dropped that in favor of its own internal HTTP client
+             abstraction. Explicit test-scope dependency so integration tests get
+             a real, working ClientHttpRequestFactory regardless of what
+             langchain4j happens to pull in. -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

@@ -24,10 +24,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * same "whole-instance default, tenant can override, execution can
  * override that" layering as the model/provider fields above, see
  * TenantLlmProviderResolver.resolveMaxTokens().
+ *
+ * maxToolRounds overrides ToolCallingChatEngine.DEFAULT_MAX_TOOL_ROUNDS --
+ * unlike maxTokensPerExecution this has no per-tenant/per-execution layer
+ * (yet): it's a defense-in-depth ceiling against a genuinely runaway loop,
+ * not a cost dial an individual caller needs to tune per run. Null means
+ * "use the engine's own default".
  */
 @ConfigurationProperties(prefix = "app.llm")
 public record LlmProperties(String provider, String anthropicModelName, String openaiModelName, String geminiModelName,
-                             String localModelName, String localBaseUrl, Integer maxTokensPerExecution) {
+                             String localModelName, String localBaseUrl, Integer maxTokensPerExecution, Integer maxToolRounds) {
 
     public LlmProvider resolvedProvider() {
         return LlmProvider.parse(provider).orElse(LlmProvider.ANTHROPIC);

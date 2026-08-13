@@ -31,7 +31,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Shared dependency versions across modules -->
-        <langchain4j.version>0.35.0</langchain4j.version>
+        <langchain4j.version>1.18.1</langchain4j.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
 

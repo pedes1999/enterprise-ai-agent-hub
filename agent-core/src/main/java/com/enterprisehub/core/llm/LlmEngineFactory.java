@@ -1,7 +1,7 @@
 package com.enterprisehub.core.llm;
 
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 
@@ -28,12 +28,12 @@ public class LlmEngineFactory {
     private static final String LOCAL_DEFAULT_BASE_URL = "http://localhost:11434/v1";
     private static final String LOCAL_PLACEHOLDER_API_KEY = "not-needed";
 
-    public ChatLanguageModel create(LlmProvider provider, String apiKey, String modelName) {
+    public ChatModel create(LlmProvider provider, String apiKey, String modelName) {
         return create(provider, apiKey, modelName, null);
     }
 
     /** baseUrl is only meaningful for LOCAL (defaults to Ollama's standard address if not supplied) -- ignored for every other provider. */
-    public ChatLanguageModel create(LlmProvider provider, String apiKey, String modelName, String baseUrl) {
+    public ChatModel create(LlmProvider provider, String apiKey, String modelName, String baseUrl) {
         return switch (provider) {
             case ANTHROPIC -> AnthropicChatModel.builder()
                     .apiKey(apiKey)
@@ -51,6 +51,16 @@ public class LlmEngineFactory {
                     // tokens generated, not this number, so a trivial ping still
                     // costs the same as before.
                     .maxTokens(4096)
+                    // Marks the system message (an AgentDefinition's persona/
+                    // instructions -- see ToolCallingChatEngine's javadoc) as an
+                    // Anthropic prompt-cache breakpoint. It's identical on every
+                    // round of a single execution AND across every execution of
+                    // the same agent, so once cached, every subsequent call (this
+                    // round or a future one) is billed the much cheaper cached-read
+                    // rate for it instead of the full input-token rate. No effect
+                    // on OPENAI/GEMINI/LOCAL -- this flag is Anthropic-specific and
+                    // simply doesn't exist on those builders.
+                    .cacheSystemMessages(true)
                     .build();
             case OPENAI -> OpenAiChatModel.builder()
                     .apiKey(apiKey)

@@ -156,7 +156,7 @@ public class AgentPromptRunner {
             List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver);
             SharedExecutionContext context = sharedExecutionContextFactory.create(
                     tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(),
-                    llmProperties.baseUrl(provider), maxTokens);
+                    llmProperties.baseUrl(provider), maxTokens, llmProperties.maxToolRounds());
 
             return context.chat(assembledPrompt);
         } finally {

@@ -3,7 +3,7 @@ package com.enterprisehub.core;
 import com.enterprisehub.core.llm.LlmEngineFactory;
 import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.AgentTool;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 
 import java.util.List;
 
@@ -39,11 +39,18 @@ public class SharedExecutionContextFactory {
         return create(tenantId, executionId, provider, apiKey, modelName, tools, systemPrompt, baseUrl, null);
     }
 
-    /** maxTokensBudget: see ToolCallingChatEngine's javadoc -- null means "no budget, rely on MAX_TOOL_ROUNDS alone". */
+    /** maxTokensBudget: see ToolCallingChatEngine's javadoc -- null means "no budget, rely on maxToolRounds alone". */
     public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
                                           String modelName, List<AgentTool> tools, String systemPrompt, String baseUrl,
                                           Integer maxTokensBudget) {
-        ChatLanguageModel chatModel = llmEngineFactory.create(provider, apiKey, modelName, baseUrl);
-        return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget);
+        return create(tenantId, executionId, provider, apiKey, modelName, tools, systemPrompt, baseUrl, maxTokensBudget, null);
+    }
+
+    /** maxToolRounds: see ToolCallingChatEngine's javadoc -- null means "use its own DEFAULT_MAX_TOOL_ROUNDS". */
+    public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
+                                          String modelName, List<AgentTool> tools, String systemPrompt, String baseUrl,
+                                          Integer maxTokensBudget, Integer maxToolRounds) {
+        ChatModel chatModel = llmEngineFactory.create(provider, apiKey, modelName, baseUrl);
+        return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget, maxToolRounds);
     }
 }

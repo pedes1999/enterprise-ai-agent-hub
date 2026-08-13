@@ -2,7 +2,6 @@ package com.enterprisehub.core.tool;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.agent.tool.JsonSchemaProperty;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
@@ -10,9 +9,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.FinishReason;
-import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
 
 import java.util.ArrayList;
@@ -30,7 +31,7 @@ import java.util.Set;
  * sandboxed tools now share one persistent workspace across a whole
  * execution, via SandboxSession -- see its javadoc -- specifically so a
  * multi-round sequence like that can actually see its own earlier steps).
- * Capped at MAX_TOOL_ROUNDS so a model that never settles on a final
+ * Capped at maxToolRounds so a model that never settles on a final
  * answer can't loop (and rack up API cost) forever; if the cap is hit, one
  * last call is made with no tool specifications at all, forcing a text
  * answer instead of yet another tool request.
@@ -61,19 +62,23 @@ public class ToolCallingChatEngine {
      * reactor+frontend every time -- a model that still never converges
      * gets cut off and reported honestly either way (see the incomplete/
      * incompleteReason handling below), this just raises how much genuine
-     * work fits before that happens.
+     * work fits before that happens. This is now a configurable per-call
+     * default (see maxToolRounds' javadoc), not a hardcoded ceiling --
+     * DEFAULT_MAX_TOOL_ROUNDS is what every caller gets unless it
+     * explicitly overrides it (app.llm.max-tool-rounds in gateway-api).
      */
-    static final int MAX_TOOL_ROUNDS = 100;
+    public static final int DEFAULT_MAX_TOOL_ROUNDS = 100;
 
-    private final ChatLanguageModel chatModel;
+    private final ChatModel chatModel;
     private final Map<String, AgentTool> toolsByName;
     private final List<ToolSpecification> toolSpecifications;
     private final ToolExecutionContext executionContext;
     private final String systemPrompt;
     private final Integer maxTokensBudget;
+    private final int maxToolRounds;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
+    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
         this(chatModel, tools, executionContext, null);
     }
 
@@ -84,19 +89,37 @@ public class ToolCallingChatEngine {
      * sees the user message with no system message at all, same as before
      * this existed.
      */
-    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext, String systemPrompt) {
+    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext, String systemPrompt) {
         this(chatModel, tools, executionContext, systemPrompt, null);
     }
 
     /**
      * maxTokensBudget is a second, cost-priced stop condition alongside
-     * MAX_TOOL_ROUNDS -- see budgetExceeded()'s javadoc for why both exist
+     * maxToolRounds -- see budgetExceeded()'s javadoc for why both exist
      * rather than one replacing the other. Null means "no budget, rely on
-     * MAX_TOOL_ROUNDS alone" -- e.g. every pre-budget caller/test, and any
+     * maxToolRounds alone" -- e.g. every pre-budget caller/test, and any
      * caller whose tenant/server config genuinely has no limit configured.
      */
-    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
+    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
                                   String systemPrompt, Integer maxTokensBudget) {
+        this(chatModel, tools, executionContext, systemPrompt, maxTokensBudget, null);
+    }
+
+    /**
+     * maxToolRounds: null means "use DEFAULT_MAX_TOOL_ROUNDS" -- every
+     * pre-existing caller/test keeps today's behavior unchanged. A
+     * defense-in-depth ceiling independent of maxTokensBudget/terminal-tool
+     * detection: even a provider that never reports usage and a tool that's
+     * never marked terminal still can't loop past this many rounds. Kept
+     * configurable (app.llm.max-tool-rounds in gateway-api) rather than a
+     * single hardcoded constant specifically because the "right" value is
+     * workload-dependent -- see DEFAULT_MAX_TOOL_ROUNDS' own javadoc for how
+     * much that number has already had to move (6 -> 14 -> 30 -> 100) as
+     * real agents needed more headroom; a deployment that wants a tighter
+     * ceiling (or a genuinely bigger one) no longer needs a code change.
+     */
+    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
+                                  String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
@@ -104,6 +127,7 @@ public class ToolCallingChatEngine {
         this.executionContext = executionContext;
         this.systemPrompt = systemPrompt;
         this.maxTokensBudget = maxTokensBudget;
+        this.maxToolRounds = maxToolRounds != null ? maxToolRounds : DEFAULT_MAX_TOOL_ROUNDS;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
@@ -119,16 +143,16 @@ public class ToolCallingChatEngine {
         // "zero tokens spent" (see ToolChatResult's fields).
         TokenUsage totalUsage = null;
 
-        for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        for (int round = 0; round < maxToolRounds; round++) {
             if (budgetExceeded(totalUsage)) {
                 // Exceeded during a PREVIOUS round -- stop before spending
                 // more on another generate() call, same "force one final
                 // text-only answer" handling as the round-cap path below.
                 break;
             }
-            Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
+            ChatResponse response = generate(messages, toolSpecifications);
             totalUsage = accumulate(totalUsage, response.tokenUsage());
-            AiMessage aiMessage = response.content();
+            AiMessage aiMessage = response.aiMessage();
 
             if (!aiMessage.hasToolExecutionRequests()) {
                 // A "final" answer that was actually cut off mid-generation (the
@@ -165,9 +189,9 @@ public class ToolCallingChatEngine {
                 // one final text-only answer instead, same mechanism as the
                 // round-cap path below but a genuine stopping point, so this
                 // is NOT incomplete.
-                Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
+                ChatResponse finalResponse = generate(messages, List.of());
                 totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
-                return new ToolChatResult(finalResponse.content().text(), toolWasUsed, false, null,
+                return new ToolChatResult(finalResponse.aiMessage().text(), toolWasUsed, false, null,
                         inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
             }
         }
@@ -178,13 +202,18 @@ public class ToolCallingChatEngine {
         // are "not a real stopping point" the same way a truncated response
         // is. budgetExceeded() here re-checks the SAME totalUsage the break
         // (if any) just fired on, so it reliably tells the two apart.
-        Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
+        ChatResponse finalResponse = generate(messages, List.of());
         totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
         String incompleteReason = budgetExceeded(totalUsage)
                 ? "Agent execution stopped after exceeding its token budget (" + maxTokensBudget + " tokens)."
-                : "Agent used all " + MAX_TOOL_ROUNDS + " allowed tool-call rounds without finishing.";
-        return new ToolChatResult(finalResponse.content().text(), toolWasUsed, true, incompleteReason,
+                : "Agent used all " + maxToolRounds + " allowed tool-call rounds without finishing.";
+        return new ToolChatResult(finalResponse.aiMessage().text(), toolWasUsed, true, incompleteReason,
                 inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
+    }
+
+    /** ChatModel's new (1.x) API takes tool specifications via ChatRequestParameters, not a positional arg -- this restores the old generate(messages, tools) call shape everywhere below it's used. */
+    private ChatResponse generate(List<ChatMessage> messages, List<ToolSpecification> tools) {
+        return chatModel.chat(ChatRequest.builder().messages(messages).toolSpecifications(tools).build());
     }
 
     /** null-safe TokenUsage.add() -- a provider/mock response with no usage data leaves the running total unchanged. */
@@ -197,11 +226,11 @@ public class ToolCallingChatEngine {
 
     /**
      * True once totalUsage's running total has reached maxTokensBudget.
-     * Deliberately a SEPARATE stop condition from MAX_TOOL_ROUNDS, not a
+     * Deliberately a SEPARATE stop condition from maxToolRounds, not a
      * replacement for it: this can only fire once a provider response has
      * actually reported usage, so a provider/mock that never does (totalUsage
      * stays null forever) would let a run loop unbounded on budget alone --
-     * MAX_TOOL_ROUNDS is the backstop that still catches that case. A null
+     * maxToolRounds is the backstop that still catches that case. A null
      * maxTokensBudget (no budget configured) always returns false, same
      * effect as today's round-cap-only behavior.
      */
@@ -258,20 +287,26 @@ public class ToolCallingChatEngine {
     }
 
     private static ToolSpecification toSpecification(AgentTool tool) {
-        ToolSpecification.Builder builder = ToolSpecification.builder()
-                .name(tool.name())
-                .description(tool.description());
-
+        // Every AgentTool parameter is a string (see its own javadoc) -- addStringProperty
+        // for all of them, then required() lists only the non-optional ones. Replaces the
+        // old per-parameter addParameter/addOptionalParameter(JsonSchemaProperty...) API,
+        // which the 1.x ToolSpecification.Builder no longer has.
         Set<String> optionalParams = tool.optionalParameterNames();
+        JsonObjectSchema.Builder schema = JsonObjectSchema.builder();
+        List<String> requiredParams = new ArrayList<>();
         tool.parameterDescriptions().forEach((paramName, paramDescription) -> {
-            if (optionalParams.contains(paramName)) {
-                builder.addOptionalParameter(paramName, JsonSchemaProperty.STRING, JsonSchemaProperty.description(paramDescription));
-            } else {
-                builder.addParameter(paramName, JsonSchemaProperty.STRING, JsonSchemaProperty.description(paramDescription));
+            schema.addStringProperty(paramName, paramDescription);
+            if (!optionalParams.contains(paramName)) {
+                requiredParams.add(paramName);
             }
         });
+        schema.required(requiredParams);
 
-        return builder.build();
+        return ToolSpecification.builder()
+                .name(tool.name())
+                .description(tool.description())
+                .parameters(schema.build())
+                .build();
     }
 
     /**

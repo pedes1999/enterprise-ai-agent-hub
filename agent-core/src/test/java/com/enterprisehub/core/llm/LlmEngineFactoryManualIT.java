@@ -1,6 +1,6 @@
 package com.enterprisehub.core.llm;
 
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
@@ -23,10 +23,10 @@ class LlmEngineFactoryManualIT {
     @Test
     void realAnthropicCall_returnsAResponse() {
         String apiKey = System.getenv("ANTHROPIC_API_KEY");
-        ChatLanguageModel model = new LlmEngineFactory()
+        ChatModel model = new LlmEngineFactory()
                 .create(LlmProvider.ANTHROPIC, apiKey, "claude-sonnet-4-5-20250929");
 
-        String reply = model.generate("Reply with exactly one word: PONG");
+        String reply = model.chat("Reply with exactly one word: PONG");
 
         System.out.println("Anthropic replied: " + reply);
         assertThat(reply).isNotBlank();
