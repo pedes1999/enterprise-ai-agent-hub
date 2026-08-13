@@ -43,7 +43,7 @@ describe('Register', () => {
       tenantName: 'Acme',
       tenantSlug: 'acme',
       email: 'admin@acme.com',
-      password: 'hunter22',
+      password: 'hunter2@',
     });
     fixture.componentInstance.submit();
 
@@ -52,7 +52,7 @@ describe('Register', () => {
       tenantName: 'Acme',
       tenantSlug: 'acme',
       email: 'admin@acme.com',
-      password: 'hunter22',
+      password: 'hunter2@',
     });
     req.flush({
       token: 't',
@@ -75,7 +75,7 @@ describe('Register', () => {
       tenantName: 'Acme',
       tenantSlug: 'acme',
       email: 'admin@acme.com',
-      password: 'hunter22',
+      password: 'hunter2@',
     });
     fixture.componentInstance.submit();
 

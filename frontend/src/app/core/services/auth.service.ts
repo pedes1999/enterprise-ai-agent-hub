@@ -2,7 +2,7 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { AuthResponse, LoginRequest, RegisterRequest, Role } from '../models/auth.model';
+import { AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest, Role } from '../models/auth.model';
 
 const STORAGE_KEY = 'auth.session';
 
@@ -11,6 +11,7 @@ interface StoredSession {
   tenantSlug: string;
   email: string;
   role: Role;
+  mustChangePassword: boolean;
   expiresAt: number;
 }
 
@@ -34,14 +35,18 @@ export class AuthService {
   private readonly _tenantSlug = signal<string | null>(null);
   private readonly _email = signal<string | null>(null);
   private readonly _role = signal<Role | null>(null);
+  private readonly _mustChangePassword = signal(false);
 
   readonly token = this._token.asReadonly();
   readonly tenantSlug = this._tenantSlug.asReadonly();
   readonly email = this._email.asReadonly();
   readonly role = this._role.asReadonly();
+  readonly mustChangePassword = this._mustChangePassword.asReadonly();
 
   readonly isAuthenticated = computed(() => this._token() !== null);
   readonly isAdmin = computed(() => this._role() === 'ADMIN');
+  /** ADMIN and DEVELOPER can each bring their own vendor credential (see VendorCredentialController) -- READONLY cannot. */
+  readonly canManageOwnCredentials = computed(() => this._role() === 'ADMIN' || this._role() === 'DEVELOPER');
 
   constructor() {
     this.restoreSession();
@@ -59,6 +64,19 @@ export class AuthService {
       .pipe(tap((response) => this.setSession(response)));
   }
 
+  /**
+   * The one request PasswordChangeRequiredFilter still lets through while
+   * mustChangePassword is true (see the backend's javadoc on it) -- the
+   * response carries a freshly issued token with the flag cleared, so
+   * setSession() here is what actually unblocks the rest of the app
+   * without forcing a second login.
+   */
+  changePassword(request: ChangePasswordRequest): Observable<AuthResponse> {
+    return this.http
+      .post<AuthResponse>(`${environment.apiBaseUrl}/auth/change-password`, request)
+      .pipe(tap((response) => this.setSession(response)));
+  }
+
   logout(): void {
     if (this.expiryTimer !== undefined) {
       clearTimeout(this.expiryTimer);
@@ -68,6 +86,7 @@ export class AuthService {
     this._tenantSlug.set(null);
     this._email.set(null);
     this._role.set(null);
+    this._mustChangePassword.set(false);
     localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -92,6 +111,7 @@ export class AuthService {
     this._tenantSlug.set(stored.tenantSlug);
     this._email.set(stored.email);
     this._role.set(stored.role);
+    this._mustChangePassword.set(stored.mustChangePassword ?? false);
     this.scheduleExpiry(remainingMs);
   }
 
@@ -100,6 +120,7 @@ export class AuthService {
     this._tenantSlug.set(response.tenantSlug);
     this._email.set(response.email);
     this._role.set(response.role);
+    this._mustChangePassword.set(response.mustChangePassword);
 
     const expiresInMs = response.expiresInSeconds * 1000;
     const stored: StoredSession = {
@@ -107,6 +128,7 @@ export class AuthService {
       tenantSlug: response.tenantSlug,
       email: response.email,
       role: response.role,
+      mustChangePassword: response.mustChangePassword,
       expiresAt: Date.now() + expiresInMs,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));

@@ -7,6 +7,8 @@ public record AuthResponse(
         String tenantSlug,
         String userId,
         String email,
-        String role
+        String role,
+        /** True until an admin-invited user sets their own password -- see UserService.create() / AuthService.changePassword(). */
+        boolean mustChangePassword
 ) {
 }

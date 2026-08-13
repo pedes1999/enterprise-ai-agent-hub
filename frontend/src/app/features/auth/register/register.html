@@ -48,7 +48,7 @@
       [class.invalid]="form.controls.password.invalid && form.controls.password.touched"
     />
     @if (form.controls.password.invalid && form.controls.password.touched) {
-      <p class="field-error">Password must be at least 8 characters.</p>
+      <p class="field-error">Password must be at least 8 characters and include a number and a special character.</p>
     }
 
     @if (errorMessage()) {

@@ -42,6 +42,12 @@ public class AppUser {
     @Column(nullable = false)
     private String role = "DEVELOPER";
 
+    // true only for admin-invited users (UserService.create()) until they
+    // set their own password -- self-registered admins (AuthService.register())
+    // never have this set, see V24__app_users_must_change_password.sql.
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 

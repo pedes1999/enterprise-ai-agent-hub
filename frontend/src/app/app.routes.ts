@@ -16,6 +16,14 @@ export const routes: Routes = [
     loadComponent: () => import('./features/auth/register/register').then((m) => m.Register),
   },
   {
+    // authGuard itself redirects here whenever mustChangePassword() is true
+    // (see its javadoc) -- this route just needs to be reachable once that
+    // happens, not gated any further.
+    path: 'change-password',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/auth/change-password/change-password').then((m) => m.ChangePassword),
+  },
+  {
     path: 'agents',
     canActivate: [authGuard],
     loadComponent: () => import('./features/catalog/catalog').then((m) => m.Catalog),
@@ -43,8 +51,11 @@ export const routes: Routes = [
       import('./features/history/execution-detail/execution-detail').then((m) => m.ExecutionDetail),
   },
   {
+    // ADMIN and DEVELOPER can each bring their own vendor credential (see
+    // VendorCredentialController) -- only the page's "Team credentials"
+    // section is admin-only, gated client-side via authService.isAdmin().
     path: 'credentials',
-    canActivate: [authGuard, adminGuard],
+    canActivate: [authGuard],
     loadComponent: () => import('./features/credentials/credentials').then((m) => m.Credentials),
   },
   {

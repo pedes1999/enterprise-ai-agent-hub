@@ -29,6 +29,21 @@ class JwtServiceTest {
         assertThat(parsed.get().userId()).isEqualTo(userId);
         assertThat(parsed.get().tenantId()).isEqualTo(tenantId);
         assertThat(parsed.get().role()).isEqualTo("ADMIN");
+        // 3-arg overload defaults it -- see PlatformPrincipal's own 3-arg constructor for the same default.
+        assertThat(parsed.get().mustChangePassword()).isFalse();
+    }
+
+    @Test
+    void issueToken_withMustChangePasswordTrue_roundTripsThroughParseAndValidate() {
+        JwtService service = serviceWithExpiration(60);
+        String userId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
+
+        String token = service.issueToken(userId, tenantId, "DEVELOPER", true);
+        Optional<PlatformPrincipal> parsed = service.parseAndValidate(token);
+
+        assertThat(parsed).isPresent();
+        assertThat(parsed.get().mustChangePassword()).isTrue();
     }
 
     @Test

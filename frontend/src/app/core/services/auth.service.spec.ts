@@ -20,6 +20,7 @@ describe('AuthService', () => {
     userId: 'user-1',
     email: 'dev@acme.com',
     role: 'DEVELOPER',
+    mustChangePassword: false,
   };
 
   beforeEach(() => {
@@ -160,6 +161,30 @@ describe('AuthService', () => {
 
     expect(restored.isAuthenticated()).toBe(false);
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('login() propagates mustChangePassword=true for an admin-invited user still on their temp password', () => {
+    service.login({ tenantSlug: 'acme', email: 'dev@acme.com', password: 'Tmp9!xyz' }).subscribe();
+
+    httpMock.expectOne(`${environment.apiBaseUrl}/auth/login`).flush({ ...authResponse, mustChangePassword: true });
+
+    expect(service.mustChangePassword()).toBe(true);
+  });
+
+  it('changePassword() posts to /auth/change-password and replaces the session with the fresh token', () => {
+    service.login({ tenantSlug: 'acme', email: 'dev@acme.com', password: 'Tmp9!xyz' }).subscribe();
+    httpMock.expectOne(`${environment.apiBaseUrl}/auth/login`).flush({ ...authResponse, mustChangePassword: true });
+    expect(service.mustChangePassword()).toBe(true);
+
+    service.changePassword({ currentPassword: 'Tmp9!xyz', newPassword: 'N3w!password' }).subscribe();
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/auth/change-password`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ currentPassword: 'Tmp9!xyz', newPassword: 'N3w!password' });
+    req.flush({ ...authResponse, token: 'new-jwt-token', mustChangePassword: false });
+
+    expect(service.mustChangePassword()).toBe(false);
+    expect(service.token()).toBe('new-jwt-token');
   });
 
   it('automatically logs out once the token reaches its own expiry while the tab stays open', () => {

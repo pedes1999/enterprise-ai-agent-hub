@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.config;
 
 import com.enterprisehub.gateway.security.JwtAuthFilter;
+import com.enterprisehub.gateway.security.PasswordChangeRequiredFilter;
 import com.enterprisehub.gateway.security.TenantResolvingFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,11 +34,14 @@ public class SecurityConfig {
 
     private final TenantResolvingFilter tenantResolvingFilter;
     private final JwtAuthFilter jwtAuthFilter;
+    private final PasswordChangeRequiredFilter passwordChangeRequiredFilter;
     private final CorsProperties corsProperties;
 
-    public SecurityConfig(TenantResolvingFilter tenantResolvingFilter, JwtAuthFilter jwtAuthFilter, CorsProperties corsProperties) {
+    public SecurityConfig(TenantResolvingFilter tenantResolvingFilter, JwtAuthFilter jwtAuthFilter,
+                           PasswordChangeRequiredFilter passwordChangeRequiredFilter, CorsProperties corsProperties) {
         this.tenantResolvingFilter = tenantResolvingFilter;
         this.jwtAuthFilter = jwtAuthFilter;
+        this.passwordChangeRequiredFilter = passwordChangeRequiredFilter;
         this.corsProperties = corsProperties;
     }
 
@@ -64,7 +68,11 @@ public class SecurityConfig {
         // JwtAuthFilter populates the SecurityContext from the Bearer token,
         // running before the tenant filter since tenant resolution depends
         // on auth already having populated the SecurityContext.
+        // PasswordChangeRequiredFilter runs right after it -- fail-fast
+        // before tenant resolution or any handler code runs at all, if this
+        // caller still needs to set their own password (see its javadoc).
         http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterAfter(passwordChangeRequiredFilter, JwtAuthFilter.class);
         http.addFilterAfter(tenantResolvingFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

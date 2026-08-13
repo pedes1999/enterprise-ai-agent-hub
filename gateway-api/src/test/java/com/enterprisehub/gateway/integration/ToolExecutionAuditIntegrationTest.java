@@ -53,7 +53,7 @@ class ToolExecutionAuditIntegrationTest {
 
     private String registerTenant(String prefix) {
         String slug = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-        RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "password123");
+        RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "p@ssword123");
         AuthResponse response = restTemplate.postForEntity(
                 "http://localhost:" + port + "/auth/register", request, AuthResponse.class).getBody();
         return response.tenantId();

@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.auth;
 
 import com.enterprisehub.dto.AuthResponse;
+import com.enterprisehub.dto.ChangePasswordRequest;
 import com.enterprisehub.dto.LoginRequest;
 import com.enterprisehub.dto.RegisterRequest;
 import com.enterprisehub.gateway.entity.AppUser;
@@ -13,6 +14,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import java.util.UUID;
 
 /**
  * Both register() and login() run partly BEFORE any tenant is known to the
@@ -69,10 +72,11 @@ public class AuthService {
             user.setRole("ADMIN"); // first user of a tenant is always its admin
             user = saveUser(user);
 
-            String token = jwtService.issueToken(user.getId().toString(), tenant.getId().toString(), user.getRole());
+            // Self-chosen up front -- never forced through the change flow.
+            String token = jwtService.issueToken(user.getId().toString(), tenant.getId().toString(), user.getRole(), false);
             return new AuthResponse(token, jwtService.expirationSeconds(),
                     tenant.getId().toString(), tenant.getSlug(),
-                    user.getId().toString(), user.getEmail(), user.getRole());
+                    user.getId().toString(), user.getEmail(), user.getRole(), false);
         } finally {
             TenantContext.clear();
         }
@@ -97,13 +101,47 @@ public class AuthService {
                 throw invalidCredentials;
             }
 
-            String token = jwtService.issueToken(user.getId().toString(), tenant.getId().toString(), user.getRole());
+            String token = jwtService.issueToken(user.getId().toString(), tenant.getId().toString(), user.getRole(), user.isMustChangePassword());
             return new AuthResponse(token, jwtService.expirationSeconds(),
                     tenant.getId().toString(), tenant.getSlug(),
-                    user.getId().toString(), user.getEmail(), user.getRole());
+                    user.getId().toString(), user.getEmail(), user.getRole(), user.isMustChangePassword());
         } finally {
             TenantContext.clear();
         }
+    }
+
+    /**
+     * The one thing an authenticated user is always allowed to do even
+     * while mustChangePassword is blocking everything else -- see
+     * PasswordChangeRequiredFilter. Re-issues a fresh token so the caller
+     * doesn't need a second login: the old one still carries
+     * mustChangePassword=true and would keep getting blocked until it
+     * expires otherwise.
+     */
+    public AuthResponse changePassword(UUID tenantId, UUID userId, ChangePasswordRequest request) {
+        AppUser user = appUserRepository.findById(userId)
+                .orElseThrow(() -> new AuthException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
+
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+        }
+        if (!PasswordPolicy.isValid(request.newPassword())) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, PasswordPolicy.REQUIREMENTS_MESSAGE);
+        }
+        if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, "New password must be different from your current password");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.setMustChangePassword(false);
+        appUserRepository.save(user);
+
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new AuthException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
+        String token = jwtService.issueToken(user.getId().toString(), tenantId.toString(), user.getRole(), false);
+        return new AuthResponse(token, jwtService.expirationSeconds(),
+                tenantId.toString(), tenant.getSlug(),
+                user.getId().toString(), user.getEmail(), user.getRole(), false);
     }
 
     private Tenant saveTenant(Tenant tenant) {
@@ -123,10 +161,11 @@ public class AuthService {
     }
 
     private void validateRegisterRequest(RegisterRequest request) {
-        if (isBlank(request.tenantName()) || isBlank(request.tenantSlug())
-                || isBlank(request.email()) || request.password() == null || request.password().length() < 8) {
-            throw new AuthException(HttpStatus.BAD_REQUEST,
-                    "tenantName, tenantSlug, email are required and password must be at least 8 characters");
+        if (isBlank(request.tenantName()) || isBlank(request.tenantSlug()) || isBlank(request.email())) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, "tenantName, tenantSlug, and email are required");
+        }
+        if (!PasswordPolicy.isValid(request.password())) {
+            throw new AuthException(HttpStatus.BAD_REQUEST, PasswordPolicy.REQUIREMENTS_MESSAGE);
         }
     }
 

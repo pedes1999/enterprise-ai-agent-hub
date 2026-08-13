@@ -73,6 +73,7 @@ public class UserService {
         user.setName(request.name());
         user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
         user.setRole(role.name());
+        user.setMustChangePassword(true);
 
         try {
             user = appUserRepository.save(user);

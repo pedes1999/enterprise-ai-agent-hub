@@ -65,7 +65,7 @@ class AgentExecutionQueueIntegrationTest {
 
     private AuthResponse registerTenant(String prefix) {
         String slug = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-        RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "password123");
+        RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "p@ssword123");
         return restTemplate.postForEntity(baseUrl() + "/auth/register", request, AuthResponse.class).getBody();
     }
 

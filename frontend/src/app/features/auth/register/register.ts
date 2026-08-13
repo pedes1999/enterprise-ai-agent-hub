@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
+import { strongPasswordValidator } from '../../../shared/validators/password.validator';
 
 @Component({
   selector: 'app-register',
@@ -21,7 +22,7 @@ export class Register {
     tenantName: ['', Validators.required],
     tenantSlug: ['', Validators.required],
     email: ['', [Validators.required, Validators.email]],
-    password: ['', [Validators.required, Validators.minLength(8)]],
+    password: ['', [Validators.required, strongPasswordValidator]],
   });
 
   submit(): void {
@@ -40,9 +41,13 @@ export class Register {
       },
       error: (err) => {
         this.submitting.set(false);
-        this.errorMessage.set(
-          err.status === 409 ? 'That organization slug is already taken.' : 'Registration failed. Please try again.',
-        );
+        if (err.status === 409) {
+          this.errorMessage.set('That organization slug is already taken.');
+        } else if (err.status === 400) {
+          this.errorMessage.set(err.error?.message ?? 'Registration failed. Please try again.');
+        } else {
+          this.errorMessage.set('Registration failed. Please try again.');
+        }
       },
     });
   }

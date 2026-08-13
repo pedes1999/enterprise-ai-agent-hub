@@ -19,6 +19,13 @@ export interface AuthResponse {
   userId: string;
   email: string;
   role: Role;
+  /** True until an admin-invited user sets their own password -- see UserService.create() / POST /auth/change-password. */
+  mustChangePassword: boolean;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
 }
 
 export type Role = 'ADMIN' | 'DEVELOPER' | 'READONLY';

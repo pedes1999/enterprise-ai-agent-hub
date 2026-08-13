@@ -56,12 +56,12 @@ class AuthIntegrationTest {
     void registerThenLogin_fullRoundTrip() {
         String slug = uniqueSlug("acme");
 
-        ResponseEntity<AuthResponse> registerResponse = register(slug, "admin@" + slug + ".com", "password123");
+        ResponseEntity<AuthResponse> registerResponse = register(slug, "admin@" + slug + ".com", "p@ssword123");
         assertThat(registerResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(registerResponse.getBody()).isNotNull();
         assertThat(registerResponse.getBody().token()).isNotBlank();
 
-        LoginRequest loginRequest = new LoginRequest(slug, "admin@" + slug + ".com", "password123");
+        LoginRequest loginRequest = new LoginRequest(slug, "admin@" + slug + ".com", "p@ssword123");
         ResponseEntity<AuthResponse> loginResponse =
                 restTemplate.postForEntity(baseUrl() + "/auth/login", loginRequest, AuthResponse.class);
 
@@ -72,7 +72,7 @@ class AuthIntegrationTest {
     @Test
     void login_wrongPassword_returns401() {
         String slug = uniqueSlug("acme");
-        register(slug, "admin@" + slug + ".com", "password123");
+        register(slug, "admin@" + slug + ".com", "p@ssword123");
 
         LoginRequest loginRequest = new LoginRequest(slug, "admin@" + slug + ".com", "totally-wrong");
         ResponseEntity<ApiError> response =
@@ -84,11 +84,11 @@ class AuthIntegrationTest {
     @Test
     void register_duplicateSlug_returns409() {
         String slug = uniqueSlug("acme");
-        register(slug, "first@" + slug + ".com", "password123");
+        register(slug, "first@" + slug + ".com", "p@ssword123");
 
         ResponseEntity<ApiError> second = restTemplate.postForEntity(
                 baseUrl() + "/auth/register",
-                new RegisterRequest(slug, slug, "second@" + slug + ".com", "password123"),
+                new RegisterRequest(slug, slug, "second@" + slug + ".com", "p@ssword123"),
                 ApiError.class);
 
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -103,7 +103,7 @@ class AuthIntegrationTest {
     @Test
     void apiKeys_createListRevoke_fullLifecycle() {
         String slug = uniqueSlug("acme");
-        String token = register(slug, "admin@" + slug + ".com", "password123").getBody().token();
+        String token = register(slug, "admin@" + slug + ".com", "p@ssword123").getBody().token();
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
@@ -135,9 +135,9 @@ class AuthIntegrationTest {
     @Test
     void apiKeys_crossTenantIsolation_listAndRevokeNeverSeeOtherTenantsKeys() {
         String slugA = uniqueSlug("acme");
-        String tokenA = register(slugA, "admin@" + slugA + ".com", "password123").getBody().token();
+        String tokenA = register(slugA, "admin@" + slugA + ".com", "p@ssword123").getBody().token();
         String slugB = uniqueSlug("globex");
-        String tokenB = register(slugB, "admin@" + slugB + ".com", "password123").getBody().token();
+        String tokenB = register(slugB, "admin@" + slugB + ".com", "p@ssword123").getBody().token();
 
         HttpHeaders headersA = new HttpHeaders();
         headersA.setBearerAuth(tokenA);

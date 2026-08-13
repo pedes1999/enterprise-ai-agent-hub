@@ -38,7 +38,7 @@ class ToolCredentialIntegrationTest {
     }
 
     private String registerAdmin(String slug) {
-        RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "password123");
+        RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "p@ssword123");
         return restTemplate.postForEntity(baseUrl() + "/auth/register", request, AuthResponse.class)
                 .getBody().token();
     }

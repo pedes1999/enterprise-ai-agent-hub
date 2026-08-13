@@ -24,8 +24,10 @@
     <nav class="primary-nav" [class.open]="mobileMenuOpen()">
       <a routerLink="/agents" routerLinkActive="active">Agents</a>
       <a routerLink="/executions" routerLinkActive="active">Executions</a>
-      @if (authService.isAdmin()) {
+      @if (authService.canManageOwnCredentials()) {
         <a routerLink="/credentials" routerLinkActive="active">Credentials</a>
+      }
+      @if (authService.isAdmin()) {
         <a routerLink="/team" routerLinkActive="active">Team</a>
       }
 

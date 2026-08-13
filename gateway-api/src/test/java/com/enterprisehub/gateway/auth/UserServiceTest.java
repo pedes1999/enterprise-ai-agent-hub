@@ -72,6 +72,21 @@ class UserServiceTest {
     }
 
     @Test
+    void create_setsMustChangePasswordTrue_invitedUserMustSetTheirOwnPasswordOnFirstLogin() {
+        when(repository.findByTenantIdAndEmail(any(), any())).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed");
+        when(repository.save(any(AppUser.class))).thenAnswer(inv -> {
+            AppUser u = inv.getArgument(0);
+            u.setId(UUID.randomUUID());
+            return u;
+        });
+
+        service.create(tenantId, new CreateUserRequest("dev@acme.com", "Dev Person", "DEVELOPER"));
+
+        verify(repository).save(argThat(AppUser::isMustChangePassword));
+    }
+
+    @Test
     void create_neverReturnsOrPersistsTheRawTemporaryPassword() {
         when(repository.findByTenantIdAndEmail(any(), any())).thenReturn(Optional.empty());
         when(passwordEncoder.encode(anyString())).thenReturn("hashed");
