@@ -186,4 +186,29 @@ class AgentJobWorkerTest {
         verify(executionService, never()).complete(any(), any(), anyBoolean(), any(), any(), any());
         assertThat(TenantContext.get()).isNull();
     }
+
+    @Test
+    void pollAndProcessOne_runnerThrowsPartialUsageException_recordsTheTokensAlreadySpent() {
+        // The live-observed shape: a few rounds succeed and are genuinely
+        // billed, then the provider call fails outright (rate limit,
+        // insufficient credit, network error) -- that real spend must reach
+        // the DB, not just the bare error message.
+        UUID tenantId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = new AgentExecution();
+        job.setId(executionId);
+        job.setTenantId(tenantId);
+        job.setPrompt("do something");
+        job.setAgentType("coding-agent");
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new ToolCallingChatEngine.PartialUsageException(
+                        "Your credit balance is too low to access the Anthropic API.", null, 900, 150, 1050));
+
+        worker.pollAndProcessOne();
+
+        verify(executionService).fail(executionId, "Your credit balance is too low to access the Anthropic API.", 900, 150, 1050);
+        verify(executionService, never()).fail(eq(executionId), anyString());
+        assertThat(TenantContext.get()).isNull();
+    }
 }

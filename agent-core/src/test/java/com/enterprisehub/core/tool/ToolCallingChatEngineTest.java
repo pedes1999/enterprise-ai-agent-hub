@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 class ToolCallingChatEngineTest {
@@ -892,5 +893,89 @@ class ToolCallingChatEngineTest {
         assertThat(resultMessage.text()).hasSizeLessThan(hugeMessage.length());
         assertThat(resultMessage.text()).startsWith("x".repeat(100));
         assertThat(resultMessage.text()).contains("truncated");
+    }
+
+    // ---------- partial usage on a mid-run provider failure ----------
+
+    @Test
+    void chat_providerThrowsOnFirstCall_wrapsWithNullUsage_nothingAccumulatedYet() {
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("credit balance too low"));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+
+        assertThatThrownBy(() -> engine.chat("do the thing"))
+                .isInstanceOf(ToolCallingChatEngine.PartialUsageException.class)
+                .hasMessage("credit balance too low")
+                .satisfies(e -> {
+                    ToolCallingChatEngine.PartialUsageException partial = (ToolCallingChatEngine.PartialUsageException) e;
+                    assertThat(partial.inputTokens()).isNull();
+                    assertThat(partial.outputTokens()).isNull();
+                    assertThat(partial.totalTokens()).isNull();
+                });
+    }
+
+    @Test
+    void chat_providerThrowsAfterEarlierRoundsSucceeded_wrapsWithUsageAccumulatedSoFar() {
+        // The exact live-observed shape: several rounds succeed and are
+        // genuinely billed, then the account runs out of credit mid-run --
+        // that real spend must not be lost just because the run ended in an
+        // exception instead of a clean stopping point.
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("echo").arguments("{\"message\":\"hello\"}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(request)), new TokenUsage(100, 20, 120)))
+                .thenThrow(new RuntimeException("Your credit balance is too low to access the Anthropic API."));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+
+        assertThatThrownBy(() -> engine.chat("Echo 'hello'"))
+                .isInstanceOf(ToolCallingChatEngine.PartialUsageException.class)
+                .hasMessageContaining("credit balance is too low")
+                .satisfies(e -> {
+                    ToolCallingChatEngine.PartialUsageException partial = (ToolCallingChatEngine.PartialUsageException) e;
+                    // Round 1's real, billed usage -- not lost even though round 2 crashed.
+                    assertThat(partial.inputTokens()).isEqualTo(100);
+                    assertThat(partial.outputTokens()).isEqualTo(20);
+                    assertThat(partial.totalTokens()).isEqualTo(120);
+                });
+    }
+
+    @Test
+    void chat_toolExecutionExceptions_stillHandledLocally_notWrappedAsPartialUsage() {
+        // Only the PROVIDER call is wrapped -- a tool throwing is a completely
+        // separate, already-handled path (see chat_toolThatThrows_...) that
+        // must keep behaving exactly as before this feature existed.
+        AgentTool failingTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "boom";
+            }
+
+            @Override
+            public String description() {
+                return "always fails";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                throw new RuntimeException("kaboom");
+            }
+        };
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder().id("1").name("boom").arguments("{}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(request))))
+                .thenReturn(response(AiMessage.from("recovered")));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(failingTool), CONTEXT).chat("trigger boom");
+
+        assertThat(result.reply()).isEqualTo("recovered");
     }
 }

@@ -201,7 +201,7 @@ public class ToolCallingChatEngine {
                 break;
             }
             cacheBreakpointIndex = moveCacheBreakpointIfEnabled(messages, cacheBreakpointIndex);
-            ChatResponse response = generate(messages, toolSpecifications);
+            ChatResponse response = generate(messages, toolSpecifications, totalUsage);
             totalUsage = accumulate(totalUsage, response.tokenUsage());
             AiMessage aiMessage = response.aiMessage();
 
@@ -241,7 +241,7 @@ public class ToolCallingChatEngine {
                 // round-cap path below but a genuine stopping point, so this
                 // is NOT incomplete.
                 cacheBreakpointIndex = moveCacheBreakpointIfEnabled(messages, cacheBreakpointIndex);
-                ChatResponse finalResponse = generate(messages, List.of());
+                ChatResponse finalResponse = generate(messages, List.of(), totalUsage);
                 totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
                 return new ToolChatResult(finalResponse.aiMessage().text(), toolWasUsed, false, null,
                         inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
@@ -255,7 +255,7 @@ public class ToolCallingChatEngine {
         // is. budgetExceeded() here re-checks the SAME totalUsage the break
         // (if any) just fired on, so it reliably tells the two apart.
         moveCacheBreakpointIfEnabled(messages, cacheBreakpointIndex);
-        ChatResponse finalResponse = generate(messages, List.of());
+        ChatResponse finalResponse = generate(messages, List.of(), totalUsage);
         totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
         String incompleteReason = budgetExceeded(totalUsage)
                 ? "Agent execution stopped after exceeding its token budget (" + maxTokensBudget + " tokens)."
@@ -264,9 +264,66 @@ public class ToolCallingChatEngine {
                 inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
     }
 
-    /** ChatModel's new (1.x) API takes tool specifications via ChatRequestParameters, not a positional arg -- this restores the old generate(messages, tools) call shape everywhere below it's used. */
-    private ChatResponse generate(List<ChatMessage> messages, List<ToolSpecification> tools) {
-        return chatModel.chat(ChatRequest.builder().messages(messages).toolSpecifications(tools).build());
+    /**
+     * ChatModel's new (1.x) API takes tool specifications via
+     * ChatRequestParameters, not a positional arg -- this restores the old
+     * generate(messages, tools) call shape everywhere below it's used.
+     *
+     * usageSoFar is whatever totalUsage had accumulated from every ROUND
+     * BEFORE this call -- not this call's own result, which doesn't exist
+     * yet. A provider call can fail after several earlier rounds already
+     * succeeded and were genuinely billed (a rate limit, a network blip, or
+     * literally running out of API credit mid-run -- all live-observed), and
+     * without this, that real spend was previously invisible: the exception
+     * propagated with no token data at all, even though most of the run's
+     * cost had already happened. See PartialUsageException's javadoc for
+     * how a caller recovers it.
+     */
+    private ChatResponse generate(List<ChatMessage> messages, List<ToolSpecification> tools, TokenUsage usageSoFar) {
+        try {
+            return chatModel.chat(ChatRequest.builder().messages(messages).toolSpecifications(tools).build());
+        } catch (RuntimeException e) {
+            throw new PartialUsageException(e.getMessage(), e,
+                    inputTokens(usageSoFar), outputTokens(usageSoFar), totalTokens(usageSoFar));
+        }
+    }
+
+    /**
+     * Thrown instead of letting a provider-call failure (rate limit,
+     * insufficient credit, network error, malformed response) propagate
+     * bare -- carries whatever input/output/total tokens had genuinely
+     * accumulated from earlier rounds of THIS execution before the failing
+     * call, the same three fields ToolChatResult reports on every other
+     * exit path. A caller that wants that partial spend recorded (see
+     * AgentJobWorker) catches this specifically, ahead of a plainer
+     * RuntimeException catch for anything else; a caller that doesn't care
+     * (e.g. AgentPingService, which never persists token usage for its
+     * synchronous spike endpoint) can keep treating it as an ordinary
+     * RuntimeException -- message and cause are preserved either way.
+     */
+    public static final class PartialUsageException extends RuntimeException {
+        private final Integer inputTokens;
+        private final Integer outputTokens;
+        private final Integer totalTokens;
+
+        public PartialUsageException(String message, Throwable cause, Integer inputTokens, Integer outputTokens, Integer totalTokens) {
+            super(message, cause);
+            this.inputTokens = inputTokens;
+            this.outputTokens = outputTokens;
+            this.totalTokens = totalTokens;
+        }
+
+        public Integer inputTokens() {
+            return inputTokens;
+        }
+
+        public Integer outputTokens() {
+            return outputTokens;
+        }
+
+        public Integer totalTokens() {
+            return totalTokens;
+        }
     }
 
     private static final String ANTHROPIC_CACHE_CONTROL_KEY = "cache_control";

@@ -96,6 +96,14 @@ public class AgentJobWorker {
                 executionService.complete(job.getId(), result.reply(), result.toolWasUsed(),
                         result.inputTokens(), result.outputTokens(), result.totalTokens());
             }
+        } catch (ToolCallingChatEngine.PartialUsageException e) {
+            // A provider call failed mid-run (rate limit, insufficient API
+            // credit, network error) after earlier rounds already succeeded
+            // and were genuinely billed -- see PartialUsageException's
+            // javadoc. Recording that spend here is the whole reason this
+            // catch exists ahead of the plain RuntimeException one below.
+            log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);
+            executionService.fail(job.getId(), e.getMessage(), e.inputTokens(), e.outputTokens(), e.totalTokens());
         } catch (RuntimeException e) {
             log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);
             executionService.fail(job.getId(), e.getMessage());
