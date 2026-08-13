@@ -203,13 +203,25 @@ export class Credentials implements OnInit {
     if (!token) {
       return;
     }
+    this.putVendorCredential(provider, token, 'Key saved.');
+  }
+
+  /** LOCAL (Ollama/LM Studio/vLLM) has no real secret -- the credential row only exists to
+   *  gate provider selection and model listing the same way every other provider does (see
+   *  LlmEngineFactory), so there's nothing for the user to actually type in. This saves a
+   *  fixed placeholder value directly instead of showing a key input for it. */
+  connectLocal(): void {
+    this.putVendorCredential('LOCAL', 'not-needed', 'Connected.');
+  }
+
+  private putVendorCredential(provider: string, token: string, successMessage: string): void {
     this.savingKey.set(provider);
     delete this.vendorMessages[provider];
     this.credentialService.putVendorCredential({ provider, token }).subscribe({
       next: () => {
         this.savingKey.set(null);
         this.vendorInputs[provider] = '';
-        this.vendorMessages[provider] = { kind: 'success', text: 'Key saved.' };
+        this.vendorMessages[provider] = { kind: 'success', text: successMessage };
         this.refreshVendorCredentials();
       },
       error: (err) => {

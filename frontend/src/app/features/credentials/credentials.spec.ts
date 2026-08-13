@@ -76,6 +76,23 @@ describe('Credentials', () => {
     httpMock.expectNone(`${environment.apiBaseUrl}/vendor-credentials`);
   });
 
+  it('connectLocal() saves a fixed placeholder token without requiring any input', () => {
+    const fixture = createComponent();
+    const component = fixture.componentInstance;
+
+    component.connectLocal();
+
+    const putReq = httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`);
+    expect(putReq.request.method).toBe('PUT');
+    expect(putReq.request.body).toEqual({ provider: 'LOCAL', token: 'not-needed' });
+    putReq.flush({ ...activeAnthropic, provider: 'LOCAL' });
+
+    httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([{ ...activeAnthropic, provider: 'LOCAL' }]);
+
+    expect(component.vendorSummary('LOCAL')?.active).toBe(true);
+    expect(component.vendorMessages['LOCAL']).toEqual({ kind: 'success', text: 'Connected.' });
+  });
+
   it('tests a vendor credential and stores a success message', () => {
     const fixture = createComponent();
     const component = fixture.componentInstance;
