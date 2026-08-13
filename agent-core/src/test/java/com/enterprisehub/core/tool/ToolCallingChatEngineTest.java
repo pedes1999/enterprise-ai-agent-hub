@@ -14,6 +14,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -231,6 +232,145 @@ class ToolCallingChatEngineTest {
         assertThat(spec.name()).isEqualTo("echo");
         assertThat(spec.description()).isEqualTo("Echoes back the given message");
         assertThat(spec.parameters().properties()).containsKey("message");
+        // echoTool declares no optional parameters -- "message" stays required,
+        // matching every tool's behavior before optionalParameterNames() existed.
+        assertThat(spec.parameters().required()).contains("message");
+    }
+
+    @Test
+    void constructor_toolWithOptionalParameter_excludedFromTheRequiredList() {
+        AgentTool toolWithOptionalArg = new AgentTool() {
+            @Override
+            public String name() {
+                return "maybe_greet";
+            }
+
+            @Override
+            public String description() {
+                return "Greets someone, optionally by name";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of("greeting", "the greeting word", "name", "optional -- who to greet");
+            }
+
+            @Override
+            public Set<String> optionalParameterNames() {
+                return Set.of("name");
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                return arguments.getOrDefault("greeting", "hi") + " " + arguments.getOrDefault("name", "there");
+            }
+        };
+
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("ok")));
+
+        new ToolCallingChatEngine(model, List.of(toolWithOptionalArg), CONTEXT).chat("hi");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ToolSpecification>> specsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(model).generate(anyList(), specsCaptor.capture());
+
+        ToolSpecification spec = specsCaptor.getValue().get(0);
+        assertThat(spec.parameters().properties()).containsKeys("greeting", "name");
+        assertThat(spec.parameters().required()).contains("greeting").doesNotContain("name");
+    }
+
+    @Test
+    void chat_toolCallOmitsAnOptionalArgument_toolReceivesItAsAbsentNotAsTheStringNull() {
+        AtomicReference<Map<String, String>> observedArguments = new AtomicReference<>();
+        AgentTool toolWithOptionalArg = new AgentTool() {
+            @Override
+            public String name() {
+                return "maybe_greet";
+            }
+
+            @Override
+            public String description() {
+                return "records the arguments it was called with";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of("greeting", "the greeting word", "name", "optional -- who to greet");
+            }
+
+            @Override
+            public Set<String> optionalParameterNames() {
+                return Set.of("name");
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                observedArguments.set(arguments);
+                return "ok";
+            }
+        };
+
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        // The model omits "name" entirely, exactly as expected when it's
+        // declared optional and the model has nothing to supply for it.
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("maybe_greet").arguments("{\"greeting\":\"hi\"}").build();
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request))))
+                .thenReturn(Response.from(AiMessage.from("done")));
+
+        new ToolCallingChatEngine(model, List.of(toolWithOptionalArg), CONTEXT).chat("greet");
+
+        assertThat(observedArguments.get()).containsEntry("greeting", "hi");
+        assertThat(observedArguments.get()).doesNotContainKey("name");
+    }
+
+    @Test
+    void chat_toolCallSendsExplicitJsonNullForAnArgument_toolReceivesItAsAbsentNotAsTheStringNull() {
+        AtomicReference<Map<String, String>> observedArguments = new AtomicReference<>();
+        AgentTool toolWithOptionalArg = new AgentTool() {
+            @Override
+            public String name() {
+                return "maybe_greet";
+            }
+
+            @Override
+            public String description() {
+                return "records the arguments it was called with";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of("greeting", "the greeting word", "name", "optional -- who to greet");
+            }
+
+            @Override
+            public Set<String> optionalParameterNames() {
+                return Set.of("name");
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                observedArguments.set(arguments);
+                return "ok";
+            }
+        };
+
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        // Some models send an explicit JSON null for a declined optional
+        // argument instead of omitting the key -- this must be treated the
+        // same as omission, not turned into the literal string "null".
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("maybe_greet").arguments("{\"greeting\":\"hi\",\"name\":null}").build();
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request))))
+                .thenReturn(Response.from(AiMessage.from("done")));
+
+        new ToolCallingChatEngine(model, List.of(toolWithOptionalArg), CONTEXT).chat("greet");
+
+        assertThat(observedArguments.get()).containsEntry("greeting", "hi");
+        assertThat(observedArguments.get()).doesNotContainKey("name");
     }
 
     @Test

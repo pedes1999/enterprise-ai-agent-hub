@@ -1,6 +1,7 @@
 package com.enterprisehub.core.tool;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The seam real capabilities (filesystem, terminal, git -- coming in
@@ -11,10 +12,12 @@ import java.util.Map;
  * ToolSpecification), so agent-runtime's eventual tool implementations
  * don't need any LangChain4j import at all.
  *
- * Every parameter is treated as a required string for now -- no typed/
- * optional parameters, no nested objects. That's enough to prove the
- * tool-calling loop works end to end; agent-runtime's real tools (a file
- * path, a shell command) are naturally string-shaped anyway.
+ * Every parameter is a string -- no typed parameters, no nested objects.
+ * That's enough for agent-runtime's real tools (a file path, a shell
+ * command, a branch name) since those are all naturally string-shaped.
+ * A parameter is required by default (the model must supply it) unless
+ * its name is also returned by optionalParameterNames() -- see that
+ * method's javadoc for what "optional" means for an implementation.
  */
 public interface AgentTool {
 
@@ -26,12 +29,27 @@ public interface AgentTool {
     Map<String, String> parameterDescriptions();
 
     /**
-     * Arguments are always present and non-null; the LLM decided to call this
-     * tool with these values. context.tenantId() is how a sandboxed
-     * implementation knows which tenant's credentials to inject and which
-     * repo it's allowed to touch -- never trust anything in `arguments` for
-     * that, since those values came from the LLM, not from authenticated
-     * request state.
+     * Names (a subset of parameterDescriptions().keySet()) the model may
+     * omit entirely rather than being forced to supply some value just to
+     * satisfy a required argument. Empty by default -- every existing tool
+     * before this method existed keeps its current "everything required"
+     * behavior with no change needed. An implementation whose parameter is
+     * listed here must treat that key being ABSENT from execute()'s
+     * `arguments` map as "not supplied" (arguments.get(name) returning null
+     * is the only signal -- there is no separate "was it present" check).
+     */
+    default Set<String> optionalParameterNames() {
+        return Set.of();
+    }
+
+    /**
+     * Arguments are always non-null when present; the LLM decided to call
+     * this tool with these values. A key listed in optionalParameterNames()
+     * may be absent from this map entirely -- every other key is guaranteed
+     * present. context.tenantId() is how a sandboxed implementation knows
+     * which tenant's credentials to inject and which repo it's allowed to
+     * touch -- never trust anything in `arguments` for that, since those
+     * values came from the LLM, not from authenticated request state.
      */
     String execute(ToolExecutionContext context, Map<String, String> arguments);
 }

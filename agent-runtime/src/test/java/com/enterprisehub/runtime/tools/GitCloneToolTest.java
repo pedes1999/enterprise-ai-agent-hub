@@ -197,4 +197,80 @@ class GitCloneToolTest {
         assertThat(tool.description()).isNotBlank();
         assertThat(tool.parameterDescriptions()).containsKey("repositoryUrl");
     }
+
+    @Test
+    void branch_isDeclaredOptional() {
+        assertThat(tool.parameterDescriptions()).containsKey("branch");
+        assertThat(tool.optionalParameterNames()).containsExactly("branch");
+    }
+
+    @Test
+    void execute_branchOmitted_commandUnchanged_noRegressionOnExistingBehavior() {
+        when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
+        stubSandbox(new CommandResult(0, "", "", false, Duration.ZERO));
+
+        tool.execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getValue())
+                .isEqualTo("mkdir -p '/tmp/workspace' && git clone 'https://github.com/org/repo.git' /tmp/workspace/repo");
+    }
+
+    @Test
+    void execute_branchGiven_addsBranchFlagBeforeTheUrl() {
+        when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
+        stubSandbox(new CommandResult(0, "", "", false, Duration.ZERO));
+
+        tool.execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git", "branch", "demo/broken-test"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getValue())
+                .isEqualTo("mkdir -p '/tmp/workspace' && git clone -b 'demo/broken-test' 'https://github.com/org/repo.git' /tmp/workspace/repo");
+    }
+
+    @Test
+    void execute_branchGiven_withCredential_branchFlagStillBeforeAuthenticatedUrl() {
+        when(credentialResolver.resolve("tenant-1", "GIT")).thenReturn(Map.of("GIT_TOKEN", "ghp_secret"));
+        stubSandbox(new CommandResult(0, "", "", false, Duration.ZERO));
+
+        tool.execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git", "branch", "main"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getValue()).contains("git clone -b 'main' \"https://x-access-token:$GIT_TOKEN@");
+    }
+
+    @Test
+    void execute_blankBranch_treatedSameAsOmitted() {
+        when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
+        stubSandbox(new CommandResult(0, "", "", false, Duration.ZERO));
+
+        tool.execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git", "branch", "  "));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getValue()).doesNotContain("-b ");
+    }
+
+    @Test
+    void execute_branchStartingWithDash_rejected_argumentInjectionDefense() {
+        assertThatThrownBy(() -> tool.execute(CONTEXT,
+                Map.of("repositoryUrl", "https://github.com/org/repo.git", "branch", "--upload-pack=evil")))
+                .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(sandboxClient);
+    }
+
+    @Test
+    void execute_branchWithShellMetacharacters_isShellQuoted_notInjected() {
+        when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
+        stubSandbox(new CommandResult(0, "", "", false, Duration.ZERO));
+
+        tool.execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git", "branch", "a'; rm -rf / #"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sandboxClient).runCommand(any(), commandCaptor.capture(), any());
+        assertThat(commandCaptor.getValue()).contains("'\\''");
+    }
 }

@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A bounded, multi-round tool-calling loop: send the user's message plus
@@ -142,7 +143,17 @@ public class ToolCallingChatEngine {
         Map<String, Object> raw = objectMapper.readValue(argumentsJson, new TypeReference<>() {
         });
         Map<String, String> arguments = new LinkedHashMap<>();
-        raw.forEach((key, value) -> arguments.put(key, String.valueOf(value)));
+        // A model declining an optional parameter (see AgentTool.optionalParameterNames())
+        // may send an explicit JSON null for it instead of omitting the key
+        // entirely -- treat both the same way (key absent from the result),
+        // rather than String.valueOf(null) silently turning it into the
+        // four-character string "null" that a tool would then treat as a
+        // real (garbage) argument value.
+        raw.forEach((key, value) -> {
+            if (value != null) {
+                arguments.put(key, String.valueOf(value));
+            }
+        });
         return arguments;
     }
 
@@ -151,8 +162,14 @@ public class ToolCallingChatEngine {
                 .name(tool.name())
                 .description(tool.description());
 
-        tool.parameterDescriptions().forEach((paramName, paramDescription) ->
-                builder.addParameter(paramName, JsonSchemaProperty.STRING, JsonSchemaProperty.description(paramDescription)));
+        Set<String> optionalParams = tool.optionalParameterNames();
+        tool.parameterDescriptions().forEach((paramName, paramDescription) -> {
+            if (optionalParams.contains(paramName)) {
+                builder.addOptionalParameter(paramName, JsonSchemaProperty.STRING, JsonSchemaProperty.description(paramDescription));
+            } else {
+                builder.addParameter(paramName, JsonSchemaProperty.STRING, JsonSchemaProperty.description(paramDescription));
+            }
+        });
 
         return builder.build();
     }

@@ -9,6 +9,7 @@ import com.enterprisehub.runtime.sandbox.SandboxSpec;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * First git-aware tool, and the first to actually use CredentialResolver
@@ -46,21 +47,32 @@ public class GitCloneTool extends AbstractSandboxedTool {
     @Override
     public String description() {
         return "Clones a git repository into the sandbox at " + CLONE_TARGET_DIR + ". Use this before reading or "
-                + "modifying files in a repository. Only HTTPS repository URLs are supported.";
+                + "modifying files in a repository. Only HTTPS repository URLs are supported. Pass branch to "
+                + "check out something other than the repository's default branch.";
     }
 
     @Override
     public Map<String, String> parameterDescriptions() {
-        return Map.of("repositoryUrl", "HTTPS URL of the repository to clone, e.g. https://github.com/org/repo.git");
+        return Map.of(
+                "repositoryUrl", "HTTPS URL of the repository to clone, e.g. https://github.com/org/repo.git",
+                "branch", "Optional. Branch to check out after cloning, e.g. main or feature/my-branch. "
+                        + "Omit this argument entirely to get the repository's default branch.");
+    }
+
+    @Override
+    public Set<String> optionalParameterNames() {
+        return Set.of("branch");
     }
 
     @Override
     protected String doExecute(ToolExecutionContext context, Map<String, String> arguments) {
         String repositoryUrl = arguments.get("repositoryUrl");
         validateRepositoryUrl(repositoryUrl);
+        String branch = arguments.get("branch");
+        validateBranch(branch);
 
         Map<String, String> credentials = credentialResolver.resolve(context.tenantId(), GIT_CREDENTIAL_KIND);
-        String command = buildCloneCommand(repositoryUrl, credentials.containsKey(GIT_TOKEN_ENV_VAR));
+        String command = buildCloneCommand(repositoryUrl, credentials.containsKey(GIT_TOKEN_ENV_VAR), branch);
 
         SandboxSpec spec = new SandboxSpec(
                 context.tenantId(), context.executionId(),
@@ -85,7 +97,23 @@ public class GitCloneTool extends AbstractSandboxedTool {
         }
     }
 
-    private String buildCloneCommand(String repositoryUrl, boolean hasCredential) {
+    private void validateBranch(String branch) {
+        if (branch == null || branch.isBlank()) {
+            // Optional -- absent/blank means "clone the default branch", the
+            // pre-existing behavior. Nothing more to validate.
+            return;
+        }
+        if (branch.startsWith("-")) {
+            // Same argument-injection defense as validateRepositoryUrl:
+            // branch is passed as `-b <value>` below, quoted, so it can't
+            // break out of that argument -- but a leading '-' is still
+            // rejected on principle rather than trusting git's positional
+            // binding of -b's value to save it in every version/edge case.
+            throw new IllegalArgumentException("branch must not start with '-'");
+        }
+    }
+
+    private String buildCloneCommand(String repositoryUrl, boolean hasCredential, String branch) {
         // /workspace does not exist by default in a fresh E2B sandbox --
         // discovered by an actual failed clone ("could not create leading
         // directories... Permission denied") during live verification, not
@@ -93,6 +121,12 @@ public class GitCloneTool extends AbstractSandboxedTool {
         // network) is what surfaces, not a filesystem setup issue.
         String mkdirPrefix = "mkdir -p " + ShellQuoting.quote(parentDirOf(CLONE_TARGET_DIR)) + " && ";
         String quotedUrl = ShellQuoting.quote(repositoryUrl);
+        // -b/--branch works for both branches and tags with a single
+        // `git clone` call -- no separate `git checkout` step needed, and
+        // it fails the whole clone up front with a clear error if the ref
+        // doesn't exist, rather than succeeding on the default branch and
+        // silently leaving the agent on the wrong ref.
+        String branchFlag = (branch != null && !branch.isBlank()) ? "-b " + ShellQuoting.quote(branch) + " " : "";
         if (hasCredential) {
             // Token embedded in the clone URL as Basic-auth userinfo, then
             // the clone's own origin remote is immediately rewritten back
@@ -106,10 +140,10 @@ public class GitCloneTool extends AbstractSandboxedTool {
             // credential-bearing URL is gone from .git/config before this
             // command even returns.
             String authenticatedUrl = AuthenticatedGitUrl.build(repositoryUrl, GIT_TOKEN_ENV_VAR);
-            return mkdirPrefix + "git clone " + authenticatedUrl + " " + CLONE_TARGET_DIR
+            return mkdirPrefix + "git clone " + branchFlag + authenticatedUrl + " " + CLONE_TARGET_DIR
                     + " && git -C " + CLONE_TARGET_DIR + " remote set-url origin " + quotedUrl;
         }
-        return mkdirPrefix + "git clone " + quotedUrl + " " + CLONE_TARGET_DIR;
+        return mkdirPrefix + "git clone " + branchFlag + quotedUrl + " " + CLONE_TARGET_DIR;
     }
 
     private String parentDirOf(String path) {
