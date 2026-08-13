@@ -58,7 +58,7 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null)))
+        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null), eq(null)))
                 .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
@@ -75,7 +75,7 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("build a feature"), eq("coding-agent"), eq(null), eq(null), eq(null)))
+        when(executionService.enqueue(eq(tenantId), eq("build a feature"), eq("coding-agent"), eq(null), eq(null), eq(null), eq(null)))
                 .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
@@ -91,7 +91,7 @@ class AgentExecutionControllerTest {
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
         when(executionService.enqueue(eq(tenantId), eq("also check the auth module"), eq("coding-agent"),
-                eq("https://github.com/org/repo.git"), eq(null), eq(java.util.Map.of("text", "Ticket: fix the bug"))))
+                eq("https://github.com/org/repo.git"), eq(null), eq(java.util.Map.of("text", "Ticket: fix the bug")), eq(null)))
                 .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
@@ -110,7 +110,7 @@ class AgentExecutionControllerTest {
         // (see AgentExecutionServiceTest for the per-AgentDefinition
         // required-inputs coverage); the controller's job is just to map
         // whatever AgentException it throws to the right status code.
-        when(executionService.enqueue(eq(tenantId), eq(" "), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null)))
+        when(executionService.enqueue(eq(tenantId), eq(" "), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null), eq(null)))
                 .thenThrow(new AgentException(org.springframework.http.HttpStatus.BAD_REQUEST, "Missing required input(s): prompt"));
 
         mockMvc.perform(post("/agents/execute")
@@ -122,7 +122,7 @@ class AgentExecutionControllerTest {
 
     @Test
     void execute_tenantAtConcurrencyLimit_returns429() throws Exception {
-        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null)))
+        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null), eq(null)))
                 .thenThrow(new AgentException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
                         "This tenant already has 5 agent executions in progress (limit 5) -- wait for one to finish before starting another."));
 
@@ -150,6 +150,29 @@ class AgentExecutionControllerTest {
         when(executionService.getUsage(tenantId)).thenReturn(new com.enterprisehub.dto.ExecutionUsage(0L, 5));
 
         mockMvc.perform(get("/agents/executions/usage"))
+                .andExpect(status().isOk());
+
+        verify(executionService, never()).findForTenant(any(), any());
+    }
+
+    @Test
+    void getTokenUsageStats_returnsAggregateStats() throws Exception {
+        when(executionService.getTokenUsageStats(tenantId, "coding-agent"))
+                .thenReturn(new com.enterprisehub.dto.AgentTokenUsageStats("coding-agent", 8L, 15_000, 27_500.5, 42_000));
+
+        mockMvc.perform(get("/agents/executions/token-usage-stats").param("agentSlug", "coding-agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sampleCount").value(8))
+                .andExpect(jsonPath("$.minTokens").value(15000))
+                .andExpect(jsonPath("$.maxTokens").value(42000));
+    }
+
+    @Test
+    void getTokenUsageStats_routeIsNotShadowedByExecutionIdPathVariable() throws Exception {
+        when(executionService.getTokenUsageStats(tenantId, "coding-agent"))
+                .thenReturn(new com.enterprisehub.dto.AgentTokenUsageStats("coding-agent", 0L, null, null, null));
+
+        mockMvc.perform(get("/agents/executions/token-usage-stats").param("agentSlug", "coding-agent"))
                 .andExpect(status().isOk());
 
         verify(executionService, never()).findForTenant(any(), any());

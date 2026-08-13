@@ -47,4 +47,8 @@ public class Tenant {
     /** Null means "no override" -- falls back to the server-wide default model for whichever provider resolves. See TenantLlmProviderResolver. */
     @Column(name = "preferred_model_name")
     private String preferredModelName;
+
+    /** Null means "no override" -- falls back to app.llm.max-tokens-per-execution. See TenantLlmProviderResolver.resolveMaxTokens(). */
+    @Column(name = "max_tokens_per_execution")
+    private Integer maxTokensPerExecution;
 }

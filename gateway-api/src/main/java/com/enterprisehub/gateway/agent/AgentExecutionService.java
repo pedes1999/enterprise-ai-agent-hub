@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.agent;
 
+import com.enterprisehub.dto.AgentTokenUsageStats;
 import com.enterprisehub.dto.ExecutionUsage;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
@@ -90,10 +91,20 @@ public class AgentExecutionService {
     @Transactional
     public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
                                    Map<String, String> inputParameters) {
+        return enqueue(tenantId, prompt, agentSlug, repositoryUrl, repositoryBranch, inputParameters, null);
+    }
+
+    /** Same as the 6-arg overload, additionally accepting a per-execution token budget override -- see AgentExecution.maxTokensOverride's javadoc. */
+    @Transactional
+    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
+                                   Map<String, String> inputParameters, Integer maxTokens) {
         AgentDefinition definition = agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
 
         validateRequiredInputs(definition, prompt, repositoryUrl, inputParameters);
+        if (maxTokens != null && maxTokens <= 0) {
+            throw new AgentException(HttpStatus.BAD_REQUEST, "maxTokens must be positive");
+        }
 
         ExecutionUsage usage = getUsage(tenantId);
         long activeCount = usage.active();
@@ -122,6 +133,7 @@ public class AgentExecutionService {
         execution.setRepositoryBranch((repositoryUrl == null || repositoryUrl.isBlank() || repositoryBranch == null || repositoryBranch.isBlank())
                 ? null : repositoryBranch);
         execution.setInputParameters(serializeInputParameters(inputParameters));
+        execution.setMaxTokensOverride(maxTokens);
         execution.setStatus("QUEUED");
         return repository.save(execution);
     }
@@ -215,19 +227,37 @@ public class AgentExecutionService {
 
     @Transactional
     public void complete(UUID executionId, String reply, boolean toolWasUsed) {
+        complete(executionId, reply, toolWasUsed, null, null, null);
+    }
+
+    /** Same as the 3-arg overload, additionally recording the run's summed token usage -- see ToolChatResult's javadoc for why these are Integers, not ints. */
+    @Transactional
+    public void complete(UUID executionId, String reply, boolean toolWasUsed, Integer inputTokens, Integer outputTokens, Integer totalTokens) {
         repository.findById(executionId).ifPresent(execution -> {
             execution.setStatus("SUCCEEDED");
             execution.setReply(reply);
             execution.setToolWasUsed(toolWasUsed);
+            execution.setInputTokens(inputTokens);
+            execution.setOutputTokens(outputTokens);
+            execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
         });
     }
 
     @Transactional
     public void fail(UUID executionId, String errorMessage) {
+        fail(executionId, errorMessage, null, null, null);
+    }
+
+    /** Same as the 2-arg overload, additionally recording token usage for a run that DID reach the model before failing (e.g. hit the round cap) -- the exception-before-any-call path has no usage to report, so it keeps using the 2-arg overload. */
+    @Transactional
+    public void fail(UUID executionId, String errorMessage, Integer inputTokens, Integer outputTokens, Integer totalTokens) {
         repository.findById(executionId).ifPresent(execution -> {
             execution.setStatus("FAILED");
             execution.setErrorMessage(errorMessage);
+            execution.setInputTokens(inputTokens);
+            execution.setOutputTokens(outputTokens);
+            execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
         });
     }
@@ -248,6 +278,23 @@ public class AgentExecutionService {
     public ExecutionUsage getUsage(UUID tenantId) {
         long active = repository.countByTenantIdAndStatusIn(tenantId, ACTIVE_STATUSES);
         return new ExecutionUsage(active, executionLimitProperties.maxConcurrentPerTenant());
+    }
+
+    /**
+     * Backs GET /agents/executions/token-usage-stats -- gives a trigger
+     * form a concrete reference point ("past runs used ~X-Y tokens") for
+     * what to put in a maxTokens override, instead of a blind guess. See
+     * AgentExecutionRepository.tokenUsageStatsRaw()'s javadoc for the
+     * "always one row, zeros/nulls for no data" contract this relies on.
+     */
+    @Transactional(readOnly = true)
+    public AgentTokenUsageStats getTokenUsageStats(UUID tenantId, String agentSlug) {
+        Object[] row = repository.tokenUsageStatsRaw(tenantId, agentSlug);
+        long sampleCount = ((Number) row[0]).longValue();
+        Integer minTokens = row[1] == null ? null : ((Number) row[1]).intValue();
+        Double avgTokens = row[2] == null ? null : ((Number) row[2]).doubleValue();
+        Integer maxTokens = row[3] == null ? null : ((Number) row[3]).intValue();
+        return new AgentTokenUsageStats(agentSlug, sampleCount, minTokens, avgTokens, maxTokens);
     }
 
     /** Backs GET /agents/executions -- status is optional (null/blank means "every status"). Tenant-scoped by RLS, same as every other query here. */

@@ -5,7 +5,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideRouter, ActivatedRoute, convertToParamMap } from '@angular/router';
 import { Trigger, POLL_INTERVAL_MS } from './trigger';
 import { environment } from '../../../environments/environment';
-import { AgentExecutionStatusResponse } from '../../core/models/agent.model';
+import { AgentExecutionStatusResponse, AgentTokenUsageStats } from '../../core/models/agent.model';
 
 /**
  * This app is zoneless (no zone.js dependency), so Angular's fakeAsync/tick
@@ -42,7 +42,10 @@ describe('Trigger', () => {
     };
   }
 
-  function createComponent(requiredInputs: string[] = []) {
+  function createComponent(
+    requiredInputs: string[] = [],
+    stats: AgentTokenUsageStats = { agentSlug: 'code-reviewer', sampleCount: 0, minTokens: null, avgTokens: null, maxTokens: null },
+  ) {
     TestBed.configureTestingModule({
       imports: [Trigger],
       providers: [
@@ -69,6 +72,9 @@ describe('Trigger', () => {
       requiredInputs,
     });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/agents/executions/token-usage-stats?agentSlug=code-reviewer`)
+      .flush(stats);
 
     return fixture;
   }
@@ -78,6 +84,24 @@ describe('Trigger', () => {
     expect(fixture.componentInstance.definition()?.name).toBe('Code Reviewer');
     expect(fixture.componentInstance.usage()).toEqual({ active: 1, limit: 5 });
     expect(fixture.componentInstance.definitionLoading()).toBe(false);
+  });
+
+  it('loads token usage stats for this agent on init', () => {
+    const fixture = createComponent([], {
+      agentSlug: 'code-reviewer',
+      sampleCount: 8,
+      minTokens: 15000,
+      avgTokens: 27500.5,
+      maxTokens: 42000,
+    });
+
+    expect(fixture.componentInstance.tokenUsageStats()).toEqual({
+      agentSlug: 'code-reviewer',
+      sampleCount: 8,
+      minTokens: 15000,
+      avgTokens: 27500.5,
+      maxTokens: 42000,
+    });
   });
 
   it('shows an error banner when the agent definition fails to load', () => {
@@ -101,6 +125,9 @@ describe('Trigger', () => {
       .expectOne(`${environment.apiBaseUrl}/agents/definitions/unknown-slug`)
       .flush({ message: 'Unknown or inactive agent: unknown-slug' }, { status: 400, statusText: 'Bad Request' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 0, limit: 5 });
+    httpMock
+      .expectOne(`${environment.apiBaseUrl}/agents/executions/token-usage-stats?agentSlug=unknown-slug`)
+      .flush({ agentSlug: 'unknown-slug', sampleCount: 0, minTokens: null, avgTokens: null, maxTokens: null });
 
     expect(fixture.componentInstance.definitionError()).toBe('Unknown or inactive agent: unknown-slug');
     expect(fixture.componentInstance.definitionLoading()).toBe(false);
@@ -221,6 +248,7 @@ describe('Trigger', () => {
       repositoryUrl: null,
       repositoryBranch: null,
       inputParameters: null,
+      maxTokens: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
@@ -240,6 +268,7 @@ describe('Trigger', () => {
       repositoryUrl: null,
       repositoryBranch: null,
       inputParameters: null,
+      maxTokens: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
@@ -259,6 +288,7 @@ describe('Trigger', () => {
       repositoryUrl: 'https://github.com/octocat/Hello-World.git',
       repositoryBranch: null,
       inputParameters: null,
+      maxTokens: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
@@ -279,6 +309,7 @@ describe('Trigger', () => {
       repositoryUrl: 'https://github.com/octocat/Hello-World.git',
       repositoryBranch: 'feature/my-branch',
       inputParameters: null,
+      maxTokens: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
@@ -303,8 +334,37 @@ describe('Trigger', () => {
       repositoryUrl: null,
       repositoryBranch: null,
       inputParameters: { text: 'ticket body here' },
+      maxTokens: null,
     });
     req.flush({ executionId: 'exec-1', status: 'QUEUED' });
     httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('sends maxTokens when filled in, overriding this tenant\'s default budget', () => {
+    const fixture = createComponent([]);
+    fixture.componentInstance.maxTokensValue = '50000';
+    fixture.componentInstance.submit();
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);
+    expect(req.request.body).toEqual({
+      prompt: null,
+      agentSlug: 'code-reviewer',
+      repositoryUrl: null,
+      repositoryBranch: null,
+      inputParameters: null,
+      maxTokens: 50000,
+    });
+    req.flush({ executionId: 'exec-1', status: 'QUEUED' });
+    httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`).flush({ active: 1, limit: 5 });
+  });
+
+  it('rejects a non-positive maxTokens value locally without ever calling the server', () => {
+    const fixture = createComponent([]);
+    fixture.componentInstance.maxTokensValue = '0';
+
+    fixture.componentInstance.submit();
+
+    httpMock.expectNone(`${environment.apiBaseUrl}/agents/execute`);
+    expect(fixture.componentInstance.maxTokensError()).toBe('Max tokens must be a positive whole number.');
   });
 });

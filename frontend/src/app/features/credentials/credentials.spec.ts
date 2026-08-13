@@ -21,6 +21,8 @@ describe('Credentials', () => {
   const noPreference: TenantSettings = {
     preferredLlmProvider: null,
     preferredModelName: null,
+    maxTokensPerExecution: null,
+    effectiveMaxTokensPerExecution: 500000,
     availableProviders: [
       { provider: 'ANTHROPIC', hasActiveCredential: true },
       { provider: 'OPENAI', hasActiveCredential: false },
@@ -217,10 +219,12 @@ describe('Credentials', () => {
     expect(fixture.componentInstance.loading()).toBe(false);
   });
 
-  it('loads the preferred provider, model, and available providers on init', () => {
+  it('loads the preferred provider, model, max tokens, and available providers on init', () => {
     const fixture = createComponent({
       preferredLlmProvider: 'LOCAL',
       preferredModelName: 'llama3.1',
+      maxTokensPerExecution: 75000,
+      effectiveMaxTokensPerExecution: 75000,
       availableProviders: [
         { provider: 'ANTHROPIC', hasActiveCredential: true },
         { provider: 'LOCAL', hasActiveCredential: true },
@@ -230,24 +234,29 @@ describe('Credentials', () => {
 
     expect(component.preferredProviderSelection()).toBe('LOCAL');
     expect(component.preferredModelSelection()).toBe('llama3.1');
+    expect(component.maxTokensSelection()).toBe('75000');
+    expect(component.effectiveMaxTokens()).toBe(75000);
     expect(component.hasActiveCredential('ANTHROPIC')).toBe(true);
     expect(component.hasActiveCredential('OPENAI')).toBe(false);
   });
 
-  it('saves the preferred provider and model, reflecting the server response', () => {
+  it('saves the preferred provider, model, and max tokens, reflecting the server response', () => {
     const fixture = createComponent();
     const component = fixture.componentInstance;
     component.preferredProviderSelection.set('LOCAL');
     component.preferredModelSelection.set('llama3.1');
+    component.maxTokensSelection.set('75000');
 
     component.savePreferredProvider();
 
     const putReq = httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`);
     expect(putReq.request.method).toBe('PUT');
-    expect(putReq.request.body).toEqual({ preferredLlmProvider: 'LOCAL', preferredModelName: 'llama3.1' });
+    expect(putReq.request.body).toEqual({ preferredLlmProvider: 'LOCAL', preferredModelName: 'llama3.1', maxTokensPerExecution: 75000 });
     putReq.flush({
       preferredLlmProvider: 'LOCAL',
       preferredModelName: 'llama3.1',
+      maxTokensPerExecution: 75000,
+      effectiveMaxTokensPerExecution: 75000,
       availableProviders: [{ provider: 'LOCAL', hasActiveCredential: true }],
     });
 
@@ -259,17 +268,37 @@ describe('Credentials', () => {
     const fixture = createComponent({
       preferredLlmProvider: 'LOCAL',
       preferredModelName: 'llama3.1',
+      maxTokensPerExecution: 75000,
+      effectiveMaxTokensPerExecution: 75000,
       availableProviders: [{ provider: 'LOCAL', hasActiveCredential: true }],
     });
     const component = fixture.componentInstance;
     component.preferredProviderSelection.set('');
     component.preferredModelSelection.set('');
+    component.maxTokensSelection.set('');
 
     component.savePreferredProvider();
 
     const putReq = httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`);
-    expect(putReq.request.body).toEqual({ preferredLlmProvider: null, preferredModelName: null });
-    putReq.flush({ preferredLlmProvider: null, preferredModelName: null, availableProviders: [] });
+    expect(putReq.request.body).toEqual({ preferredLlmProvider: null, preferredModelName: null, maxTokensPerExecution: null });
+    putReq.flush({
+      preferredLlmProvider: null,
+      preferredModelName: null,
+      maxTokensPerExecution: null,
+      effectiveMaxTokensPerExecution: 500000,
+      availableProviders: [],
+    });
+  });
+
+  it('rejects a non-positive max tokens value without calling the server', () => {
+    const fixture = createComponent();
+    const component = fixture.componentInstance;
+    component.maxTokensSelection.set('0');
+
+    component.savePreferredProvider();
+
+    httpMock.expectNone(`${environment.apiBaseUrl}/tenant-settings`);
+    expect(component.preferenceMessage()?.kind).toBe('error');
   });
 
   it('shows an error message when saving the preference fails', () => {

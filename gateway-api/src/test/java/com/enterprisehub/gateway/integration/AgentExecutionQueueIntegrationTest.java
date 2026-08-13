@@ -111,7 +111,7 @@ class AgentExecutionQueueIntegrationTest {
 
         ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
                 baseUrl() + "/agents/execute", HttpMethod.POST,
-                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null), authHeaders(tenant.token())),
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(tenant.token())),
                 AgentExecutionAccepted.class);
 
         assertThat(postResponse.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
@@ -134,7 +134,7 @@ class AgentExecutionQueueIntegrationTest {
 
         ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
                 baseUrl() + "/agents/execute", HttpMethod.POST,
-                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null), authHeaders(tenant.token())),
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(tenant.token())),
                 AgentExecutionAccepted.class);
         UUID executionId = postResponse.getBody().executionId();
 
@@ -171,7 +171,7 @@ class AgentExecutionQueueIntegrationTest {
     void claimNext_underWorkerSentinel_seesJobRegardlessOfWhichTenantCreatedIt() {
         AuthResponse tenant = registerTenant("job-c");
         restTemplate.exchange(baseUrl() + "/agents/execute", HttpMethod.POST,
-                new HttpEntity<>(new TriggerAgentExecutionRequest("hello", null, null, null, null), authHeaders(tenant.token())),
+                new HttpEntity<>(new TriggerAgentExecutionRequest("hello", null, null, null, null, null), authHeaders(tenant.token())),
                 AgentExecutionAccepted.class);
 
         TenantContext.set(TenantContext.SYSTEM_WORKER_TENANT_ID);
@@ -186,7 +186,7 @@ class AgentExecutionQueueIntegrationTest {
     void claimNext_underAnOrdinaryTenantContext_cannotSeeAnyonesQueuedJobs() {
         AuthResponse tenantA = registerTenant("job-d");
         restTemplate.exchange(baseUrl() + "/agents/execute", HttpMethod.POST,
-                new HttpEntity<>(new TriggerAgentExecutionRequest("hello", null, null, null, null), authHeaders(tenantA.token())),
+                new HttpEntity<>(new TriggerAgentExecutionRequest("hello", null, null, null, null, null), authHeaders(tenantA.token())),
                 AgentExecutionAccepted.class);
 
         AuthResponse tenantB = registerTenant("job-e");
@@ -205,7 +205,7 @@ class AgentExecutionQueueIntegrationTest {
         AuthResponse tenantA = registerTenant("job-f");
         ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
                 baseUrl() + "/agents/execute", HttpMethod.POST,
-                new HttpEntity<>(new TriggerAgentExecutionRequest("secret prompt", null, null, null, null), authHeaders(tenantA.token())),
+                new HttpEntity<>(new TriggerAgentExecutionRequest("secret prompt", null, null, null, null, null), authHeaders(tenantA.token())),
                 AgentExecutionAccepted.class);
         UUID executionId = postResponse.getBody().executionId();
 
@@ -225,7 +225,7 @@ class AgentExecutionQueueIntegrationTest {
 
         ResponseEntity<String> response = restTemplate.exchange(
                 baseUrl() + "/agents/execute", HttpMethod.POST,
-                new HttpEntity<>(new TriggerAgentExecutionRequest("hello", null, null, null, null), authHeaders(readOnly.token())),
+                new HttpEntity<>(new TriggerAgentExecutionRequest("hello", null, null, null, null, null), authHeaders(readOnly.token())),
                 String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);

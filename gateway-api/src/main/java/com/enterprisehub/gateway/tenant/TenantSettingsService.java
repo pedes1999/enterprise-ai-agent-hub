@@ -31,15 +31,19 @@ public class TenantSettingsService {
 
     private final TenantRepository tenantRepository;
     private final VendorCredentialRepository vendorCredentialRepository;
+    private final TenantLlmProviderResolver tenantLlmProviderResolver;
 
-    public TenantSettingsService(TenantRepository tenantRepository, VendorCredentialRepository vendorCredentialRepository) {
+    public TenantSettingsService(TenantRepository tenantRepository, VendorCredentialRepository vendorCredentialRepository,
+                                  TenantLlmProviderResolver tenantLlmProviderResolver) {
         this.tenantRepository = tenantRepository;
         this.vendorCredentialRepository = vendorCredentialRepository;
+        this.tenantLlmProviderResolver = tenantLlmProviderResolver;
     }
 
     public TenantSettingsResponse get(UUID tenantId) {
         Tenant tenant = requireTenant(tenantId);
-        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(), availableProviders(tenantId));
+        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(),
+                tenant.getMaxTokensPerExecution(), tenantLlmProviderResolver.resolveMaxTokens(tenantId), availableProviders(tenantId));
     }
 
     public TenantSettingsResponse update(UUID tenantId, UpdateTenantSettingsRequest request) {
@@ -66,8 +70,15 @@ public class TenantSettingsService {
         String requestedModelName = request.preferredModelName();
         tenant.setPreferredModelName(requestedModelName == null || requestedModelName.isBlank() ? null : requestedModelName);
 
+        Integer requestedMaxTokens = request.maxTokensPerExecution();
+        if (requestedMaxTokens != null && requestedMaxTokens <= 0) {
+            throw new TenantSettingsException(HttpStatus.BAD_REQUEST, "maxTokensPerExecution must be positive");
+        }
+        tenant.setMaxTokensPerExecution(requestedMaxTokens);
+
         tenantRepository.save(tenant);
-        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(), availableProviders(tenantId));
+        return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(),
+                tenant.getMaxTokensPerExecution(), tenantLlmProviderResolver.resolveMaxTokens(tenantId), availableProviders(tenantId));
     }
 
     private List<LlmProviderAvailability> availableProviders(UUID tenantId) {

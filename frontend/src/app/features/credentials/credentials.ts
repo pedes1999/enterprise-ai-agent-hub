@@ -61,6 +61,10 @@ export class Credentials implements OnInit {
   readonly preferredProviderSelection = signal('');
   /** '' means "no override -- use the provider's default model". */
   readonly preferredModelSelection = signal('');
+  /** '' means "no override -- use the server-wide default token budget". Kept as a string (the input's raw value) so an in-progress edit like "50" isn't silently coerced mid-typing. */
+  readonly maxTokensSelection = signal('');
+  /** Whatever maxTokensSelection actually resolves to right now -- shown as a concrete reference number, never null. */
+  readonly effectiveMaxTokens = signal<number | null>(null);
   readonly availableProviders = signal<LlmProviderAvailability[]>([]);
   readonly savingPreference = signal(false);
   readonly preferenceMessage = signal<RowMessage | null>(null);
@@ -114,6 +118,8 @@ export class Credentials implements OnInit {
       next: (settings) => {
         this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
         this.preferredModelSelection.set(settings.preferredModelName ?? '');
+        this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
+        this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
         this.availableProviders.set(settings.availableProviders);
         done();
       },
@@ -177,13 +183,22 @@ export class Credentials implements OnInit {
   savePreferredProvider(): void {
     const provider = this.preferredProviderSelection();
     const modelName = this.preferredModelSelection();
+    const maxTokensText = this.maxTokensSelection().trim();
+    if (maxTokensText && (!/^\d+$/.test(maxTokensText) || Number(maxTokensText) <= 0)) {
+      this.preferenceMessage.set({ kind: 'error', text: 'Max tokens per execution must be a positive whole number.' });
+      return;
+    }
+    const maxTokens = maxTokensText ? Number(maxTokensText) : null;
+
     this.savingPreference.set(true);
     this.preferenceMessage.set(null);
-    this.tenantSettingsService.updateSettings(provider || null, modelName || null).subscribe({
+    this.tenantSettingsService.updateSettings(provider || null, modelName || null, maxTokens).subscribe({
       next: (settings) => {
         this.savingPreference.set(false);
         this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
         this.preferredModelSelection.set(settings.preferredModelName ?? '');
+        this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
+        this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
         this.availableProviders.set(settings.availableProviders);
         this.preferenceMessage.set({ kind: 'success', text: 'Preference saved.' });
       },

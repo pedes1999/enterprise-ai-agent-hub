@@ -12,8 +12,16 @@ export class TenantSettingsService {
     return this.http.get<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`);
   }
 
-  /** A full replace, not a partial patch -- always send both fields, matching the backend's UpdateTenantSettingsRequest. */
-  updateSettings(preferredLlmProvider: string | null, preferredModelName: string | null): Observable<TenantSettings> {
-    return this.http.put<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`, { preferredLlmProvider, preferredModelName });
+  /** A full replace, not a partial patch -- always send every field, matching the backend's UpdateTenantSettingsRequest. */
+  updateSettings(
+    preferredLlmProvider: string | null,
+    preferredModelName: string | null,
+    maxTokensPerExecution: number | null,
+  ): Observable<TenantSettings> {
+    return this.http.put<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`, {
+      preferredLlmProvider,
+      preferredModelName,
+      maxTokensPerExecution,
+    });
   }
 }

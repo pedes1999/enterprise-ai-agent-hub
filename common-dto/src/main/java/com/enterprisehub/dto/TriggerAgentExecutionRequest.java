@@ -21,12 +21,19 @@ import java.util.Map;
  * repository's default branch", matching git_clone's own optional branch
  * argument (see GitCloneTool). Not part of required_inputs' fixed
  * vocabulary since it's never required on its own.
+ *
+ * maxTokens is optional, same shape as repositoryBranch: null means "use
+ * this tenant's default token budget" (TenantSettingsService), which
+ * itself falls back to the server-wide app.llm.max-tokens-per-execution --
+ * see TenantLlmProviderResolver.resolveMaxTokens() and
+ * ToolCallingChatEngine. Must be positive when given.
  */
 public record TriggerAgentExecutionRequest(
         String prompt,
         String agentSlug,
         String repositoryUrl,
         String repositoryBranch,
-        Map<String, String> inputParameters
+        Map<String, String> inputParameters,
+        Integer maxTokens
 ) {
 }

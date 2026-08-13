@@ -36,7 +36,14 @@ public class SharedExecutionContextFactory {
     /** baseUrl: only meaningful for LlmProvider.LOCAL -- see LlmEngineFactory. Null for every other provider. */
     public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
                                           String modelName, List<AgentTool> tools, String systemPrompt, String baseUrl) {
+        return create(tenantId, executionId, provider, apiKey, modelName, tools, systemPrompt, baseUrl, null);
+    }
+
+    /** maxTokensBudget: see ToolCallingChatEngine's javadoc -- null means "no budget, rely on MAX_TOOL_ROUNDS alone". */
+    public SharedExecutionContext create(String tenantId, String executionId, LlmProvider provider, String apiKey,
+                                          String modelName, List<AgentTool> tools, String systemPrompt, String baseUrl,
+                                          Integer maxTokensBudget) {
         ChatLanguageModel chatModel = llmEngineFactory.create(provider, apiKey, modelName, baseUrl);
-        return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt);
+        return new SharedExecutionContext(tenantId, executionId, chatModel, tools, systemPrompt, maxTokensBudget);
     }
 }

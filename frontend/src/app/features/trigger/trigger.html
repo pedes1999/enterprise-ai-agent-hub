@@ -43,6 +43,31 @@
         />
       }
 
+      <label for="maxTokens">Max tokens <span class="optional">(optional)</span></label>
+      <input
+        id="maxTokens"
+        type="number"
+        min="1"
+        step="1"
+        [(ngModel)]="maxTokensValue"
+        name="maxTokens"
+        placeholder="Uses this organization's default budget"
+      />
+      @if (tokenUsageStats(); as stats) {
+        @if (stats.sampleCount > 0) {
+          <p class="hint">
+            Past runs of this agent used {{ stats.minTokens | number }}–{{ stats.maxTokens | number }} tokens
+            (avg {{ stats.avgTokens ? (stats.avgTokens | number: '1.0-0') : '—' }}, based on {{ stats.sampleCount }}
+            run{{ stats.sampleCount === 1 ? '' : 's' }}).
+          </p>
+        } @else {
+          <p class="hint">No past runs of this agent have recorded token usage yet.</p>
+        }
+      }
+      @if (maxTokensError()) {
+        <div class="banner banner-error" role="alert">{{ maxTokensError() }}</div>
+      }
+
       @if (errorKind() === 'rate-limit') {
         <div class="banner banner-error" role="alert">Execution limit reached. {{ errorMessage() }}</div>
       } @else if (errorKind() === 'required-inputs') {

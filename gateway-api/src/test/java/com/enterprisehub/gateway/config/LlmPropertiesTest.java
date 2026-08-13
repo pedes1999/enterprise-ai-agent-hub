@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LlmPropertiesTest {
 
     private final LlmProperties properties = new LlmProperties(
-            "ANTHROPIC", "claude-3-5-sonnet-20240620", "gpt-4o-mini", "gemini-1.5-flash", "llama3.1", "http://localhost:11434/v1");
+            "ANTHROPIC", "claude-3-5-sonnet-20240620", "gpt-4o-mini", "gemini-1.5-flash", "llama3.1", "http://localhost:11434/v1", 500_000);
 
     @Test
     void resolvedProvider_parsesConfiguredValue() {
@@ -17,7 +17,7 @@ class LlmPropertiesTest {
 
     @Test
     void resolvedProvider_unparseableValue_fallsBackToAnthropic() {
-        LlmProperties broken = new LlmProperties("not-a-provider", "claude-3-5-sonnet-20240620", null, null, null, null);
+        LlmProperties broken = new LlmProperties("not-a-provider", "claude-3-5-sonnet-20240620", null, null, null, null, null);
         assertThat(broken.resolvedProvider()).isEqualTo(LlmProvider.ANTHROPIC);
     }
 

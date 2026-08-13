@@ -117,24 +117,37 @@ public class AgentPromptRunner {
      * row for the async worker).
      */
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt) {
-        return run(tenantId, executionId, agentSlug, prompt, null, null, null);
+        return run(tenantId, executionId, agentSlug, prompt, null, null, null, null);
+    }
+
+    /** Same as the 8-arg overload, with no per-execution token budget override (uses the tenant's/server's default). */
+    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
+                                                      String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters) {
+        return run(tenantId, executionId, agentSlug, prompt, repositoryUrl, repositoryBranch, inputParameters, null);
     }
 
     /**
-     * repositoryUrl/repositoryBranch/inputParameters are all optional and
-     * additive -- see TriggerAgentExecutionRequest's javadoc. An
-     * AgentDefinition with no inputSourceType (general-assistant,
-     * ticket-resolver today) ignores them entirely: assemblePrompt()
-     * reduces to exactly `prompt`, byte-identical to this method's behavior
-     * before any of these parameters existed. repositoryBranch is only
-     * meaningful alongside a non-blank repositoryUrl -- see assemblePrompt().
+     * repositoryUrl/repositoryBranch/inputParameters/maxTokensOverride are
+     * all optional and additive -- see TriggerAgentExecutionRequest's
+     * javadoc. An AgentDefinition with no inputSourceType (general-assistant,
+     * ticket-resolver today) ignores repositoryUrl/repositoryBranch/
+     * inputParameters entirely: assemblePrompt() reduces to exactly
+     * `prompt`, byte-identical to this method's behavior before any of
+     * these parameters existed. repositoryBranch is only meaningful
+     * alongside a non-blank repositoryUrl -- see assemblePrompt().
+     * maxTokensOverride, when null, falls back to this tenant's own default
+     * (TenantLlmProviderResolver.resolveMaxTokens()) -- the same
+     * "execution overrides tenant overrides server" layering repositoryUrl/
+     * modelName already use elsewhere in this class.
      */
     public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, String executionId, String agentSlug, String prompt,
-                                                      String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters) {
+                                                      String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters,
+                                                      Integer maxTokensOverride) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, provider);
         String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
+        Integer maxTokens = maxTokensOverride != null ? maxTokensOverride : tenantLlmProviderResolver.resolveMaxTokens(tenantId);
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
         String assembledPrompt = assemblePrompt(repositoryUrl, repositoryBranch, resolvedInput, prompt);
 
@@ -142,7 +155,8 @@ public class AgentPromptRunner {
         try {
             List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver);
             SharedExecutionContext context = sharedExecutionContextFactory.create(
-                    tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(), llmProperties.baseUrl(provider));
+                    tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(),
+                    llmProperties.baseUrl(provider), maxTokens);
 
             return context.chat(assembledPrompt);
         } finally {

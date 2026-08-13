@@ -48,8 +48,8 @@ class AgentJobWorkerTest {
         worker.pollAndProcessOne();
 
         verifyNoInteractions(agentPromptRunner);
-        verify(executionService, never()).complete(any(), any(), anyBoolean());
-        verify(executionService, never()).fail(any(), any());
+        verify(executionService, never()).complete(any(), any(), anyBoolean(), any(), any(), any());
+        verify(executionService, never()).fail(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -78,7 +78,7 @@ class AgentJobWorkerTest {
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
 
-        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("coding-agent"), eq("list files"), eq(null), any(), eq(Map.of())))
+        when(agentPromptRunner.run(eq(tenantId), eq(executionId.toString()), eq("coding-agent"), eq("list files"), eq(null), any(), eq(Map.of()), any()))
                 .thenAnswer(invocation -> {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
@@ -88,8 +88,8 @@ class AgentJobWorkerTest {
 
         worker.pollAndProcessOne();
 
-        verify(executionService).complete(executionId, "here are the files", true);
-        verify(executionService, never()).fail(any(), any());
+        verify(executionService).complete(executionId, "here are the files", true, null, null, null);
+        verify(executionService, never()).fail(any(), any(), any(), any(), any());
         assertThat(TenantContext.get()).isNull();
     }
 
@@ -107,14 +107,14 @@ class AgentJobWorkerTest {
         job.setPrompt("fix the bug");
         job.setAgentType("ticket-resolver");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any())).thenReturn(
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(
                 new ToolCallingChatEngine.ToolChatResult("Let me check if there's a", true, true,
                         "Agent used all 14 allowed tool-call rounds without finishing."));
 
         worker.pollAndProcessOne();
 
-        verify(executionService).fail(executionId, "Agent used all 14 allowed tool-call rounds without finishing.");
-        verify(executionService, never()).complete(any(), any(), anyBoolean());
+        verify(executionService).fail(executionId, "Agent used all 14 allowed tool-call rounds without finishing.", null, null, null);
+        verify(executionService, never()).complete(any(), any(), anyBoolean(), any(), any(), any());
     }
 
     @Test
@@ -133,13 +133,13 @@ class AgentJobWorkerTest {
         job.setPrompt("fix the bug");
         job.setAgentType("ticket-resolver");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("", true, false, null));
 
         worker.pollAndProcessOne();
 
-        verify(executionService).fail(eq(executionId), contains("tool-call trace"));
-        verify(executionService, never()).complete(any(), any(), anyBoolean());
+        verify(executionService).fail(eq(executionId), contains("tool-call trace"), any(), any(), any());
+        verify(executionService, never()).complete(any(), any(), anyBoolean(), any(), any(), any());
     }
 
     @Test
@@ -156,13 +156,13 @@ class AgentJobWorkerTest {
         job.setPrompt("say nothing");
         job.setAgentType("general-assistant");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("", false, false, null));
 
         worker.pollAndProcessOne();
 
-        verify(executionService).complete(executionId, "", false);
-        verify(executionService, never()).fail(any(), any());
+        verify(executionService).complete(executionId, "", false, null, null, null);
+        verify(executionService, never()).fail(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -175,13 +175,13 @@ class AgentJobWorkerTest {
         job.setPrompt("do something");
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
 
         worker.pollAndProcessOne(); // must not throw out of the scheduled method
 
         verify(executionService).fail(executionId, "Anthropic API call failed: timeout");
-        verify(executionService, never()).complete(any(), any(), anyBoolean());
+        verify(executionService, never()).complete(any(), any(), anyBoolean(), any(), any(), any());
         assertThat(TenantContext.get()).isNull();
     }
 }

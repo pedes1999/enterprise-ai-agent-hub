@@ -1,9 +1,15 @@
 import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription, switchMap, takeWhile, timer } from 'rxjs';
 import { AgentService } from '../../core/services/agent.service';
-import { AgentExecutionStatusResponse, AgentDefinitionDetail, ExecutionUsage } from '../../core/models/agent.model';
+import {
+  AgentExecutionStatusResponse,
+  AgentDefinitionDetail,
+  AgentTokenUsageStats,
+  ExecutionUsage,
+} from '../../core/models/agent.model';
 
 export const POLL_INTERVAL_MS = 2000;
 
@@ -21,7 +27,7 @@ type TriggerErrorKind = 'rate-limit' | 'required-inputs' | 'generic' | null;
 
 @Component({
   selector: 'app-trigger',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, DecimalPipe],
   templateUrl: './trigger.html',
   styleUrl: './trigger.css',
 })
@@ -35,6 +41,7 @@ export class Trigger implements OnInit, OnDestroy {
   readonly definitionLoading = signal(true);
   readonly definitionError = signal<string | null>(null);
   readonly usage = signal<ExecutionUsage | null>(null);
+  readonly tokenUsageStats = signal<AgentTokenUsageStats | null>(null);
 
   /** One form field per entry in this agent's own requiredInputs (from the DB) -- never a fixed set shown for every agent regardless of relevance. */
   readonly fields = computed(() =>
@@ -46,6 +53,9 @@ export class Trigger implements OnInit, OnDestroy {
 
   fieldValues: Record<string, string> = {};
   branchValue = '';
+  /** '' means "use this tenant's default token budget" -- same shape as branchValue's '' -> null. */
+  maxTokensValue = '';
+  readonly maxTokensError = signal<string | null>(null);
 
   readonly submitting = signal(false);
   readonly errorKind = signal<TriggerErrorKind>(null);
@@ -69,6 +79,12 @@ export class Trigger implements OnInit, OnDestroy {
       },
     });
     this.refreshUsage();
+    // Best-effort -- a fresh agent with no runs yet, or the request simply
+    // failing, should never block the trigger form itself from working.
+    this.agentService.getTokenUsageStats(this.slug).subscribe({
+      next: (stats) => this.tokenUsageStats.set(stats),
+      error: () => {},
+    });
   }
 
   ngOnDestroy(): void {
@@ -80,6 +96,13 @@ export class Trigger implements OnInit, OnDestroy {
   }
 
   submit(): void {
+    this.maxTokensError.set(null);
+    const maxTokensText = this.maxTokensValue.trim();
+    if (maxTokensText && (!/^\d+$/.test(maxTokensText) || Number(maxTokensText) <= 0)) {
+      this.maxTokensError.set('Max tokens must be a positive whole number.');
+      return;
+    }
+
     this.submitting.set(true);
     this.errorKind.set(null);
     this.errorMessage.set(null);
@@ -102,6 +125,7 @@ export class Trigger implements OnInit, OnDestroy {
         repositoryUrl: this.fieldValues['repositoryUrl'] || null,
         repositoryBranch: this.branchValue || null,
         inputParameters: Object.keys(inputParameters).length > 0 ? inputParameters : null,
+        maxTokens: maxTokensText ? Number(maxTokensText) : null,
       })
       .subscribe({
         next: (accepted) => {

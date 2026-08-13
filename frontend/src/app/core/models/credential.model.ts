@@ -41,6 +41,10 @@ export interface LlmProviderAvailability {
 export interface TenantSettings {
   preferredLlmProvider: string | null;
   preferredModelName: string | null;
+  /** Null means "no override -- use the server-wide default token budget per agent execution". */
+  maxTokensPerExecution: number | null;
+  /** Never null -- whatever maxTokensPerExecution actually resolves to (this override, or the server default). */
+  effectiveMaxTokensPerExecution: number;
   availableProviders: LlmProviderAvailability[];
 }
 

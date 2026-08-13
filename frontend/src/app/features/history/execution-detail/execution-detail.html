@@ -19,6 +19,14 @@
         <dd class="mono">{{ exec.llmProvider }}</dd>
         <dt>Repository URL</dt>
         <dd class="mono">{{ exec.repositoryUrl ?? '—' }}</dd>
+        <dt>Token usage</dt>
+        <dd class="mono">
+          @if (exec.totalTokens != null) {
+            {{ exec.totalTokens }} total ({{ exec.inputTokens }} in / {{ exec.outputTokens }} out)
+          } @else {
+            —
+          }
+        </dd>
         <dt>Created</dt>
         <dd>{{ exec.createdAt | localDateTime }}</dd>
         <dt>Started</dt>

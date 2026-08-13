@@ -4,6 +4,7 @@ import com.enterprisehub.dto.AgentDefinitionDetail;
 import com.enterprisehub.dto.AgentDefinitionSummary;
 import com.enterprisehub.dto.AgentExecutionAccepted;
 import com.enterprisehub.dto.AgentExecutionStatusResponse;
+import com.enterprisehub.dto.AgentTokenUsageStats;
 import com.enterprisehub.dto.ExecutionUsage;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.dto.TriggerAgentExecutionRequest;
@@ -61,7 +62,7 @@ public class AgentExecutionController {
                 ? AgentPromptRunner.DEFAULT_AGENT_SLUG : request.agentSlug();
         AgentExecution execution = executionService.enqueue(
                 UUID.fromString(principal.tenantId()), request.prompt(), agentSlug, request.repositoryUrl(),
-                request.repositoryBranch(), request.inputParameters());
+                request.repositoryBranch(), request.inputParameters(), request.maxTokens());
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new AgentExecutionAccepted(execution.getId(), execution.getStatus()));
     }
@@ -77,6 +78,19 @@ public class AgentExecutionController {
     @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
     public ResponseEntity<ExecutionUsage> getUsage(@AuthenticationPrincipal PlatformPrincipal principal) {
         return ResponseEntity.ok(executionService.getUsage(UUID.fromString(principal.tenantId())));
+    }
+
+    /**
+     * "Past runs of this agent used ~X-Y tokens" -- a concrete reference
+     * point for the trigger form's maxTokens override field, instead of a
+     * blind guess. A literal path segment ahead of {id} for the same
+     * routing-specificity reason getUsage() above already documents.
+     */
+    @GetMapping("/executions/token-usage-stats")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<AgentTokenUsageStats> getTokenUsageStats(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                                      @RequestParam String agentSlug) {
+        return ResponseEntity.ok(executionService.getTokenUsageStats(UUID.fromString(principal.tenantId()), agentSlug));
     }
 
     @GetMapping("/executions/{id}")
@@ -133,6 +147,8 @@ public class AgentExecutionController {
                 execution.getId(), execution.getStatus(), execution.getLlmProvider(), execution.getAgentType(), execution.getPrompt(),
                 execution.getRepositoryUrl(), execution.getRepositoryBranch(), executionService.deserializeInputParameters(execution),
                 execution.getReply(), execution.getToolWasUsed(), execution.getErrorMessage(),
-                execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt());
+                execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt(),
+                execution.getInputTokens(), execution.getOutputTokens(), execution.getTotalTokens(),
+                execution.getMaxTokensOverride());
     }
 }

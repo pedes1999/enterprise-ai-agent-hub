@@ -75,9 +75,11 @@ public class AgentJobWorker {
         try {
             ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
                     job.getTenantId(), job.getId().toString(), job.getAgentType(), job.getPrompt(),
-                    job.getRepositoryUrl(), job.getRepositoryBranch(), executionService.deserializeInputParameters(job));
+                    job.getRepositoryUrl(), job.getRepositoryBranch(), executionService.deserializeInputParameters(job),
+                    job.getMaxTokensOverride());
             if (result.incomplete()) {
-                executionService.fail(job.getId(), result.incompleteReason());
+                executionService.fail(job.getId(), result.incompleteReason(),
+                        result.inputTokens(), result.outputTokens(), result.totalTokens());
             } else if (result.toolWasUsed() && (result.reply() == null || result.reply().isBlank())) {
                 // A genuine final answer (incomplete==false) that is still blank
                 // despite having used tools is its own kind of failure -- most
@@ -88,9 +90,11 @@ public class AgentJobWorker {
                 // but nothing previously made the execution itself reflect that;
                 // it silently reported SUCCEEDED with nothing to show for it.
                 executionService.fail(job.getId(),
-                        "Agent used tools but produced no final summary -- check the tool-call trace for repeated failures.");
+                        "Agent used tools but produced no final summary -- check the tool-call trace for repeated failures.",
+                        result.inputTokens(), result.outputTokens(), result.totalTokens());
             } else {
-                executionService.complete(job.getId(), result.reply(), result.toolWasUsed());
+                executionService.complete(job.getId(), result.reply(), result.toolWasUsed(),
+                        result.inputTokens(), result.outputTokens(), result.totalTokens());
             }
         } catch (RuntimeException e) {
             log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);

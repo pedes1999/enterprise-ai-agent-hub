@@ -64,7 +64,7 @@ class AgentPromptRunnerTest {
         vendorCredentialService = mock(VendorCredentialService.class);
         sharedExecutionContextFactory = mock(SharedExecutionContextFactory.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");
@@ -140,7 +140,7 @@ class AgentPromptRunnerTest {
      */
     private void stubContextFactory(String executionId) {
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(executionId), eq(LlmProvider.ANTHROPIC),
-                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any()))
+                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
@@ -170,7 +170,7 @@ class AgentPromptRunnerTest {
         when(vendorCredentialRepository.findByTenantIdAndProvider(tenantId, "LOCAL")).thenReturn(Optional.of(localCredential));
         when(vendorCredentialService.decryptToken(localCredential)).thenReturn("not-needed");
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-local"), eq(LlmProvider.LOCAL),
-                eq("not-needed"), eq((String) null), any(), any(), eq((String) null)))
+                eq("not-needed"), eq((String) null), any(), any(), eq((String) null), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);

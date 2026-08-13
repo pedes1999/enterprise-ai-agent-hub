@@ -9,6 +9,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -61,6 +62,38 @@ class ToolCallingChatEngineTest {
         assertThat(result.incomplete()).isFalse();
         assertThat(result.incompleteReason()).isNull();
         verify(model, times(1)).generate(anyList(), anyList());
+    }
+
+    @Test
+    void chat_modelAnswersDirectly_noUsageDataOnResponse_reportsNullNotZero() {
+        // Response.from(AiMessage) with no TokenUsage arg -- the shape a mock
+        // (or a provider that just doesn't report usage) returns. Must stay
+        // null, not silently become 0, which would read as "this was free".
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from("Just an answer")));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("Hi");
+
+        assertThat(result.inputTokens()).isNull();
+        assertThat(result.outputTokens()).isNull();
+        assertThat(result.totalTokens()).isNull();
+    }
+
+    @Test
+    void chat_multiRoundToolCall_sumsTokenUsageAcrossEveryModelCall() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("echo").arguments("{\"message\":\"hello\"}").build();
+
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(request)), new TokenUsage(100, 20, 120)))
+                .thenReturn(Response.from(AiMessage.from("Final answer using tool result"), new TokenUsage(150, 30, 180)));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("Echo 'hello'");
+
+        assertThat(result.inputTokens()).isEqualTo(250);
+        assertThat(result.outputTokens()).isEqualTo(50);
+        assertThat(result.totalTokens()).isEqualTo(300);
     }
 
     @Test
@@ -426,6 +459,63 @@ class ToolCallingChatEngineTest {
         ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
 
         assertThat(result.reply()).isEqualTo("forced final answer");
+    }
+
+    @Test
+    void chat_tokenBudgetExceeded_stopsBeforeNextRoundAndForcesTextAnswer() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest infiniteRequest = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"again\"}").build();
+
+        // Every round costs 1000 tokens -- with a 2000 budget, round 3 must
+        // never happen: round 1 lands at 1000 (under), round 2 at 2000
+        // (meets the budget), and the check ahead of round 3 is what stops
+        // it, not MAX_TOOL_ROUNDS (100, nowhere close).
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(infiniteRequest)), new TokenUsage(900, 100, 1000)));
+        when(model.generate(anyList(), eq(List.of())))
+                .thenReturn(Response.from(AiMessage.from("forced final answer"), new TokenUsage(50, 10, 60)));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, 2000);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
+
+        // Exactly 2 tool-offering rounds (2000 tokens) plus 1 forced final call.
+        verify(model, times(2)).generate(anyList(), argThat((List<ToolSpecification> specs) -> !specs.isEmpty()));
+        verify(model, times(1)).generate(anyList(), eq(List.of()));
+        assertThat(result.incomplete()).isTrue();
+        assertThat(result.incompleteReason()).contains("token budget").contains("2000");
+        assertThat(result.totalTokens()).isEqualTo(2060);
+    }
+
+    @Test
+    void chat_noBudgetConfigured_ignoresTokenUsageEntirely_onlyRoundCapApplies() {
+        // maxTokensBudget null (the pre-budget constructor) must behave
+        // byte-identical to before this feature existed -- huge per-round
+        // usage should never trigger an early stop on its own.
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest infiniteRequest = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"again\"}").build();
+        when(model.generate(anyList(), anyList()))
+                .thenReturn(Response.from(AiMessage.from(List.of(infiniteRequest)), new TokenUsage(900_000, 100_000, 1_000_000)));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
+
+        verify(model, times(ToolCallingChatEngine.MAX_TOOL_ROUNDS + 1)).generate(anyList(), anyList());
+        assertThat(result.incompleteReason()).contains(String.valueOf(ToolCallingChatEngine.MAX_TOOL_ROUNDS));
+    }
+
+    @Test
+    void chat_budgetSetButProviderNeverReportsUsage_neverTriggers_roundCapStillCatchesIt() {
+        // totalUsage stays null forever when nothing reports usage -- budgetExceeded()
+        // can't fire on a null total, so MAX_TOOL_ROUNDS is the only backstop left.
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        ToolExecutionRequest infiniteRequest = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"again\"}").build();
+        when(model.generate(anyList(), anyList())).thenReturn(Response.from(AiMessage.from(List.of(infiniteRequest))));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, 100);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
+
+        verify(model, times(ToolCallingChatEngine.MAX_TOOL_ROUNDS + 1)).generate(anyList(), anyList());
+        assertThat(result.incompleteReason()).contains(String.valueOf(ToolCallingChatEngine.MAX_TOOL_ROUNDS));
     }
 
     @Test

@@ -33,11 +33,17 @@ public class SharedExecutionContext {
 
     /** systemPrompt: see ToolCallingChatEngine's javadoc -- an AgentDefinition's persona/instructions, nullable. */
     public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools, String systemPrompt) {
+        this(tenantId, executionId, chatModel, tools, systemPrompt, null);
+    }
+
+    /** maxTokensBudget: see ToolCallingChatEngine's javadoc -- null means "no budget, rely on MAX_TOOL_ROUNDS alone". */
+    public SharedExecutionContext(String tenantId, String executionId, ChatLanguageModel chatModel, List<AgentTool> tools,
+                                   String systemPrompt, Integer maxTokensBudget) {
         this.tenantId = tenantId;
         this.executionId = executionId;
         this.chatModel = chatModel;
         this.tools = List.copyOf(tools);
-        this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId), systemPrompt);
+        this.chatEngine = new ToolCallingChatEngine(chatModel, this.tools, new ToolExecutionContext(tenantId, executionId), systemPrompt, maxTokensBudget);
     }
 
     public String tenantId() {

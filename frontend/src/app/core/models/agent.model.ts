@@ -21,6 +21,8 @@ export interface TriggerAgentExecutionRequest {
   repositoryUrl: string | null;
   repositoryBranch: string | null;
   inputParameters: Record<string, string> | null;
+  /** Null means "use this tenant's default token budget". Must be positive when given. */
+  maxTokens: number | null;
 }
 
 export interface AgentExecutionAccepted {
@@ -45,6 +47,12 @@ export interface AgentExecutionStatusResponse {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /** Optional -- absent on responses recorded before token tracking existed, or when the provider reported no usage data. Null and "not present" both mean "unknown", never "zero tokens spent". */
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  /** Null means this run used the tenant's (or server's) default budget instead of its own override. */
+  maxTokensOverride?: number | null;
 }
 
 export interface ToolExecutionRecord {
@@ -58,6 +66,15 @@ export interface ToolExecutionRecord {
 export interface ExecutionUsage {
   active: number;
   limit: number;
+}
+
+/** sampleCount is how many past executions of this agent recorded usage -- 0 means minTokens/avgTokens/maxTokens are all null (no data yet), not zero. */
+export interface AgentTokenUsageStats {
+  agentSlug: string;
+  sampleCount: number;
+  minTokens: number | null;
+  avgTokens: number | null;
+  maxTokens: number | null;
 }
 
 /** Mirrors Spring's PagedModel<T> JSON shape -- {content, page: {size, number, totalElements, totalPages}}. */

@@ -51,7 +51,7 @@ class AgentPingServiceTest {
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
         chatLanguageModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000);
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");
         when(agentPromptRunner.modelName(tenantId)).thenReturn("claude-3-5-sonnet-20240620");

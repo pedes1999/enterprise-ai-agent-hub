@@ -7,6 +7,7 @@ import {
   AgentDefinitionSummary,
   AgentExecutionAccepted,
   AgentExecutionStatusResponse,
+  AgentTokenUsageStats,
   ExecutionUsage,
   PagedModel,
   ToolExecutionRecord,
@@ -51,5 +52,11 @@ export class AgentService {
 
   getUsage(): Observable<ExecutionUsage> {
     return this.http.get<ExecutionUsage>(`${environment.apiBaseUrl}/agents/executions/usage`);
+  }
+
+  getTokenUsageStats(agentSlug: string): Observable<AgentTokenUsageStats> {
+    return this.http.get<AgentTokenUsageStats>(`${environment.apiBaseUrl}/agents/executions/token-usage-stats`, {
+      params: new HttpParams().set('agentSlug', agentSlug),
+    });
   }
 }

@@ -55,4 +55,20 @@ public class TenantLlmProviderResolver {
                 .filter(value -> value != null && !value.isBlank())
                 .orElseGet(() -> llmProperties.modelName(provider));
     }
+
+    /**
+     * Same fallback shape as resolveModelName(), but for the per-execution
+     * token budget ToolCallingChatEngine enforces -- a tenant can lower or
+     * raise it from the server-wide app.llm.max-tokens-per-execution default
+     * without touching config. AgentPromptRunner layers one more override on
+     * top of THIS (a single trigger request's own maxTokens), so this method
+     * is "the tenant's default", not necessarily what a given execution
+     * actually used.
+     */
+    public Integer resolveMaxTokens(UUID tenantId) {
+        return tenantRepository.findById(tenantId)
+                .map(Tenant::getMaxTokensPerExecution)
+                .filter(value -> value != null)
+                .orElseGet(llmProperties::maxTokensPerExecution);
+    }
 }

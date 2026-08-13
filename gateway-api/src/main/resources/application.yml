@@ -95,6 +95,13 @@ app:
     # Only read when provider=LOCAL. Defaults to Ollama's standard address
     # if left unset -- see LlmEngineFactory.
     local-base-url: ${LLM_LOCAL_BASE_URL:http://localhost:11434/v1}
+    # Server-wide fallback token budget per execution -- ToolCallingChatEngine
+    # forces a final answer once a run's cumulative TokenUsage crosses this,
+    # same idea as MAX_TOOL_ROUNDS but priced in tokens instead of rounds. A
+    # tenant can override it (TenantSettingsService), and a single trigger
+    # request can override THAT (TriggerAgentExecutionRequest.maxTokens) --
+    # see TenantLlmProviderResolver.resolveMaxTokens().
+    max-tokens-per-execution: ${MAX_TOKENS_PER_EXECUTION:500000}
   sandbox:
     # Points at agent-runtime/sidecar (see its README) -- must be running
     # separately (node --env-file=.env server.js, or the Dockerfile) for

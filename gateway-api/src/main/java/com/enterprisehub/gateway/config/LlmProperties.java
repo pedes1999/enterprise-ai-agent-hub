@@ -18,10 +18,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * whole-instance dev/ops default, same shape as app.job-worker.enabled --
  * see TenantLlmProviderResolver/TenantSettingsService for the per-tenant
  * override that sits on top of this default.
+ *
+ * maxTokensPerExecution is the server-wide fallback ToolCallingChatEngine
+ * budget-caps a run at once its round-by-round TokenUsage exceeds it --
+ * same "whole-instance default, tenant can override, execution can
+ * override that" layering as the model/provider fields above, see
+ * TenantLlmProviderResolver.resolveMaxTokens().
  */
 @ConfigurationProperties(prefix = "app.llm")
 public record LlmProperties(String provider, String anthropicModelName, String openaiModelName, String geminiModelName,
-                             String localModelName, String localBaseUrl) {
+                             String localModelName, String localBaseUrl, Integer maxTokensPerExecution) {
 
     public LlmProvider resolvedProvider() {
         return LlmProvider.parse(provider).orElse(LlmProvider.ANTHROPIC);

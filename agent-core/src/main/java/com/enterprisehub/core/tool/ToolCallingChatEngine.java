@@ -13,6 +13,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.output.TokenUsage;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -69,6 +70,7 @@ public class ToolCallingChatEngine {
     private final List<ToolSpecification> toolSpecifications;
     private final ToolExecutionContext executionContext;
     private final String systemPrompt;
+    private final Integer maxTokensBudget;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
@@ -83,12 +85,25 @@ public class ToolCallingChatEngine {
      * this existed.
      */
     public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext, String systemPrompt) {
+        this(chatModel, tools, executionContext, systemPrompt, null);
+    }
+
+    /**
+     * maxTokensBudget is a second, cost-priced stop condition alongside
+     * MAX_TOOL_ROUNDS -- see budgetExceeded()'s javadoc for why both exist
+     * rather than one replacing the other. Null means "no budget, rely on
+     * MAX_TOOL_ROUNDS alone" -- e.g. every pre-budget caller/test, and any
+     * caller whose tenant/server config genuinely has no limit configured.
+     */
+    public ToolCallingChatEngine(ChatLanguageModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
+                                  String systemPrompt, Integer maxTokensBudget) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
         this.toolSpecifications = tools.stream().map(ToolCallingChatEngine::toSpecification).toList();
         this.executionContext = executionContext;
         this.systemPrompt = systemPrompt;
+        this.maxTokensBudget = maxTokensBudget;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
@@ -99,9 +114,20 @@ public class ToolCallingChatEngine {
         }
         messages.add(new UserMessage(userMessage));
         boolean toolWasUsed = false;
+        // Null until the first response that actually carries usage data --
+        // some providers/mocks return none at all, and that's "unknown", not
+        // "zero tokens spent" (see ToolChatResult's fields).
+        TokenUsage totalUsage = null;
 
         for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            if (budgetExceeded(totalUsage)) {
+                // Exceeded during a PREVIOUS round -- stop before spending
+                // more on another generate() call, same "force one final
+                // text-only answer" handling as the round-cap path below.
+                break;
+            }
             Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
+            totalUsage = accumulate(totalUsage, response.tokenUsage());
             AiMessage aiMessage = response.content();
 
             if (!aiMessage.hasToolExecutionRequests()) {
@@ -116,7 +142,8 @@ public class ToolCallingChatEngine {
                 String incompleteReason = truncated
                         ? "Model response was truncated (hit the max_tokens limit) before it finished."
                         : null;
-                return new ToolChatResult(aiMessage.text(), toolWasUsed, truncated, incompleteReason);
+                return new ToolChatResult(aiMessage.text(), toolWasUsed, truncated, incompleteReason,
+                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
             }
 
             toolWasUsed = true;
@@ -139,17 +166,60 @@ public class ToolCallingChatEngine {
                 // round-cap path below but a genuine stopping point, so this
                 // is NOT incomplete.
                 Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
-                return new ToolChatResult(finalResponse.content().text(), toolWasUsed, false, null);
+                totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
+                return new ToolChatResult(finalResponse.content().text(), toolWasUsed, false, null,
+                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
             }
         }
 
-        // Round cap hit -- force a text answer instead of letting the model
-        // request yet another round it won't get to use. This is also not a
-        // real stopping point -- the model still wanted to keep going -- so
-        // it's incomplete for the same reason a truncated response is.
+        // Either the round cap was exhausted or the loop above broke early on
+        // an exceeded budget -- both force a text answer instead of letting
+        // the model request yet another round it won't get to use, and both
+        // are "not a real stopping point" the same way a truncated response
+        // is. budgetExceeded() here re-checks the SAME totalUsage the break
+        // (if any) just fired on, so it reliably tells the two apart.
         Response<AiMessage> finalResponse = chatModel.generate(messages, List.of());
-        return new ToolChatResult(finalResponse.content().text(), toolWasUsed, true,
-                "Agent used all " + MAX_TOOL_ROUNDS + " allowed tool-call rounds without finishing.");
+        totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
+        String incompleteReason = budgetExceeded(totalUsage)
+                ? "Agent execution stopped after exceeding its token budget (" + maxTokensBudget + " tokens)."
+                : "Agent used all " + MAX_TOOL_ROUNDS + " allowed tool-call rounds without finishing.";
+        return new ToolChatResult(finalResponse.content().text(), toolWasUsed, true, incompleteReason,
+                inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
+    }
+
+    /** null-safe TokenUsage.add() -- a provider/mock response with no usage data leaves the running total unchanged. */
+    private static TokenUsage accumulate(TokenUsage total, TokenUsage next) {
+        if (next == null) {
+            return total;
+        }
+        return total == null ? next : total.add(next);
+    }
+
+    /**
+     * True once totalUsage's running total has reached maxTokensBudget.
+     * Deliberately a SEPARATE stop condition from MAX_TOOL_ROUNDS, not a
+     * replacement for it: this can only fire once a provider response has
+     * actually reported usage, so a provider/mock that never does (totalUsage
+     * stays null forever) would let a run loop unbounded on budget alone --
+     * MAX_TOOL_ROUNDS is the backstop that still catches that case. A null
+     * maxTokensBudget (no budget configured) always returns false, same
+     * effect as today's round-cap-only behavior.
+     */
+    private boolean budgetExceeded(TokenUsage totalUsage) {
+        return maxTokensBudget != null && totalUsage != null && totalUsage.totalTokenCount() != null
+                && totalUsage.totalTokenCount() >= maxTokensBudget;
+    }
+
+    private static Integer inputTokens(TokenUsage usage) {
+        return usage == null ? null : usage.inputTokenCount();
+    }
+
+    private static Integer outputTokens(TokenUsage usage) {
+        return usage == null ? null : usage.outputTokenCount();
+    }
+
+    private static Integer totalTokens(TokenUsage usage) {
+        return usage == null ? null : usage.totalTokenCount();
     }
 
     private boolean isTerminalSuccess(String toolName, String result) {
@@ -212,7 +282,19 @@ public class ToolCallingChatEngine {
      * a caller (AgentJobWorker) should treat this as a failed execution with
      * incompleteReason as the error, not a successful one with a
      * suspiciously short (or blank) reply and no explanation anywhere.
+     *
+     * inputTokens/outputTokens/totalTokens are summed across every
+     * chatModel.generate() call made during chat() (every round, plus
+     * whichever "final" call ended it) -- null, not zero, when not a single
+     * one of those responses carried usage data, so a caller can tell
+     * "genuinely free" apart from "we don't know".
      */
-    public record ToolChatResult(String reply, boolean toolWasUsed, boolean incomplete, String incompleteReason) {
+    public record ToolChatResult(String reply, boolean toolWasUsed, boolean incomplete, String incompleteReason,
+                                  Integer inputTokens, Integer outputTokens, Integer totalTokens) {
+
+        /** For callers that don't need token usage -- e.g. existing tests predating this field. */
+        public ToolChatResult(String reply, boolean toolWasUsed, boolean incomplete, String incompleteReason) {
+            this(reply, toolWasUsed, incomplete, incompleteReason, null, null, null);
+        }
     }
 }

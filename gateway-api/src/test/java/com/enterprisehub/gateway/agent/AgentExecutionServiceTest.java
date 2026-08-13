@@ -311,6 +311,39 @@ class AgentExecutionServiceTest {
     }
 
     @Test
+    void complete_withTokenUsage_persistsAllThreeCounts() {
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setStatus("RUNNING");
+        when(repository.findById(id)).thenReturn(Optional.of(execution));
+
+        service.complete(id, "here are the files", true, 120, 340, 460);
+
+        assertThat(execution.getInputTokens()).isEqualTo(120);
+        assertThat(execution.getOutputTokens()).isEqualTo(340);
+        assertThat(execution.getTotalTokens()).isEqualTo(460);
+    }
+
+    @Test
+    void complete_3ArgOverload_leavesTokenCountsNull() {
+        // The 3-arg overload is what every pre-token-tracking caller (and
+        // test) still uses -- must NOT silently record "0 tokens spent" for
+        // them, see AgentExecution's javadoc on these columns.
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setStatus("RUNNING");
+        when(repository.findById(id)).thenReturn(Optional.of(execution));
+
+        service.complete(id, "here are the files", true);
+
+        assertThat(execution.getInputTokens()).isNull();
+        assertThat(execution.getOutputTokens()).isNull();
+        assertThat(execution.getTotalTokens()).isNull();
+    }
+
+    @Test
     void complete_unknownId_doesNothing_doesNotThrow() {
         when(repository.findById(any())).thenReturn(Optional.empty());
 
@@ -331,6 +364,23 @@ class AgentExecutionServiceTest {
         assertThat(execution.getStatus()).isEqualTo("FAILED");
         assertThat(execution.getErrorMessage()).isEqualTo("Anthropic API call failed: timeout");
         assertThat(execution.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    void fail_withTokenUsage_persistsAllThreeCounts() {
+        // A run that hit the round cap still spent real money getting there --
+        // this is arguably the more important case to have visibility into.
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setStatus("RUNNING");
+        when(repository.findById(id)).thenReturn(Optional.of(execution));
+
+        service.fail(id, "Agent used all 100 allowed tool-call rounds without finishing.", 5000, 1200, 6200);
+
+        assertThat(execution.getInputTokens()).isEqualTo(5000);
+        assertThat(execution.getOutputTokens()).isEqualTo(1200);
+        assertThat(execution.getTotalTokens()).isEqualTo(6200);
     }
 
     @Test
@@ -450,5 +500,34 @@ class AgentExecutionServiceTest {
         // tenantId itself has nothing active (default 0 stub).
 
         assertThat(service.getUsage(tenantId).active()).isZero();
+    }
+
+    @Test
+    void getTokenUsageStats_mapsAggregateRowIntoTypedStats() {
+        when(repository.tokenUsageStatsRaw(tenantId, "coding-agent"))
+                .thenReturn(new Object[]{8L, 15_000, 27_500.5, 42_000});
+
+        var stats = service.getTokenUsageStats(tenantId, "coding-agent");
+
+        assertThat(stats.agentSlug()).isEqualTo("coding-agent");
+        assertThat(stats.sampleCount()).isEqualTo(8L);
+        assertThat(stats.minTokens()).isEqualTo(15_000);
+        assertThat(stats.avgTokens()).isEqualTo(27_500.5);
+        assertThat(stats.maxTokens()).isEqualTo(42_000);
+    }
+
+    @Test
+    void getTokenUsageStats_noPastExecutionsWithUsage_zeroCountAndNullAggregates() {
+        // SQL aggregates over zero matching rows -- count=0, everything else
+        // null -- not an empty result the repository call has to special-case.
+        when(repository.tokenUsageStatsRaw(tenantId, "brand-new-agent"))
+                .thenReturn(new Object[]{0L, null, null, null});
+
+        var stats = service.getTokenUsageStats(tenantId, "brand-new-agent");
+
+        assertThat(stats.sampleCount()).isZero();
+        assertThat(stats.minTokens()).isNull();
+        assertThat(stats.avgTokens()).isNull();
+        assertThat(stats.maxTokens()).isNull();
     }
 }

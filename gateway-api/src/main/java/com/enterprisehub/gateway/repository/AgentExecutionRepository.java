@@ -41,4 +41,17 @@ public interface AgentExecutionRepository extends JpaRepository<AgentExecution, 
     @Query(value = "SELECT * FROM agent_executions WHERE status = 'QUEUED' "
             + "ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED", nativeQuery = true)
     Optional<AgentExecution> claimNextQueued();
+
+    /**
+     * Backs GET /agents/executions/token-usage-stats -- count/min/avg/max
+     * over this tenant's past executions of one agent that actually
+     * recorded token usage (see AgentExecution.totalTokens' javadoc).
+     * Always returns exactly one row, even when zero rows match: SQL
+     * aggregates over an empty set yield count=0 and null for the rest,
+     * never no row at all -- AgentExecutionService.getTokenUsageStats()
+     * relies on that to represent "no data yet" instead of an empty Optional.
+     */
+    @Query("select count(e), min(e.totalTokens), avg(e.totalTokens), max(e.totalTokens) "
+            + "from AgentExecution e where e.tenantId = :tenantId and e.agentType = :agentSlug and e.totalTokens is not null")
+    Object[] tokenUsageStatsRaw(UUID tenantId, String agentSlug);
 }

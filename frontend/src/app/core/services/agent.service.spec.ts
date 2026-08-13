@@ -39,6 +39,7 @@ describe('AgentService', () => {
       repositoryUrl: 'https://github.com/acme/repo',
       repositoryBranch: 'main',
       inputParameters: { branch: 'main' },
+      maxTokens: null,
     };
     service.execute(request).subscribe();
     const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/execute`);

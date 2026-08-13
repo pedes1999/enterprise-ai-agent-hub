@@ -46,6 +46,12 @@ label {
   opacity: 0.75;
 }
 
+.hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+}
+
 input,
 textarea {
   padding: var(--space-2);

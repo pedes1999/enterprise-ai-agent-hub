@@ -23,7 +23,7 @@ class TenantLlmProviderResolverTest {
     @BeforeEach
     void setUp() {
         tenantRepository = mock(TenantRepository.class);
-        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null);
+        LlmProperties llmProperties = new LlmProperties("ANTHROPIC", "claude-3-5-sonnet-20240620", null, null, null, null, 500_000);
         resolver = new TenantLlmProviderResolver(tenantRepository, llmProperties);
     }
 
@@ -102,5 +102,28 @@ class TenantLlmProviderResolverTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
 
         assertThat(resolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).isEqualTo("claude-3-5-sonnet-20240620");
+    }
+
+    @Test
+    void resolveMaxTokens_tenantHasNoOverride_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenantWithPreference(null)));
+
+        assertThat(resolver.resolveMaxTokens(tenantId)).isEqualTo(500_000);
+    }
+
+    @Test
+    void resolveMaxTokens_tenantHasOverride_returnsItInsteadOfServerDefault() {
+        Tenant tenant = tenantWithPreference(null);
+        tenant.setMaxTokensPerExecution(50_000);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        assertThat(resolver.resolveMaxTokens(tenantId)).isEqualTo(50_000);
+    }
+
+    @Test
+    void resolveMaxTokens_unknownTenant_fallsBackToServerDefault() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+
+        assertThat(resolver.resolveMaxTokens(tenantId)).isEqualTo(500_000);
     }
 }

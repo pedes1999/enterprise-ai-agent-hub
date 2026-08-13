@@ -12,6 +12,17 @@ import java.util.UUID;
  * supplied on the original TriggerAgentExecutionRequest --
  * repositoryBranch is null both when no branch was given (default branch
  * used) and whenever repositoryUrl itself is null.
+ *
+ * inputTokens/outputTokens/totalTokens are null until status is SUCCEEDED
+ * or FAILED (an execution that never reached the model, or whose provider
+ * response carried no usage data, reports null here too) -- see
+ * ToolCallingChatEngine.ToolChatResult's javadoc for why null and 0 mean
+ * different things.
+ *
+ * maxTokensOverride mirrors whatever was supplied on the original
+ * TriggerAgentExecutionRequest.maxTokens -- null means this run used the
+ * tenant's (or server's) default budget instead of its own override, same
+ * shape as repositoryBranch above.
  */
 public record AgentExecutionStatusResponse(
         UUID id,
@@ -27,6 +38,10 @@ public record AgentExecutionStatusResponse(
         String errorMessage,
         Instant createdAt,
         Instant startedAt,
-        Instant completedAt
+        Instant completedAt,
+        Integer inputTokens,
+        Integer outputTokens,
+        Integer totalTokens,
+        Integer maxTokensOverride
 ) {
 }

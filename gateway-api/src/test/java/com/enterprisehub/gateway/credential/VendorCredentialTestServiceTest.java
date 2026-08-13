@@ -39,7 +39,7 @@ class VendorCredentialTestServiceTest {
         llmEngineFactory = mock(LlmEngineFactory.class);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         chatModel = mock(ChatLanguageModel.class);
-        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", "gpt-4o-mini", "gemini-1.5-flash", null, null);
+        LlmProperties properties = new LlmProperties("ANTHROPIC", "claude-sonnet-4-5-20250929", "gpt-4o-mini", "gemini-1.5-flash", null, null, 500_000);
         service = new VendorCredentialTestService(repository, vendorCredentialService, llmEngineFactory, properties, tenantLlmProviderResolver);
         // Default stub: no tenant override, resolveModelName falls back to
         // whatever the server default would have been -- matches every

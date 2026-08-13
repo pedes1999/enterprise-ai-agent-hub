@@ -55,6 +55,10 @@ public class AgentExecution {
     @Column(name = "repository_branch")
     private String repositoryBranch;
 
+    /** Optional per-execution override of the token budget -- null means "use the tenant's default, or the server's if the tenant has none", see V21 and AgentPromptRunner. */
+    @Column(name = "max_tokens_override")
+    private Integer maxTokensOverride;
+
     // JSON-serialized Map<String, String> -- see V9's rationale. Null for
     // every execution whose AgentDefinition has no input_source_type.
     @Column(name = "input_parameters", columnDefinition = "TEXT")
@@ -74,6 +78,19 @@ public class AgentExecution {
 
     @Column(name = "tool_was_used")
     private Boolean toolWasUsed;
+
+    // Null means "no usage data available" (pre-V19 row, or every provider
+    // response in this execution omitted TokenUsage), not "zero tokens" --
+    // see ToolCallingChatEngine's accumulation, which preserves that
+    // distinction the same way.
+    @Column(name = "input_tokens")
+    private Integer inputTokens;
+
+    @Column(name = "output_tokens")
+    private Integer outputTokens;
+
+    @Column(name = "total_tokens")
+    private Integer totalTokens;
 
     @Column(name = "started_at")
     private Instant startedAt;

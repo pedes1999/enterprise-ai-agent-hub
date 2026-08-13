@@ -26,6 +26,7 @@
             <th>ID</th>
             <th>Agent</th>
             <th>Status</th>
+            <th>Tokens</th>
             <th>Created</th>
           </tr>
         </thead>
@@ -37,6 +38,7 @@
               <td>
                 <span class="badge" [class]="'status-' + exec.status.toLowerCase()">{{ exec.status }}</span>
               </td>
+              <td class="mono">{{ exec.totalTokens ?? '—' }}</td>
               <td>{{ exec.createdAt | localDateTime }}</td>
             </tr>
           }
