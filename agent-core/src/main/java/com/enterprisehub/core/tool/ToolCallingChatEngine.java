@@ -48,12 +48,21 @@ public class ToolCallingChatEngine {
      * test-fixer's prompt asks for a full-suite re-run after EACH
      * individual fix (read failing test, read source, fix, re-run --
      * repeated per failure, potentially several times on a repo with
-     * multiple genuine failures) -- 30 leaves room for that multi-fix
-     * loop without still being unbounded; a model that never converges
-     * still gets cut off and reported honestly (see the incomplete/
-     * incompleteReason handling below) rather than looping forever.
+     * multiple genuine failures), which raised it to 30. 30 still wasn't
+     * enough live-run against this repo itself (a multi-module Maven
+     * reactor plus an npm frontend) -- both Haiku and Sonnet exhausted all
+     * 30 rounds on stack discovery and full-suite runs without ever
+     * reaching write_file, let alone open_pull_request, on a
+     * single-assertion fix. Raised to 100 to give a genuinely large/slow
+     * monorepo enough headroom to actually finish, alongside tightening
+     * test-fixer's own prompt (see its system_prompt migration) to scope
+     * re-verification to the affected project instead of the whole
+     * reactor+frontend every time -- a model that still never converges
+     * gets cut off and reported honestly either way (see the incomplete/
+     * incompleteReason handling below), this just raises how much genuine
+     * work fits before that happens.
      */
-    static final int MAX_TOOL_ROUNDS = 30;
+    static final int MAX_TOOL_ROUNDS = 100;
 
     private final ChatLanguageModel chatModel;
     private final Map<String, AgentTool> toolsByName;
