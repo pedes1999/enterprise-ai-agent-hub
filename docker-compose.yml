@@ -1,0 +1,93 @@
+# One-machine deployment: postgres + sidecar + gateway-api + frontend.
+# Copy .env.example to .env and fill in real secrets before running for
+# anything beyond local testing -- the defaults below are dev-only
+# placeholders, not safe values for a real deployment.
+#
+#   docker compose up --build -d
+#   docker compose logs -f gateway-api
+#
+# Frontend: http://localhost:4200 -- gateway-api: http://localhost:8080
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      # Host-side 5433 -- avoids clashing with a Postgres already on 5432.
+      # gateway-api talks to this over the compose network at "postgres:5432"
+      # regardless of the host mapping.
+      - "5433:5432"
+
+  sidecar:
+    build:
+      context: ./agent-runtime/sidecar
+    environment:
+      E2B_API_KEY: "${E2B_API_KEY:?set E2B_API_KEY in .env -- see agent-runtime/sidecar/README.md}"
+      PORT: 8090
+    ports:
+      - "8090:8090"
+
+  gateway-api:
+    build:
+      context: .
+      dockerfile: gateway-api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sidecar:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/agent_hub
+      DB_USERNAME: hub_user
+      DB_PASSWORD: password
+      # Must be >= 256 bits (32 bytes) for HS256 -- JwtService rejects anything shorter at startup.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-override-me-must-be-at-least-32-bytes-long}
+      CREDENTIAL_LOCAL_KEY: "${CREDENTIAL_LOCAL_KEY:?generate one -- python3 -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())'}"
+      SANDBOX_SIDECAR_URL: http://sidecar:8090/
+      CORS_ALLOWED_ORIGIN: http://localhost:4200
+      # "localhost" inside this container means the container itself, not
+      # your host machine where Ollama actually runs -- host.docker.internal
+      # is Docker Desktop's DNS name for the host. Only relevant if you use
+      # the LOCAL provider; harmless otherwise (LlmEngineFactory only reads
+      # this for LOCAL).
+      LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
+      # Must match a tag actually pulled in Ollama (`ollama list`) -- Ollama
+      # matches tags exactly, "llama3.1" != "llama3.1:8b". A tenant can still
+      # override this per-tenant via preferredModelName regardless.
+      LLM_LOCAL_MODEL_NAME: ${LLM_LOCAL_MODEL_NAME:-llama3.1:8b}
+      # Optional -- team-invite emails silently have nowhere to go without these.
+      BREVO_SMTP_USERNAME: ${BREVO_SMTP_USERNAME:-}
+      BREVO_SMTP_KEY: ${BREVO_SMTP_KEY:-}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+    # Docker Desktop (Windows/Mac) resolves host.docker.internal automatically;
+    # plain Docker Engine on Linux needs this explicit mapping to do the same.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Must be reachable from the BROWSER, not from inside the compose
+        # network -- see frontend/Dockerfile's comment. Override in .env if
+        # gateway-api is published on a different host/port.
+        API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://localhost:8080}
+    depends_on:
+      - gateway-api
+    ports:
+      - "4200:80"
+
+volumes:
+  pgdata:
