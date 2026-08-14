@@ -3,7 +3,13 @@ package com.enterprisehub.runtime.sandbox;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -91,6 +97,48 @@ class SandboxSessionTest {
         session.endSession();
 
         verify(delegate, times(1)).destroy(handle);
+    }
+
+    /**
+     * ToolCallingChatEngine can now run several tool calls from one round
+     * concurrently (see its javadoc) -- two sandboxed tools could race into
+     * create() at the same instant. Forces that race deliberately: both
+     * threads start blocked on the same latch, delegate.create() itself
+     * sleeps briefly so a broken (unsynchronized) implementation would have
+     * a real window to let both threads see handle == null and both call
+     * delegate.create(). Asserts exactly one real provisioning call
+     * happened and both callers got back the identical handle.
+     */
+    @Test
+    void create_calledConcurrentlyByTwoThreads_onlyProvisionsOnce() throws InterruptedException {
+        SandboxClient delegate = mock(SandboxClient.class);
+        SandboxHandle handle = new SandboxHandle("s1");
+        when(delegate.create(sessionSpec)).thenAnswer(invocation -> {
+            Thread.sleep(50);
+            return handle;
+        });
+        SandboxSession session = new SandboxSession(delegate, sessionSpec);
+
+        CountDownLatch startLatch = new CountDownLatch(1);
+        List<SandboxHandle> results = new CopyOnWriteArrayList<>();
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Runnable callCreate = () -> {
+                try {
+                    startLatch.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                results.add(session.create(sessionSpec));
+            };
+            executor.submit(callCreate);
+            executor.submit(callCreate);
+            startLatch.countDown();
+            executor.shutdown();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+
+        verify(delegate, times(1)).create(sessionSpec);
+        assertThat(results).hasSize(2).containsOnly(handle);
     }
 
     @Test

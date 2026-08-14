@@ -27,9 +27,14 @@ import java.time.Duration;
  * might need up front and builds ONE spec with all of them before any tool
  * runs -- see its javadoc.
  *
- * Not thread-safe across concurrent tool calls (today's ToolCallingChatEngine
- * only ever runs one tool call at a time per execution, so this hasn't
- * needed to be).
+ * Thread-safe for concurrent create() calls: ToolCallingChatEngine can now
+ * run several tool calls from one round in parallel (see its javadoc), so
+ * two sandboxed tools could race into create() at the same instant -- the
+ * synchronized check-then-act below ensures only the first actually
+ * provisions a sandbox and every other caller (concurrent or not) gets the
+ * same cached handle back. runCommand/writeFile/readFile are simple
+ * pass-throughs to delegate, which is expected to handle its own
+ * concurrency (e.g. independent HTTP calls to the sidecar).
  */
 public final class SandboxSession implements SandboxClient {
 
@@ -43,7 +48,7 @@ public final class SandboxSession implements SandboxClient {
     }
 
     @Override
-    public SandboxHandle create(SandboxSpec ignoredPerCallSpec) {
+    public synchronized SandboxHandle create(SandboxSpec ignoredPerCallSpec) {
         if (handle == null) {
             handle = delegate.create(sessionSpec);
         }

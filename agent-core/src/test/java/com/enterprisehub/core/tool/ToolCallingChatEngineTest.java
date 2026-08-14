@@ -430,6 +430,99 @@ class ToolCallingChatEngineTest {
         assertThat(observedArguments.get()).doesNotContainKey("name");
     }
 
+    /**
+     * A single round can carry several independent tool calls (see
+     * executeToolsInOrder()'s javadoc) -- runs them concurrently. Uses one
+     * fast and one deliberately slow tool and asserts total wall-clock time
+     * stays close to the slow tool alone, not their sum, proving the calls
+     * actually overlapped rather than running one after another.
+     */
+    @Test
+    void chat_multipleToolCallsInOneRound_executedConcurrently_notSequentially() {
+        AgentTool slowTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "slow";
+            }
+
+            @Override
+            public String description() {
+                return "sleeps then answers";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return "slow-done";
+            }
+        };
+        AgentTool fastTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "fast";
+            }
+
+            @Override
+            public String description() {
+                return "answers immediately";
+            }
+
+            @Override
+            public Map<String, String> parameterDescriptions() {
+                return Map.of();
+            }
+
+            @Override
+            public String execute(ToolExecutionContext context, Map<String, String> arguments) {
+                return "fast-done";
+            }
+        };
+
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest slowRequest = ToolExecutionRequest.builder().id("1").name("slow").arguments("{}").build();
+        ToolExecutionRequest fastRequest = ToolExecutionRequest.builder().id("2").name("fast").arguments("{}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(slowRequest, fastRequest))))
+                .thenReturn(response(AiMessage.from("both done")));
+
+        long start = System.nanoTime();
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(slowTool, fastTool), CONTEXT).chat("do both");
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertThat(result.reply()).isEqualTo("both done");
+        // Sequential execution would take >= 600ms (300ms slow + 300ms slow
+        // again, since a broken implementation re-blocks on the same sleep
+        // twice were it to run one-at-a-time... in practice here it's
+        // slow+fast run one after another, so >= 300ms). Concurrent
+        // execution should finish close to the single 300ms sleep, not
+        // meaningfully more -- 450ms leaves generous headroom for virtual
+        // thread startup / scheduling jitter while still failing loudly if
+        // the two calls were run sequentially.
+        assertThat(elapsedMs).isLessThan(450);
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(2)).chat(captor.capture());
+        List<ChatMessage> secondCallMessages = captor.getAllValues().get(1).messages();
+        List<ToolExecutionResultMessage> resultMessages = secondCallMessages.stream()
+                .filter(ToolExecutionResultMessage.class::isInstance)
+                .map(ToolExecutionResultMessage.class::cast)
+                .toList();
+        // Results must be fed back in the ORIGINAL request order (slow, then
+        // fast) regardless of which one actually finished first.
+        assertThat(resultMessages).hasSize(2);
+        assertThat(resultMessages.get(0).text()).isEqualTo("slow-done");
+        assertThat(resultMessages.get(1).text()).isEqualTo("fast-done");
+    }
+
     @Test
     void chat_threeRoundsOfToolCalls_allExecuted_finalAnswerAfterThirdRound() {
         ChatModel model = mock(ChatModel.class);

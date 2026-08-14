@@ -21,6 +21,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * A bounded, multi-round tool-calling loop: send the user's message plus
@@ -224,8 +227,11 @@ public class ToolCallingChatEngine {
             toolWasUsed = true;
             messages.add(aiMessage);
             boolean terminalSuccess = false;
-            for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
-                String result = executeTool(request);
+            List<ToolExecutionRequest> requests = aiMessage.toolExecutionRequests();
+            List<String> results = executeToolsInOrder(requests);
+            for (int i = 0; i < requests.size(); i++) {
+                ToolExecutionRequest request = requests.get(i);
+                String result = results.get(i);
                 messages.add(ToolExecutionResultMessage.from(request, result));
                 if (isTerminalSuccess(request.name(), result)) {
                     terminalSuccess = true;
@@ -419,6 +425,55 @@ public class ToolCallingChatEngine {
     private boolean isTerminalSuccess(String toolName, String result) {
         AgentTool tool = toolsByName.get(toolName);
         return tool != null && tool.isTerminalSuccess(result);
+    }
+
+    /**
+     * A single AiMessage round can carry several independent tool calls
+     * (e.g. reading two unrelated files) -- the model already decided they
+     * don't depend on each other's output, or it wouldn't have requested
+     * them together. Running them concurrently instead of one at a time
+     * cuts wall-clock latency for that round to the slowest call instead of
+     * their sum. A single-request round (the common case) skips the
+     * executor entirely -- no thread-pool overhead for the typical case.
+     * Virtual threads suit this well since every real tool call here is
+     * I/O-bound (an HTTP call to the sandbox sidecar, or the LLM's own
+     * provider call for a sub-delegation-style tool). Results are returned
+     * in the SAME order as requests, regardless of completion order --
+     * message history and which result flips terminalSuccess must stay
+     * deterministic. executeTool() already isolates exceptions per call
+     * (returns an error string rather than throwing), so a failure in one
+     * concurrent call can't take down the others.
+     */
+    private List<String> executeToolsInOrder(List<ToolExecutionRequest> requests) {
+        if (requests.size() <= 1) {
+            return requests.stream().map(this::executeTool).toList();
+        }
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<String>> futures = requests.stream()
+                    .map(request -> executor.submit(() -> executeTool(request)))
+                    .toList();
+            List<String> results = new ArrayList<>(futures.size());
+            for (Future<String> future : futures) {
+                results.add(awaitResult(future));
+            }
+            return results;
+        }
+    }
+
+    private static String awaitResult(Future<String> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "Error executing tool: interrupted while waiting for result";
+        } catch (java.util.concurrent.ExecutionException e) {
+            // executeTool() already catches every Exception internally and
+            // returns an error string instead of throwing -- this branch is
+            // effectively unreachable in practice, but kept as a safe
+            // fallback rather than letting Future.get()'s checked exception
+            // propagate uncaught.
+            return "Error executing tool: " + e.getCause().getMessage();
+        }
     }
 
     private String executeTool(ToolExecutionRequest request) {
