@@ -72,12 +72,17 @@ button {
   font-weight: 700;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.15s, transform 0.15s;
+  transition: box-shadow var(--transition-fast) var(--ease-standard), transform var(--transition-fast) var(--ease-standard);
 }
 
 button:hover:not(:disabled) {
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(0) scale(0.98);
 }
 
 button:disabled {

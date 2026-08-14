@@ -59,12 +59,17 @@
   font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-muted);
+  transition: color var(--transition-fast) var(--ease-standard), background var(--transition-fast) var(--ease-standard);
 }
 
 .primary-nav a:hover {
   color: var(--color-text);
   background: var(--color-surface-alt);
   text-decoration: none;
+}
+
+.primary-nav a:active {
+  background: var(--color-border);
 }
 
 .primary-nav a.active {
@@ -92,12 +97,16 @@
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color var(--transition-fast) var(--ease-standard), color var(--transition-fast) var(--ease-standard), transform var(--transition-fast) var(--ease-standard);
 }
 
 .sign-out:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+
+.sign-out:active {
+  transform: scale(0.97);
 }
 
 .menu-toggle {
@@ -113,6 +122,15 @@
   background: var(--color-surface);
   cursor: pointer;
   margin-left: auto;
+  transition: transform var(--transition-fast) var(--ease-standard), border-color var(--transition-fast) var(--ease-standard);
+}
+
+.menu-toggle:hover {
+  border-color: var(--color-accent);
+}
+
+.menu-toggle:active {
+  transform: scale(0.94);
 }
 
 .menu-toggle span {
@@ -150,7 +168,7 @@
     transform: translateY(-8px);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.15s, transform 0.15s;
+    transition: opacity var(--transition-base) var(--ease-standard), transform var(--transition-base) var(--ease-standard);
   }
 
   .primary-nav.open {

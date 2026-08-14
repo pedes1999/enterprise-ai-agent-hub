@@ -45,6 +45,19 @@
   --font-size-lg: 20px;
   --font-size-xl: 26px;
 
+  /* Leading tracks inversely with size: tight on large display text,
+     looser on small/body copy so dense UI stays readable. */
+  --line-height-tight: 1.15;
+  --line-height-base: 1.5;
+  --line-height-loose: 1.65;
+
+  /* Motion: one shared timing scale + easing curve instead of every
+     component hardcoding its own 0.1s/0.15s/0.6s ad hoc. */
+  --transition-fast: 120ms;
+  --transition-base: 180ms;
+  --transition-slow: 280ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
   /* Layout */
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -62,6 +75,85 @@
   --shadow-lg: 0 16px 40px rgba(18, 19, 28, 0.14);
 }
 
+/* Dark mode: follows the OS/browser preference (no in-app toggle exists
+   yet) -- same token names, cool-neutral dark palette instead of a pure
+   black, brand accents lifted a step lighter so they keep enough contrast
+   against a dark surface. Every component already reads color exclusively
+   through these custom properties, so redefining them here is the whole
+   theme -- no component file needs to know dark mode exists. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0f1117;
+    --color-surface: #171a23;
+    --color-surface-alt: #1d212c;
+    --color-border: #2b2f3d;
+    --color-text: #e8e9f2;
+    --color-text-muted: #9a9db0;
+
+    --color-accent: #6366f1;
+    --color-accent-hover: #818cf8;
+    --color-accent-light: rgba(99, 102, 241, 0.18);
+    --color-accent-2: #22d3ee;
+    --gradient-accent: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #22d3ee 100%);
+
+    --color-status-queued: #9ca3af;
+    --color-status-running: #60a5fa;
+    --color-status-succeeded: #4ade80;
+    --color-status-failed: #f87171;
+
+    --color-status-queued-bg: rgba(156, 163, 175, 0.16);
+    --color-status-running-bg: rgba(96, 165, 250, 0.16);
+    --color-status-succeeded-bg: rgba(74, 222, 128, 0.16);
+    --color-status-failed-bg: rgba(248, 113, 113, 0.16);
+
+    /* Shadows read as pure darkening on a light surface -- on a dark
+       surface that's invisible, so these lean on a stronger, cooler
+       black instead of trying to reuse the light-mode values. */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #3a3e4d;
+    border-color: var(--color-bg);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4a4f61;
+  }
+}
+
+/* prefers-contrast: more -- widen the focus ring and darken/lighten
+   borders so structure reads clearly without relying on subtle shadows
+   or low-contrast dividers. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: #9a9db0;
+  }
+
+  :focus-visible {
+    outline-width: 3px;
+  }
+}
+
+/* Reduced motion: a blanket kill-switch rather than a per-component media
+   query. Every transition/animation in this app is a small, decorative
+   affordance (hover lifts, spinner, mobile nav slide) -- none of it
+   carries information that would be lost by making it instant, so cutting
+   duration to effectively zero (not display:none, which would also hide
+   the loading spinner itself) is enough, applied once, globally. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -75,6 +167,7 @@ body {
 body {
   font-family: var(--font-ui);
   font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
   color: var(--color-text);
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
@@ -105,7 +198,15 @@ h2,
 h3 {
   margin: 0;
   font-weight: 700;
+  line-height: var(--line-height-tight);
   letter-spacing: -0.01em;
+}
+
+/* The largest text on the page (page titles, var(--font-size-xl)) wants
+   tighter tracking than h2/h3 -- letters read too far apart at that size
+   with the same -0.01em every heading gets by default. */
+h1 {
+  letter-spacing: -0.02em;
 }
 
 p {
