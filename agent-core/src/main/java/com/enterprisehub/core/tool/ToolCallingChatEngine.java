@@ -87,6 +87,25 @@ public class ToolCallingChatEngine {
      */
     static final int MAX_TOOL_RESULT_CHARS = 8_000;
 
+    /**
+     * MAX_TOOL_RESULT_CHARS caps a single result ONCE, at insertion --
+     * but that capped result then gets resent in full on every SUBSEQUENT
+     * round for the rest of the run, all the way to round 100 if
+     * maxToolRounds gets there (nothing in this class ever shrinks or
+     * drops an older message otherwise). This is the actual fix for that:
+     * once a round's messages are more than this many rounds old, their
+     * ToolExecutionResultMessage content (never the AiMessage, and never
+     * anything from the last COMPACTION_WINDOW_ROUNDS rounds) is replaced
+     * with a short placeholder -- see compactToolResult(). 20 keeps a
+     * generous amount of recent context intact (more than any observed
+     * ticket-resolver run needs end to end) while still compacting the
+     * bulk of a long test-fixer-shaped run. Deliberately a straight
+     * sliding window with no special-casing by tool name: if a task
+     * genuinely needs an old file's content again, a fresh read_file call
+     * is cheap -- keeping every historical read alive forever is not.
+     */
+    private static final int DEFAULT_COMPACTION_WINDOW_ROUNDS = 20;
+
     private final ChatModel chatModel;
     private final Map<String, AgentTool> toolsByName;
     private final List<ToolSpecification> toolSpecifications;
@@ -95,6 +114,7 @@ public class ToolCallingChatEngine {
     private final Integer maxTokensBudget;
     private final int maxToolRounds;
     private final boolean cacheConversationHistory;
+    private final int compactionWindowRounds;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
@@ -164,6 +184,23 @@ public class ToolCallingChatEngine {
     public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
                                   String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds,
                                   boolean cacheConversationHistory) {
+        this(chatModel, tools, executionContext, systemPrompt, maxTokensBudget, maxToolRounds,
+                cacheConversationHistory, null);
+    }
+
+    /**
+     * compactionWindowRounds: null means "use DEFAULT_COMPACTION_WINDOW_ROUNDS" --
+     * every pre-existing caller/test keeps today's (now-compacting)
+     * behavior. See DEFAULT_COMPACTION_WINDOW_ROUNDS' own javadoc for what
+     * this controls and why 20 is the default. Kept configurable the same
+     * way maxToolRounds already is, for the same reason: the right value
+     * is workload-dependent, and a deployment that wants a smaller/larger
+     * window (or -- by passing Integer.MAX_VALUE -- effectively none)
+     * shouldn't need a code change to get it.
+     */
+    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
+                                  String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds,
+                                  boolean cacheConversationHistory, Integer compactionWindowRounds) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
@@ -173,6 +210,7 @@ public class ToolCallingChatEngine {
         this.maxTokensBudget = maxTokensBudget;
         this.maxToolRounds = maxToolRounds != null ? maxToolRounds : DEFAULT_MAX_TOOL_ROUNDS;
         this.cacheConversationHistory = cacheConversationHistory;
+        this.compactionWindowRounds = compactionWindowRounds != null ? compactionWindowRounds : DEFAULT_COMPACTION_WINDOW_ROUNDS;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
@@ -195,6 +233,11 @@ public class ToolCallingChatEngine {
         // accumulates more than a single extra breakpoint here regardless of
         // how many rounds it takes.
         int cacheBreakpointIndex = -1;
+        // One [startIndex, endIndex) entry per round that added messages
+        // (a round ending in a plain text answer never reaches the
+        // "toolWasUsed = true" block below, so never gets an entry) --
+        // see compactOldRoundIfNeeded() for how this drives compaction.
+        List<int[]> roundMessageRanges = new ArrayList<>();
 
         for (int round = 0; round < maxToolRounds; round++) {
             if (budgetExceeded(totalUsage)) {
@@ -225,6 +268,7 @@ public class ToolCallingChatEngine {
             }
 
             toolWasUsed = true;
+            int roundStartIndex = messages.size();
             messages.add(aiMessage);
             boolean terminalSuccess = false;
             List<ToolExecutionRequest> requests = aiMessage.toolExecutionRequests();
@@ -237,6 +281,8 @@ public class ToolCallingChatEngine {
                     terminalSuccess = true;
                 }
             }
+            roundMessageRanges.add(new int[] {roundStartIndex, messages.size()});
+            compactOldRoundIfNeeded(messages, roundMessageRanges);
 
             if (terminalSuccess) {
                 // A tool like open_pull_request just reported that the actual
@@ -474,6 +520,52 @@ public class ToolCallingChatEngine {
             // propagate uncaught.
             return "Error executing tool: " + e.getCause().getMessage();
         }
+    }
+
+    /**
+     * roundMessageRanges has exactly one entry per round that has finished
+     * so far, in order -- so once it holds more than compactionWindowRounds
+     * entries, the entry at (size - 1 - compactionWindowRounds) is exactly
+     * the one round that just aged out of the window for the first time
+     * (each index reaches that position exactly once as rounds progress,
+     * so this never re-compacts an already-compacted round). Everything
+     * from the most recent compactionWindowRounds rounds is left
+     * untouched.
+     */
+    private void compactOldRoundIfNeeded(List<ChatMessage> messages, List<int[]> roundMessageRanges) {
+        if (roundMessageRanges.size() <= compactionWindowRounds) {
+            return;
+        }
+        int[] range = roundMessageRanges.get(roundMessageRanges.size() - 1 - compactionWindowRounds);
+        for (int i = range[0]; i < range[1]; i++) {
+            if (messages.get(i) instanceof ToolExecutionResultMessage resultMessage) {
+                messages.set(i, compactToolResult(resultMessage));
+            }
+        }
+    }
+
+    /**
+     * Replaces the result's TEXT only, in place -- the message itself
+     * (same position, same tool_use_id pairing with its AiMessage) stays
+     * exactly where it was, so this can never desync the tool_use/
+     * tool_result pairing Anthropic's API (and langchain4j's own message
+     * ordering) requires. AiMessages are never touched by compaction at
+     * all -- only the (already-capped, see MAX_TOOL_RESULT_CHARS) result
+     * text a past round's tool call produced.
+     */
+    private static ToolExecutionResultMessage compactToolResult(ToolExecutionResultMessage message) {
+        String text = message.text();
+        if (text == null || text.isEmpty()) {
+            return message;
+        }
+        String placeholder = "[tool result from an earlier round, " + text.length()
+                + " chars, omitted to save context -- call the tool again if you need this]";
+        // ToolExecutionResultMessage.Builder rejects text+contents both being
+        // set (langchain4j's message content is either plain text OR a
+        // multi-part contents list, never both) -- toBuilder() carries the
+        // original's contents forward, so it must be explicitly cleared
+        // here or build() throws even though this only means to replace text.
+        return message.toBuilder().text(placeholder).contents(List.<dev.langchain4j.data.message.Content>of()).build();
     }
 
     private String executeTool(ToolExecutionRequest request) {

@@ -988,6 +988,93 @@ class ToolCallingChatEngineTest {
         assertThat(resultMessage.text()).contains("truncated");
     }
 
+    // ---------- history compaction (compactionWindowRounds) ----------
+
+    @Test
+    void chat_roundsOlderThanTheCompactionWindow_toolResultsReplacedWithAPlaceholder() {
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest r0 = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"round0\"}").build();
+        ToolExecutionRequest r1 = ToolExecutionRequest.builder().id("2").name("echo").arguments("{\"message\":\"round1\"}").build();
+        ToolExecutionRequest r2 = ToolExecutionRequest.builder().id("3").name("echo").arguments("{\"message\":\"round2\"}").build();
+        ToolExecutionRequest r3 = ToolExecutionRequest.builder().id("4").name("echo").arguments("{\"message\":\"round3\"}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(r0))))
+                .thenReturn(response(AiMessage.from(List.of(r1))))
+                .thenReturn(response(AiMessage.from(List.of(r2))))
+                .thenReturn(response(AiMessage.from(List.of(r3))))
+                .thenReturn(response(AiMessage.from("done after four rounds")));
+
+        // compactionWindowRounds=2 -- rounds 0 and 1 age out of the window by
+        // the time round 3 finishes; rounds 2 and 3 (the last 2) stay full.
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(
+                model, List.of(echoTool), CONTEXT, null, null, null, false, 2);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("do four things");
+
+        assertThat(result.reply()).isEqualTo("done after four rounds");
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(5)).chat(captor.capture());
+        List<ToolExecutionResultMessage> toolResults = captor.getAllValues().get(4).messages().stream()
+                .filter(ToolExecutionResultMessage.class::isInstance)
+                .map(ToolExecutionResultMessage.class::cast)
+                .toList();
+
+        assertThat(toolResults).hasSize(4);
+        assertThat(toolResults.get(0).text()).startsWith("[tool result from an earlier round");
+        assertThat(toolResults.get(1).text()).startsWith("[tool result from an earlier round");
+        assertThat(toolResults.get(2).text()).isEqualTo("echo: round2");
+        assertThat(toolResults.get(3).text()).isEqualTo("echo: round3");
+    }
+
+    @Test
+    void chat_compactedResult_placeholderMentionsOriginalLength() {
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest r0 = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"round0\"}").build();
+        ToolExecutionRequest r1 = ToolExecutionRequest.builder().id("2").name("echo").arguments("{\"message\":\"round1\"}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(r0))))
+                .thenReturn(response(AiMessage.from(List.of(r1))))
+                .thenReturn(response(AiMessage.from("done")));
+
+        // compactionWindowRounds=0 -- every round is immediately outside the
+        // window as soon as the NEXT round finishes, so round 0's result is
+        // compacted right after round 1 completes.
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(
+                model, List.of(echoTool), CONTEXT, null, null, null, false, 0);
+        engine.chat("do two things");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(3)).chat(captor.capture());
+        List<ToolExecutionResultMessage> toolResults = captor.getAllValues().get(2).messages().stream()
+                .filter(ToolExecutionResultMessage.class::isInstance)
+                .map(ToolExecutionResultMessage.class::cast)
+                .toList();
+
+        // "echo: round0" is 12 characters.
+        assertThat(toolResults.get(0).text()).contains("12 chars");
+    }
+
+    @Test
+    void chat_defaultCompactionWindow_wellUnder20Rounds_nothingCompacted() {
+        // Regression guard for every pre-existing caller/test: a normal-length
+        // run must see byte-identical tool result text throughout, same as
+        // before compaction existed.
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"hello\"}").build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(List.of(request))))
+                .thenReturn(response(AiMessage.from("done")));
+
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("Echo 'hello'");
+
+        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(model, times(2)).chat(captor.capture());
+        ToolExecutionResultMessage resultMessage = captor.getAllValues().get(1).messages().stream()
+                .filter(ToolExecutionResultMessage.class::isInstance)
+                .map(ToolExecutionResultMessage.class::cast)
+                .findFirst().orElseThrow();
+        assertThat(resultMessage.text()).isEqualTo("echo: hello");
+    }
+
     // ---------- partial usage on a mid-run provider failure ----------
 
     @Test
