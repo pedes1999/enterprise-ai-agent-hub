@@ -38,10 +38,15 @@ jobs:
       - name: Create app role and test database
         # See docker/postgres/init.sh -- gateway-api's tests connect as
         # hub_user/password against agent_hub_test (application-test.yml),
-        # never as the postgres superuser.
+        # never as the postgres superuser. Two separate -c flags, not one
+        # semicolon-joined string: psql sends a multi-statement -c string as
+        # a single simple-query message, which Postgres implicitly wraps in
+        # one transaction block -- and CREATE DATABASE cannot run inside a
+        # transaction block, so the combined form always failed here.
         run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -c \
-            "CREATE ROLE hub_user LOGIN PASSWORD 'password'; CREATE DATABASE agent_hub_test OWNER hub_user;"
+          PGPASSWORD=postgres psql -h localhost -U postgres \
+            -c "CREATE ROLE hub_user LOGIN PASSWORD 'password';" \
+            -c "CREATE DATABASE agent_hub_test OWNER hub_user;"
 
       - name: mvn test
         run: mvn -B -ntp test
