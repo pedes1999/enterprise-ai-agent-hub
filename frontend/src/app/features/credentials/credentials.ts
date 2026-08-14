@@ -71,6 +71,39 @@ export class Credentials implements OnInit {
   readonly teamError = signal<string | null>(null);
   readonly deactivatingKey = signal<string | null>(null);
 
+  /**
+   * One entry per teammate who has at least one vendor credential row,
+   * each holding just that person's own rows -- backend already returns
+   * teamCredentials() sorted by email then provider (see
+   * VendorCredentialService.listForTeam()), so grouping here preserves
+   * that order rather than re-sorting. Lets the template render a clearly
+   * separated block per person instead of one long table where the same
+   * email has to be re-read on every row to tell whose credential is
+   * whose.
+   */
+  readonly groupedTeamCredentials = computed(() => {
+    const groups: { userId: string; userEmail: string; credentials: TeamVendorCredentialSummary[] }[] = [];
+    for (const credential of this.teamCredentials()) {
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup && lastGroup.userId === credential.userId) {
+        lastGroup.credentials.push(credential);
+      } else {
+        groups.push({ userId: credential.userId, userEmail: credential.userEmail, credentials: [credential] });
+      }
+    }
+    return groups;
+  });
+
+  /** A short, deterministic 1-2 letter tag for the group header's avatar circle -- initials from the email's local part, never a random/generated identicon. */
+  initialsFor(email: string): string {
+    const localPart = email.split('@')[0];
+    const parts = localPart.split(/[._-]/).filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return localPart.slice(0, 2).toUpperCase();
+  }
+
   /** '' means "no override -- use the server default", matching a null preferredLlmProvider. */
   readonly preferredProviderSelection = signal('');
   /** '' means "no override -- use the provider's default model". */

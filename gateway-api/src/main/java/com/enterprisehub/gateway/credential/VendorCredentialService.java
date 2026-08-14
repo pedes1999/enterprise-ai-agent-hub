@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -115,6 +116,14 @@ public class VendorCredentialService {
      * ADMIN-only cross-user view: every credential across the whole tenant,
      * with owner email attached, no secret ever touched. Backs GET
      * /vendor-credentials/team.
+     *
+     * Sorted by owner email, then provider -- repository.findByTenantId()
+     * has no defined order of its own (effectively insertion order), which
+     * interleaves different users' rows depending on who connected what
+     * when. The frontend groups this list by user for display (see
+     * Credentials' groupedTeamCredentials), so a stable per-user ordering
+     * here is what makes each group's own rows land in a consistent order
+     * too, not just the groups themselves.
      */
     public List<TeamVendorCredentialSummary> listForTeam(UUID tenantId) {
         List<VendorCredential> credentials = repository.findByTenantId(tenantId);
@@ -129,6 +138,8 @@ public class VendorCredentialService {
                         credential.isActive(),
                         credential.getLastUsedAt(),
                         credential.getLastValidatedAt()))
+                .sorted(Comparator.comparing(TeamVendorCredentialSummary::userEmail)
+                        .thenComparing(TeamVendorCredentialSummary::provider))
                 .toList();
     }
 

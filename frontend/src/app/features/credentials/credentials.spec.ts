@@ -455,6 +455,40 @@ describe('Credentials', () => {
       expect(fixture.componentInstance.deactivatingKey()).toBeNull();
     });
 
+    it('groups team credentials by user, preserving the backend-provided order within each group', () => {
+      const secondRowSameUser: TeamVendorCredentialSummary = { ...teamRow, provider: 'GEMINI' };
+      const otherUserRow: TeamVendorCredentialSummary = {
+        userId: 'user-3',
+        userEmail: 'ops@acme.com',
+        provider: 'ANTHROPIC',
+        active: false,
+        lastUsedAt: null,
+        lastValidatedAt: null,
+      };
+      const fixture = TestBed.createComponent(Credentials);
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(noPreference);
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([teamRow, secondRowSameUser, otherUserRow]);
+
+      const groups = fixture.componentInstance.groupedTeamCredentials();
+
+      expect(groups.length).toBe(2);
+      expect(groups[0].userEmail).toBe('dev@acme.com');
+      expect(groups[0].credentials).toEqual([teamRow, secondRowSameUser]);
+      expect(groups[1].userEmail).toBe('ops@acme.com');
+      expect(groups[1].credentials).toEqual([otherUserRow]);
+    });
+
+    it('initialsFor() derives a two-letter tag from the email local part', () => {
+      const fixture = TestBed.createComponent(Credentials);
+      const component = fixture.componentInstance;
+
+      expect(component.initialsFor('jane.doe@acme.com')).toBe('JD');
+      expect(component.initialsFor('dev@acme.com')).toBe('DE');
+    });
+
     it('skips the deactivate request when the confirmation is declined', () => {
       isAdmin = true;
       vi.spyOn(window, 'confirm').mockReturnValue(false);
