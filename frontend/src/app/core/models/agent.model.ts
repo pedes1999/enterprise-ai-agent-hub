@@ -53,6 +53,8 @@ export interface AgentExecutionStatusResponse {
   totalTokens?: number | null;
   /** Null means this run used the tenant's (or server's) default budget instead of its own override. */
   maxTokensOverride?: number | null;
+  /** Non-null only for a child execution the delegate_to_agent tool queued on behalf of another execution -- null for everything triggered directly. */
+  parentExecutionId?: string | null;
 }
 
 export interface ToolExecutionRecord {

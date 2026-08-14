@@ -16,9 +16,11 @@ export class ExecutionDetail implements OnInit {
 
   readonly execution = signal<AgentExecutionStatusResponse | null>(null);
   readonly toolExecutions = signal<ToolExecutionRecord[]>([]);
+  readonly children = signal<AgentExecutionStatusResponse[]>([]);
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
   readonly traceError = signal<string | null>(null);
+  readonly childrenError = signal<string | null>(null);
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id')!;
@@ -35,6 +37,10 @@ export class ExecutionDetail implements OnInit {
     this.agentService.getToolExecutions(id).subscribe({
       next: (records) => this.toolExecutions.set(records),
       error: (err) => this.traceError.set(err.error?.message ?? 'Failed to load the tool-call trace.'),
+    });
+    this.agentService.getChildren(id).subscribe({
+      next: (records) => this.children.set(records),
+      error: (err) => this.childrenError.set(err.error?.message ?? 'Failed to load delegated executions.'),
     });
   }
 }

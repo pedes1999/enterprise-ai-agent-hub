@@ -113,6 +113,20 @@ public class AgentExecutionService {
     @Transactional
     public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
                                    Map<String, String> inputParameters, Integer maxTokens, UUID triggeredBy) {
+        return enqueue(tenantId, prompt, agentSlug, repositoryUrl, repositoryBranch, inputParameters, maxTokens, triggeredBy, null);
+    }
+
+    /**
+     * Same as the 8-arg overload, additionally recording parentExecutionId --
+     * non-null only when this execution is being created by delegate_to_agent
+     * on behalf of another, already-running execution (see
+     * DelegateToAgentTool and V25__agent_execution_parent_and_planner.sql).
+     * Every other call site (the public API, every pre-existing test) passes
+     * null via the 8-arg overload, unchanged.
+     */
+    @Transactional
+    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
+                                   Map<String, String> inputParameters, Integer maxTokens, UUID triggeredBy, UUID parentExecutionId) {
         AgentDefinition definition = agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
 
@@ -150,6 +164,7 @@ public class AgentExecutionService {
         execution.setInputParameters(serializeInputParameters(inputParameters));
         execution.setMaxTokensOverride(maxTokens);
         execution.setTriggeredBy(triggeredBy);
+        execution.setParentExecutionId(parentExecutionId);
         execution.setStatus("QUEUED");
         return repository.save(execution);
     }
@@ -339,6 +354,22 @@ public class AgentExecutionService {
                 .stream()
                 .map(this::toToolExecutionRecord)
                 .toList();
+    }
+
+    /**
+     * Backs GET /agents/executions/{id}/children -- every execution
+     * delegate_to_agent queued from this one (see
+     * V25__agent_execution_parent_and_planner.sql). Empty, not 404, for an
+     * execution that exists but never delegated anything -- 404 is reserved
+     * for the parent itself not existing/belonging to another tenant, same
+     * distinction getToolExecutions() already makes.
+     */
+    @Transactional(readOnly = true)
+    public List<AgentExecution> getChildren(UUID tenantId, UUID executionId) {
+        findForTenant(tenantId, executionId)
+                .orElseThrow(() -> new AgentException(HttpStatus.NOT_FOUND, "No execution with id " + executionId));
+
+        return repository.findByTenantIdAndParentExecutionIdOrderByCreatedAtAsc(tenantId, executionId);
     }
 
     private ToolExecutionRecord toToolExecutionRecord(ToolExecution toolExecution) {

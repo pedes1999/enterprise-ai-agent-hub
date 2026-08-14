@@ -80,6 +80,13 @@ describe('AgentService', () => {
     req.flush([]);
   });
 
+  it('getChildren() GETs /agents/executions/{id}/children', () => {
+    service.getChildren('exec-1').subscribe();
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1/children`);
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+  });
+
   it('getUsage() GETs /agents/executions/usage', () => {
     service.getUsage().subscribe();
     const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/usage`);

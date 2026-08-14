@@ -19,6 +19,10 @@
         <dd class="mono">{{ exec.llmProvider }}</dd>
         <dt>Repository URL</dt>
         <dd class="mono">{{ exec.repositoryUrl ?? '—' }}</dd>
+        @if (exec.parentExecutionId) {
+          <dt>Delegated from</dt>
+          <dd class="mono"><a [routerLink]="['/executions', exec.parentExecutionId]">{{ exec.parentExecutionId }}</a></dd>
+        }
         <dt>Token usage</dt>
         <dd class="mono">
           @if (exec.totalTokens != null) {
@@ -56,6 +60,34 @@
         <div class="banner banner-error" role="alert">{{ exec.errorMessage }}</div>
       </section>
     }
+
+    <section>
+      <h2>Delegated executions</h2>
+      @if (childrenError()) {
+        <div class="banner banner-error" role="alert">{{ childrenError() }}</div>
+      } @else if (children().length === 0) {
+        <p class="empty">This execution didn't delegate any work to other agents.</p>
+      } @else {
+        <table class="trace-table">
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Status</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (child of children(); track child.id) {
+              <tr [routerLink]="['/executions', child.id]" class="row-link">
+                <td class="mono">{{ child.agentSlug }}</td>
+                <td><span class="badge" [class]="'status-' + child.status.toLowerCase()">{{ child.status }}</span></td>
+                <td>{{ child.createdAt | localDateTime }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </section>
 
     <section>
       <h2>Tool-call trace</h2>

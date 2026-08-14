@@ -50,6 +50,13 @@ export class AgentService {
     );
   }
 
+  /** Every execution the delegate_to_agent tool queued on behalf of this one -- empty, not an error, if it never delegated anything. */
+  getChildren(executionId: string): Observable<AgentExecutionStatusResponse[]> {
+    return this.http.get<AgentExecutionStatusResponse[]>(
+      `${environment.apiBaseUrl}/agents/executions/${executionId}/children`,
+    );
+  }
+
   getUsage(): Observable<ExecutionUsage> {
     return this.http.get<ExecutionUsage>(`${environment.apiBaseUrl}/agents/executions/usage`);
   }

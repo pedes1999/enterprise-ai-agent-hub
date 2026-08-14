@@ -23,6 +23,12 @@ import java.util.UUID;
  * TriggerAgentExecutionRequest.maxTokens -- null means this run used the
  * tenant's (or server's) default budget instead of its own override, same
  * shape as repositoryBranch above.
+ *
+ * parentExecutionId is non-null only for a child execution the
+ * delegate_to_agent tool queued on behalf of another, already-running
+ * execution -- null for everything triggered directly via POST
+ * /agents/execute. See GET /agents/executions/{id}/children for the
+ * reverse direction (a parent's own list of what it delegated).
  */
 public record AgentExecutionStatusResponse(
         UUID id,
@@ -42,6 +48,7 @@ public record AgentExecutionStatusResponse(
         Integer inputTokens,
         Integer outputTokens,
         Integer totalTokens,
-        Integer maxTokensOverride
+        Integer maxTokensOverride,
+        UUID parentExecutionId
 ) {
 }

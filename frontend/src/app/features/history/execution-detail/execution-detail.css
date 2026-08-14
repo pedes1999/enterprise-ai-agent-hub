@@ -88,6 +88,14 @@ dd {
   overflow: hidden;
 }
 
+.row-link {
+  cursor: pointer;
+}
+
+.row-link:hover {
+  background: var(--color-bg);
+}
+
 .trace-table th,
 .trace-table td {
   text-align: left;

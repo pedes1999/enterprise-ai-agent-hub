@@ -129,6 +129,15 @@ public class AgentExecutionController {
         return ResponseEntity.ok(executionService.getToolExecutions(UUID.fromString(principal.tenantId()), id));
     }
 
+    /** Every execution delegate_to_agent queued from this one (see V25) -- empty, not 404, if this execution never delegated anything. */
+    @GetMapping("/executions/{id}/children")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<List<AgentExecutionStatusResponse>> getChildren(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                                            @PathVariable UUID id) {
+        List<AgentExecution> children = executionService.getChildren(UUID.fromString(principal.tenantId()), id);
+        return ResponseEntity.ok(children.stream().map(this::toResponse).toList());
+    }
+
     @GetMapping("/definitions")
     @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
     public ResponseEntity<List<AgentDefinitionSummary>> listDefinitions() {
@@ -149,6 +158,6 @@ public class AgentExecutionController {
                 execution.getReply(), execution.getToolWasUsed(), execution.getErrorMessage(),
                 execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt(),
                 execution.getInputTokens(), execution.getOutputTokens(), execution.getTotalTokens(),
-                execution.getMaxTokensOverride());
+                execution.getMaxTokensOverride(), execution.getParentExecutionId());
     }
 }

@@ -49,6 +49,15 @@ public class AgentExecution {
     @Column(name = "triggered_by")
     private UUID triggeredBy;
 
+    /**
+     * Non-null only for a child execution created by the delegate_to_agent
+     * tool (see DelegateToAgentTool) -- the execution id of whoever
+     * delegated this one. Null for everything triggered directly via
+     * POST /agents/execute. See V25__agent_execution_parent_and_planner.sql.
+     */
+    @Column(name = "parent_execution_id")
+    private UUID parentExecutionId;
+
     // Repurposed from its original Week 1 meaning (a category like
     // SECURITY_PATCH) -- now holds the resolved AgentDefinition.slug this
     // execution ran with (e.g. "coding-agent"), set by

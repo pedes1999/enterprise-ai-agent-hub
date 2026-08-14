@@ -218,6 +218,46 @@ class AgentExecutionQueueIntegrationTest {
         assertThat(getResponse.getBody()).doesNotContain("secret prompt");
     }
 
+    /**
+     * parentExecutionId isn't settable via the public /agents/execute API
+     * (it only exists for delegate_to_agent-created rows -- see
+     * V25__agent_execution_parent_and_planner.sql) -- exercised here
+     * directly through the 9-arg enqueue() overload, the same one
+     * DelegateToAgentTool calls, then verified through both the child's own
+     * GET /agents/executions/{id} and the parent's GET
+     * .../{id}/children.
+     */
+    @Test
+    void enqueueWithParentExecutionId_roundTripsThroughGetAndChildrenEndpoints() {
+        AuthResponse tenant = registerTenant("job-i");
+        UUID tenantId = UUID.fromString(tenant.tenantId());
+
+        TenantContext.set(tenant.tenantId());
+        AgentExecution parent;
+        AgentExecution child;
+        try {
+            parent = executionService.enqueue(tenantId, "parent prompt", "general-assistant", null, null, null, null, null);
+            child = executionService.enqueue(tenantId, "child prompt", "general-assistant", null, null, null, null, null, parent.getId());
+        } finally {
+            TenantContext.clear();
+        }
+
+        ResponseEntity<AgentExecutionStatusResponse> childResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + child.getId(), HttpMethod.GET,
+                new HttpEntity<>(authHeaders(tenant.token())), AgentExecutionStatusResponse.class);
+        assertThat(childResponse.getBody().parentExecutionId()).isEqualTo(parent.getId());
+
+        ResponseEntity<AgentExecutionStatusResponse[]> childrenResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + parent.getId() + "/children", HttpMethod.GET,
+                new HttpEntity<>(authHeaders(tenant.token())), AgentExecutionStatusResponse[].class);
+        assertThat(childrenResponse.getBody()).extracting(AgentExecutionStatusResponse::id).containsExactly(child.getId());
+
+        ResponseEntity<AgentExecutionStatusResponse> parentResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + parent.getId(), HttpMethod.GET,
+                new HttpEntity<>(authHeaders(tenant.token())), AgentExecutionStatusResponse.class);
+        assertThat(parentResponse.getBody().parentExecutionId()).isNull();
+    }
+
     @Test
     void execute_readOnlyRole_forbidden() {
         AuthResponse admin = registerTenant("job-h");

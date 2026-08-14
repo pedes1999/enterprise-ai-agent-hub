@@ -7,12 +7,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface AgentExecutionRepository extends JpaRepository<AgentExecution, UUID> {
 
     Optional<AgentExecution> findByIdAndTenantId(UUID id, UUID tenantId);
+
+    /** Backs GET /agents/executions/{id}/children -- every execution delegate_to_agent queued from this one. Ordered oldest-first, same as tool-execution traces. */
+    List<AgentExecution> findByTenantIdAndParentExecutionIdOrderByCreatedAtAsc(UUID tenantId, UUID parentExecutionId);
 
     /** Backs the per-tenant concurrency cap -- see AgentExecutionService.enqueue(). Normal RLS applies (no worker-sentinel involved). */
     long countByTenantIdAndStatusIn(UUID tenantId, Collection<String> statuses);
