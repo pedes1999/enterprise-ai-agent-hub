@@ -52,6 +52,20 @@ public class AgentDefinition {
     @Column(name = "llm_provider", nullable = false)
     private String llmProvider = "ANTHROPIC";
 
+    /**
+     * Overrides the tenant's own resolved model name (see
+     * TenantLlmProviderResolver.resolveModelName()) for executions of this
+     * definition -- null (every existing seeded agent today) means "use
+     * whatever the tenant's preference/server default resolves to", same
+     * behavior as before this field existed. Lets a simple/cheap agent
+     * (e.g. general-assistant) use a cheaper model than a tenant's default
+     * without needing a different vendor credential -- only the model
+     * name changes, not the provider, so the same per-user credential
+     * still resolves. See V27__agent_definition_preferred_model.sql.
+     */
+    @Column(name = "preferred_model_name")
+    private String preferredModelName;
+
     // Null (the default for every existing row) means this definition takes
     // plain free-text `prompt` only -- no InputSourceResolver runs, no
     // resolved blob gets prepended. Set it (e.g. "MANUAL_TEXT") to have

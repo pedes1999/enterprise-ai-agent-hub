@@ -10,6 +10,8 @@ public record AgentDefinitionDetail(
         String systemPrompt,
         List<String> toolNames,
         String inputSourceType,
-        List<String> requiredInputs
+        List<String> requiredInputs,
+        /** Null means this definition uses the tenant's/server's default model -- see AgentDefinition.preferredModelName. */
+        String preferredModelName
 ) {
 }

@@ -13,6 +13,8 @@ export interface AgentDefinitionDetail {
   toolNames: string[];
   inputSourceType: string | null;
   requiredInputs: string[];
+  /** Null means this definition uses the tenant's/server's default model. */
+  preferredModelName: string | null;
 }
 
 export interface TriggerAgentExecutionRequest {

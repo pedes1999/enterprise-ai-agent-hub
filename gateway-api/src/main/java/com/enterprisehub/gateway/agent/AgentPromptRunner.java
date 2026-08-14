@@ -148,7 +148,14 @@ public class AgentPromptRunner {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, userId, provider);
-        String modelName = tenantLlmProviderResolver.resolveModelName(tenantId, provider);
+        // The definition's own preferred model (if set) overrides the
+        // tenant's resolved model name -- provider (and therefore which
+        // credential apiKey above resolved) is untouched either way, only
+        // which model that same credential talks to. See
+        // AgentDefinition.preferredModelName's javadoc.
+        String modelName = definition.getPreferredModelName() != null
+                ? definition.getPreferredModelName()
+                : tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         Integer maxTokens = maxTokensOverride != null ? maxTokensOverride : tenantLlmProviderResolver.resolveMaxTokens(tenantId);
         String resolvedInput = resolveInput(definition, tenantId, inputParameters);
         String assembledPrompt = assemblePrompt(repositoryUrl, repositoryBranch, resolvedInput, prompt);

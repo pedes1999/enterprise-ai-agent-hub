@@ -272,7 +272,7 @@ class AgentExecutionControllerTest {
     void getDefinition_knownSlug_returnsFullConfiguration() throws Exception {
         when(agentDefinitionService.getDetail("coding-agent")).thenReturn(
                 new com.enterprisehub.dto.AgentDefinitionDetail("coding-agent", "Coding Agent", "desc",
-                        "You are a coding agent.", List.of("git_clone", "open_pull_request"), null, List.of("repositoryUrl")));
+                        "You are a coding agent.", List.of("git_clone", "open_pull_request"), null, List.of("repositoryUrl"), null));
 
         mockMvc.perform(get("/agents/definitions/coding-agent"))
                 .andExpect(status().isOk())

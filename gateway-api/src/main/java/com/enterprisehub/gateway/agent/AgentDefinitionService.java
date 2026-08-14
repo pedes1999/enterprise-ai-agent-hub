@@ -42,6 +42,7 @@ public class AgentDefinitionService {
     private AgentDefinitionDetail toDetail(AgentDefinition definition) {
         return new AgentDefinitionDetail(
                 definition.getSlug(), definition.getName(), definition.getDescription(), definition.getSystemPrompt(),
-                definition.getToolNames(), definition.getInputSourceType(), definition.getRequiredInputs());
+                definition.getToolNames(), definition.getInputSourceType(), definition.getRequiredInputs(),
+                definition.getPreferredModelName());
     }
 }

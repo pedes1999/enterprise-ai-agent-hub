@@ -1,0 +1,19 @@
+-- V27__agent_definition_preferred_model.sql
+--
+-- Lets an AgentDefinition use a cheaper model than the tenant's own
+-- default for simple/cheap-to-run agents, without needing a different
+-- vendor credential -- only the model NAME differs, the provider (and
+-- therefore which per-user credential gets resolved, see V22/V23) stays
+-- exactly what the tenant already configured. AgentPromptRunner.run()
+-- uses this instead of TenantLlmProviderResolver.resolveModelName()
+-- whenever it's set.
+--
+-- Nullable, left UNSET for every existing seeded agent (general-assistant,
+-- ticket-resolver, test-fixer, planner) -- this migration adds the
+-- mechanism, not a guess at which model id counts as "cheap enough" for a
+-- given tenant's chosen provider. LlmProperties has exactly one model name
+-- configured per provider today (no "cheap vs capable" tier concept to
+-- pull a default from), so picking a concrete value here would be a blind
+-- guess, not an informed one -- that's a follow-up once a specific model
+-- id is actually chosen for a specific provider/tenant.
+ALTER TABLE agent_definitions ADD COLUMN preferred_model_name VARCHAR(200);

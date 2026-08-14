@@ -438,6 +438,46 @@ class AgentPromptRunnerTest {
     }
 
     @Test
+    void run_definitionHasPreferredModelName_overridesTenantsResolvedModel() {
+        AgentDefinition definition = testDefinition("get_current_date_time");
+        definition.setPreferredModelName("claude-cheap-model");
+        when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG)).thenReturn(Optional.of(definition));
+        stubCredentialResolution();
+        when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-cheap"), eq(LlmProvider.ANTHROPIC),
+                eq("sk-ant-real-key"), eq("claude-cheap-model"), any(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
+                    String systemPrompt = invocation.getArgument(6);
+                    return new SharedExecutionContext(tenantId.toString(), "exec-cheap", chatLanguageModel, tools, systemPrompt);
+                });
+        when(chatLanguageModel.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("cheap reply")));
+
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-cheap", AGENT_SLUG, "Hello");
+
+        assertThat(result.reply()).isEqualTo("cheap reply");
+        // The definition's own preference wins -- the tenant's own resolved
+        // model name is never even asked for.
+        verify(tenantLlmProviderResolver, never()).resolveModelName(any(), any());
+    }
+
+    @Test
+    void run_definitionHasNoPreferredModelName_usesTenantsResolvedModel() {
+        // testDefinition() leaves preferredModelName null -- every other test
+        // in this class already exercises this path implicitly via
+        // stubContextFactory()'s eq("claude-3-5-sonnet-20240620") expectation;
+        // this test makes the fallback itself an explicit, named assertion.
+        stubCredentialResolution();
+        stubContextFactory("exec-default-model");
+        when(chatLanguageModel.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("default reply")));
+
+        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-default-model", AGENT_SLUG, "Hello");
+
+        assertThat(result.reply()).isEqualTo("default reply");
+        verify(tenantLlmProviderResolver).resolveModelName(tenantId, LlmProvider.ANTHROPIC);
+    }
+
+    @Test
     void modelName_returnsConfiguredModelForTheTenantsResolvedProvider() {
         assertThat(runner.modelName(tenantId)).isEqualTo("claude-3-5-sonnet-20240620");
     }
