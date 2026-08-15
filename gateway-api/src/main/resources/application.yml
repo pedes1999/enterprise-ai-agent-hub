@@ -41,6 +41,15 @@ spring:
           starttls:
             enable: true
 
+management:
+  health:
+    # Mail is optional (only backs team-invite emails, see MailService) --
+    # an unreachable/misconfigured SMTP relay shouldn't fail /actuator/health
+    # for the whole app, which docker-compose's frontend service depends on
+    # via condition: service_healthy.
+    mail:
+      enabled: false
+
 server:
   port: ${SERVER_PORT:8080}
 

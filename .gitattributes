@@ -1,0 +1,3 @@
+# Shell scripts run inside Linux containers (see docker/postgres/init.sh) --
+# a CRLF shebang breaks them. Force LF regardless of core.autocrlf.
+*.sh text eol=lf
