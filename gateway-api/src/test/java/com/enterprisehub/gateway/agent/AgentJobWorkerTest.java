@@ -80,7 +80,12 @@ class AgentJobWorkerTest {
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
 
-        when(agentPromptRunner.run(eq(tenantId), eq(userId), eq(executionId.toString()), eq("coding-agent"), eq("list files"), eq(null), any(), eq(Map.of()), any()))
+        // AgentRunRequest is a record, so this matches by value across every
+        // field at once -- no per-parameter eq()/any() matchers needed.
+        when(agentPromptRunner.run(AgentRunRequest.of(tenantId, userId, executionId.toString(), "coding-agent")
+                .prompt("list files")
+                .inputParameters(Map.of())
+                .build()))
                 .thenAnswer(invocation -> {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
@@ -109,7 +114,7 @@ class AgentJobWorkerTest {
         job.setPrompt("fix the bug");
         job.setAgentType("ticket-resolver");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(
+        when(agentPromptRunner.run(any())).thenReturn(
                 new ToolCallingChatEngine.ToolChatResult("Let me check if there's a", true, true,
                         "Agent used all 14 allowed tool-call rounds without finishing."));
 
@@ -135,7 +140,7 @@ class AgentJobWorkerTest {
         job.setPrompt("fix the bug");
         job.setAgentType("ticket-resolver");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any()))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("", true, false, null));
 
         worker.pollAndProcessOne();
@@ -158,7 +163,7 @@ class AgentJobWorkerTest {
         job.setPrompt("say nothing");
         job.setAgentType("general-assistant");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any()))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("", false, false, null));
 
         worker.pollAndProcessOne();
@@ -177,7 +182,7 @@ class AgentJobWorkerTest {
         job.setPrompt("do something");
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any()))
                 .thenThrow(new RuntimeException("Anthropic API call failed: timeout"));
 
         worker.pollAndProcessOne(); // must not throw out of the scheduled method
@@ -201,7 +206,7 @@ class AgentJobWorkerTest {
         job.setPrompt("do something");
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
-        when(agentPromptRunner.run(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(agentPromptRunner.run(any()))
                 .thenThrow(new ToolCallingChatEngine.PartialUsageException(
                         "Your credit balance is too low to access the Anthropic API.", null, 900, 150, 1050));
 

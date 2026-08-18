@@ -82,7 +82,9 @@ public class AgentPingService {
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         ToolCallingChatEngine.ToolChatResult result;
         try {
-            result = agentPromptRunner.run(tenantId, userId, executionId, resolvedSlug, prompt);
+            result = agentPromptRunner.run(AgentRunRequest.of(tenantId, userId, executionId, resolvedSlug)
+                    .prompt(prompt)
+                    .build());
         } catch (AgentException e) {
             throw e; // already the right status (e.g. unknown agent, no credential) -- don't relabel it as a provider failure
         } catch (RuntimeException e) {

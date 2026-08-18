@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import com.enterprisehub.gateway.agent.EnqueueExecutionCommand;
 
 /**
  * Proves the DB-backed job queue's real moving parts against real Postgres
@@ -221,9 +222,9 @@ class AgentExecutionQueueIntegrationTest {
     /**
      * parentExecutionId isn't settable via the public /agents/execute API
      * (it only exists for delegate_to_agent-created rows -- see
-     * V25__agent_execution_parent_and_planner.sql) -- exercised here
-     * directly through the 9-arg enqueue() overload, the same one
-     * DelegateToAgentTool calls, then verified through both the child's own
+     * V25__agent_execution_parent_and_planner.sql) -- exercised here by
+     * calling enqueue() directly with parentExecutionId set, the same way
+     * DelegateToAgentTool does, then verified through both the child's own
      * GET /agents/executions/{id} and the parent's GET
      * .../{id}/children.
      */
@@ -236,8 +237,13 @@ class AgentExecutionQueueIntegrationTest {
         AgentExecution parent;
         AgentExecution child;
         try {
-            parent = executionService.enqueue(tenantId, "parent prompt", "general-assistant", null, null, null, null, null);
-            child = executionService.enqueue(tenantId, "child prompt", "general-assistant", null, null, null, null, null, parent.getId());
+            parent = executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "general-assistant")
+                    .prompt("parent prompt")
+                    .build());
+            child = executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "general-assistant")
+                    .prompt("child prompt")
+                    .parentExecutionId(parent.getId())
+                    .build());
         } finally {
             TenantContext.clear();
         }

@@ -89,48 +89,16 @@ public class AgentExecutionService {
      * not just an error to swallow).
      */
     @Transactional
-    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
-                                   Map<String, String> inputParameters) {
-        return enqueue(tenantId, prompt, agentSlug, repositoryUrl, repositoryBranch, inputParameters, null);
-    }
+    public AgentExecution enqueue(EnqueueExecutionCommand command) {
+        UUID tenantId = command.tenantId();
+        String agentSlug = command.agentSlug();
+        String repositoryUrl = command.repositoryUrl();
+        Integer maxTokens = command.maxTokens();
 
-    /** Same as the 6-arg overload, additionally accepting a per-execution token budget override -- see AgentExecution.maxTokensOverride's javadoc. */
-    @Transactional
-    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
-                                   Map<String, String> inputParameters, Integer maxTokens) {
-        return enqueue(tenantId, prompt, agentSlug, repositoryUrl, repositoryBranch, inputParameters, maxTokens, null);
-    }
-
-    /**
-     * Same as the 7-arg overload, additionally recording WHICH app_user
-     * triggered this -- AgentJobWorker runs asynchronously with no HTTP
-     * principal available, so this is how it (via AgentPromptRunner) later
-     * knows whose vendor credential to resolve, now that credentials are
-     * per-user, not per-tenant (see V22/V23 and AgentExecution.triggeredBy's
-     * javadoc). Null is a legitimate value here (e.g. a future non-HTTP
-     * caller), not just "old test predating this param".
-     */
-    @Transactional
-    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
-                                   Map<String, String> inputParameters, Integer maxTokens, UUID triggeredBy) {
-        return enqueue(tenantId, prompt, agentSlug, repositoryUrl, repositoryBranch, inputParameters, maxTokens, triggeredBy, null);
-    }
-
-    /**
-     * Same as the 8-arg overload, additionally recording parentExecutionId --
-     * non-null only when this execution is being created by delegate_to_agent
-     * on behalf of another, already-running execution (see
-     * DelegateToAgentTool and V25__agent_execution_parent_and_planner.sql).
-     * Every other call site (the public API, every pre-existing test) passes
-     * null via the 8-arg overload, unchanged.
-     */
-    @Transactional
-    public AgentExecution enqueue(UUID tenantId, String prompt, String agentSlug, String repositoryUrl, String repositoryBranch,
-                                   Map<String, String> inputParameters, Integer maxTokens, UUID triggeredBy, UUID parentExecutionId) {
         AgentDefinition definition = agentDefinitionRepository.findBySlugAndActiveTrue(agentSlug)
                 .orElseThrow(() -> new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: " + agentSlug));
 
-        validateRequiredInputs(definition, prompt, repositoryUrl, inputParameters);
+        validateRequiredInputs(definition, command.prompt(), repositoryUrl, command.inputParameters());
         if (maxTokens != null && maxTokens <= 0) {
             throw new AgentException(HttpStatus.BAD_REQUEST, "maxTokens must be positive");
         }
@@ -156,15 +124,16 @@ public class AgentExecutionService {
         // agent whose requiredInputs doesn't include "prompt" crash the insert. Both seeded
         // agents currently require prompt, but that's a per-AgentDefinition choice, not a
         // guarantee -- this stays defensive for the next one that doesn't.
-        execution.setPrompt(prompt == null ? "" : prompt);
+        execution.setPrompt(command.prompt() == null ? "" : command.prompt());
         execution.setRepositoryUrl(repositoryUrl);
         // Only meaningful paired with a repository -- never persisted on its own.
+        String repositoryBranch = command.repositoryBranch();
         execution.setRepositoryBranch((repositoryUrl == null || repositoryUrl.isBlank() || repositoryBranch == null || repositoryBranch.isBlank())
                 ? null : repositoryBranch);
-        execution.setInputParameters(serializeInputParameters(inputParameters));
+        execution.setInputParameters(serializeInputParameters(command.inputParameters()));
         execution.setMaxTokensOverride(maxTokens);
-        execution.setTriggeredBy(triggeredBy);
-        execution.setParentExecutionId(parentExecutionId);
+        execution.setTriggeredBy(command.triggeredBy());
+        execution.setParentExecutionId(command.parentExecutionId());
         execution.setStatus("QUEUED");
         return repository.save(execution);
     }

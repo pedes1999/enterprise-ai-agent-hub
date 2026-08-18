@@ -118,36 +118,28 @@ public class ToolCallingChatEngine {
     private final int compactionWindowRounds;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** Tunes nothing -- see ChatEngineOptions.DEFAULTS for exactly what that means. */
     public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext) {
-        this(chatModel, tools, executionContext, null);
+        this(chatModel, tools, executionContext, ChatEngineOptions.DEFAULTS);
     }
 
     /**
+     * options carries the five tunable knobs -- see ChatEngineOptions for
+     * how they're built and why they live in one object rather than as a
+     * positional tail. What each one does:
+     *
      * systemPrompt is an AgentDefinition's persona/instructions (see
-     * gateway-api) -- nullable/blank for callers that don't have one (or
-     * still use the 3-arg constructor above), in which case the model just
-     * sees the user message with no system message at all, same as before
-     * this existed.
-     */
-    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext, String systemPrompt) {
-        this(chatModel, tools, executionContext, systemPrompt, null);
-    }
-
-    /**
+     * gateway-api) -- nullable/blank for callers that don't have one, in
+     * which case the model just sees the user message with no system
+     * message at all.
+     *
      * maxTokensBudget is a second, cost-priced stop condition alongside
      * maxToolRounds -- see budgetExceeded()'s javadoc for why both exist
      * rather than one replacing the other. Null means "no budget, rely on
-     * maxToolRounds alone" -- e.g. every pre-budget caller/test, and any
-     * caller whose tenant/server config genuinely has no limit configured.
-     */
-    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
-                                  String systemPrompt, Integer maxTokensBudget) {
-        this(chatModel, tools, executionContext, systemPrompt, maxTokensBudget, null);
-    }
-
-    /**
-     * maxToolRounds: null means "use DEFAULT_MAX_TOOL_ROUNDS" -- every
-     * pre-existing caller/test keeps today's behavior unchanged. A
+     * maxToolRounds alone" -- e.g. any caller whose tenant/server config
+     * genuinely has no limit configured.
+     *
+     * maxToolRounds: null means "use DEFAULT_MAX_TOOL_ROUNDS". A
      * defense-in-depth ceiling independent of maxTokensBudget/terminal-tool
      * detection: even a provider that never reports usage and a tool that's
      * never marked terminal still can't loop past this many rounds. Kept
@@ -157,13 +149,7 @@ public class ToolCallingChatEngine {
      * much that number has already had to move (6 -> 14 -> 30 -> 100) as
      * real agents needed more headroom; a deployment that wants a tighter
      * ceiling (or a genuinely bigger one) no longer needs a code change.
-     */
-    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
-                                  String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds) {
-        this(chatModel, tools, executionContext, systemPrompt, maxTokensBudget, maxToolRounds, false);
-    }
-
-    /**
+     *
      * cacheConversationHistory: Anthropic-only (see AnthropicMapper.CACHE_CONTROL
      * in langchain4j-anthropic -- agent-core deliberately doesn't depend on
      * that module, see LlmEngineFactory's javadoc, so the "cache_control"/
@@ -172,46 +158,35 @@ public class ToolCallingChatEngine {
      * this way is a silent no-op for OpenAI/Gemini/Local since their
      * langchain4j mappers don't look for this attribute at all, but there's
      * no benefit to paying the (tiny) extra allocation cost of rebuilding a
-     * message on providers that will never read it.
-     *
-     * When true, the LAST message in the conversation is marked as a cache
-     * breakpoint before every generate() call, moving forward each round:
-     * round N's call caches everything through round N's newest message, so
-     * round N+1 only pays full price for what's actually new since then,
-     * instead of resending the entire growing history at full price every
-     * single round the same way the system prompt/tools already avoid via
+     * message on providers that will never read it. When true, the LAST
+     * message in the conversation is marked as a cache breakpoint before
+     * every generate() call, moving forward each round: round N's call
+     * caches everything through round N's newest message, so round N+1 only
+     * pays full price for what's actually new since then, instead of
+     * resending the entire growing history at full price every single round
+     * the same way the system prompt/tools already avoid via
      * cacheSystemMessages/cacheTools.
+     *
+     * compactionWindowRounds: null means "use DEFAULT_COMPACTION_WINDOW_ROUNDS".
+     * See that constant's own javadoc for what this controls and why 20 is
+     * the default. Kept configurable the same way maxToolRounds is, for the
+     * same reason: the right value is workload-dependent, and a deployment
+     * that wants a smaller/larger window (or -- by passing
+     * Integer.MAX_VALUE -- effectively none) shouldn't need a code change.
      */
     public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
-                                  String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds,
-                                  boolean cacheConversationHistory) {
-        this(chatModel, tools, executionContext, systemPrompt, maxTokensBudget, maxToolRounds,
-                cacheConversationHistory, null);
-    }
-
-    /**
-     * compactionWindowRounds: null means "use DEFAULT_COMPACTION_WINDOW_ROUNDS" --
-     * every pre-existing caller/test keeps today's (now-compacting)
-     * behavior. See DEFAULT_COMPACTION_WINDOW_ROUNDS' own javadoc for what
-     * this controls and why 20 is the default. Kept configurable the same
-     * way maxToolRounds already is, for the same reason: the right value
-     * is workload-dependent, and a deployment that wants a smaller/larger
-     * window (or -- by passing Integer.MAX_VALUE -- effectively none)
-     * shouldn't need a code change to get it.
-     */
-    public ToolCallingChatEngine(ChatModel chatModel, List<AgentTool> tools, ToolExecutionContext executionContext,
-                                  String systemPrompt, Integer maxTokensBudget, Integer maxToolRounds,
-                                  boolean cacheConversationHistory, Integer compactionWindowRounds) {
+                                  ChatEngineOptions options) {
         this.chatModel = chatModel;
         this.toolsByName = new LinkedHashMap<>();
         tools.forEach(tool -> toolsByName.put(tool.name(), tool));
         this.toolSpecifications = tools.stream().map(ToolCallingChatEngine::toSpecification).toList();
         this.executionContext = executionContext;
-        this.systemPrompt = systemPrompt;
-        this.maxTokensBudget = maxTokensBudget;
-        this.maxToolRounds = maxToolRounds != null ? maxToolRounds : DEFAULT_MAX_TOOL_ROUNDS;
-        this.cacheConversationHistory = cacheConversationHistory;
-        this.compactionWindowRounds = compactionWindowRounds != null ? compactionWindowRounds : DEFAULT_COMPACTION_WINDOW_ROUNDS;
+        this.systemPrompt = options.systemPrompt();
+        this.maxTokensBudget = options.maxTokensBudget();
+        this.maxToolRounds = options.maxToolRounds() != null ? options.maxToolRounds() : DEFAULT_MAX_TOOL_ROUNDS;
+        this.cacheConversationHistory = options.cacheConversationHistory();
+        this.compactionWindowRounds = options.compactionWindowRounds() != null
+                ? options.compactionWindowRounds() : DEFAULT_COMPACTION_WINDOW_ROUNDS;
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */

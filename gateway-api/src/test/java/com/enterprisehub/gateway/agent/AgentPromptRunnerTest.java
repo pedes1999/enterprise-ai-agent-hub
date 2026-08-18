@@ -3,6 +3,7 @@ package com.enterprisehub.gateway.agent;
 import com.enterprisehub.core.SharedExecutionContext;
 import com.enterprisehub.core.SharedExecutionContextFactory;
 import com.enterprisehub.core.llm.LlmProvider;
+import com.enterprisehub.core.tool.ChatEngineOptions;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.gateway.agent.catalog.CurrentDateTimeToolFactory;
 import com.enterprisehub.gateway.agent.catalog.GitCloneToolFactory;
@@ -147,12 +148,12 @@ class AgentPromptRunnerTest {
      */
     private void stubContextFactory(String executionId) {
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq(executionId), eq(LlmProvider.ANTHROPIC),
-                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any(), any(), any()))
+                eq("sk-ant-real-key"), eq("claude-3-5-sonnet-20240620"), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
-                    String systemPrompt = invocation.getArgument(6);
-                    return new SharedExecutionContext(tenantId.toString(), executionId, chatLanguageModel, tools, systemPrompt);
+                    ChatEngineOptions options = invocation.getArgument(7);
+                    return new SharedExecutionContext(tenantId.toString(), executionId, chatLanguageModel, tools, options);
                 });
     }
 
@@ -163,7 +164,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("Hi there!")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-1", AGENT_SLUG, "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(AgentRunRequest.of(tenantId, userId, "exec-1", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         assertThat(result.reply()).isEqualTo("Hi there!");
         assertThat(result.toolWasUsed()).isFalse();
@@ -177,17 +180,19 @@ class AgentPromptRunnerTest {
         when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "LOCAL")).thenReturn(Optional.of(localCredential));
         when(vendorCredentialService.decryptToken(localCredential)).thenReturn("not-needed");
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-local"), eq(LlmProvider.LOCAL),
-                eq("not-needed"), eq((String) null), any(), any(), eq((String) null), any(), any()))
+                eq("not-needed"), eq((String) null), any(), eq((String) null), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
-                    String systemPrompt = invocation.getArgument(6);
-                    return new SharedExecutionContext(tenantId.toString(), "exec-local", chatLanguageModel, tools, systemPrompt);
+                    ChatEngineOptions options = invocation.getArgument(7);
+                    return new SharedExecutionContext(tenantId.toString(), "exec-local", chatLanguageModel, tools, options);
                 });
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("Hi from local!")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-local", AGENT_SLUG, "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(AgentRunRequest.of(tenantId, userId, "exec-local", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         assertThat(result.reply()).isEqualTo("Hi from local!");
         verify(vendorCredentialRepository, never()).findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC");
@@ -208,7 +213,9 @@ class AgentPromptRunnerTest {
                 .thenReturn(response(AiMessage.from(List.of(toolRequest))))
                 .thenReturn(response(AiMessage.from("It is currently 2026-01-01T00:00:00Z")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-2", AGENT_SLUG, "What time is it in UTC?");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(AgentRunRequest.of(tenantId, userId, "exec-2", AGENT_SLUG)
+                .prompt("What time is it in UTC?")
+                .build());
 
         assertThat(result.toolWasUsed()).isTrue();
         assertThat(result.reply()).contains("2026-01-01");
@@ -235,7 +242,9 @@ class AgentPromptRunnerTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(new com.enterprisehub.runtime.sandbox.CommandResult(0, "ok", "", false, java.time.Duration.ZERO));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-shared", AGENT_SLUG, "clone then list files");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(AgentRunRequest.of(tenantId, userId, "exec-shared", AGENT_SLUG)
+                .prompt("clone then list files")
+                .build());
 
         assertThat(result.toolWasUsed()).isTrue();
         // Two sandboxed tool calls happened, but only ONE real sandbox was
@@ -252,7 +261,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("no tool needed")));
 
-        runner.run(tenantId, userId, "exec-notools", AGENT_SLUG, "just answer directly");
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-notools", AGENT_SLUG)
+                .prompt("just answer directly")
+                .build());
 
         verifyNoInteractions(sandboxClient);
     }
@@ -261,7 +272,9 @@ class AgentPromptRunnerTest {
     void run_noCredentialConfigured_throwsBadRequest() {
         when(vendorCredentialRepository.findByTenantIdAndUserIdAndProvider(tenantId, userId, "ANTHROPIC")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> runner.run(tenantId, userId, "exec-3", AGENT_SLUG, "Hello"))
+        assertThatThrownBy(() -> runner.run(AgentRunRequest.of(tenantId, userId, "exec-3", AGENT_SLUG)
+                .prompt("Hello")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verifyNoInteractions(sharedExecutionContextFactory);
@@ -271,7 +284,9 @@ class AgentPromptRunnerTest {
     void run_unknownAgentSlug_throwsBadRequest_neverResolvesCredential() {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("does-not-exist")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> runner.run(tenantId, userId, "exec-unknown", "does-not-exist", "Hello"))
+        assertThatThrownBy(() -> runner.run(AgentRunRequest.of(tenantId, userId, "exec-unknown", "does-not-exist")
+                .prompt("Hello")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("does-not-exist")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -287,7 +302,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-no-git", AGENT_SLUG, "Hello");
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-no-git", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         verifyNoInteractions(credentialResolver);
     }
@@ -301,7 +318,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-with-git", AGENT_SLUG, "Hello");
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-with-git", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         verify(credentialResolver).resolve(tenantId.toString(), "GIT");
     }
@@ -315,7 +334,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-no-pr", AGENT_SLUG, "Hello");
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-no-pr", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         verifyNoInteractions(credentialResolver);
     }
@@ -329,7 +350,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-with-pr", AGENT_SLUG, "Hello");
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-with-pr", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         verify(credentialResolver).resolve(tenantId.toString(), "GIT");
         verify(credentialResolver).resolve(tenantId.toString(), "GITHUB");
@@ -342,7 +365,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-sysprompt", AGENT_SLUG, "Hello");
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-sysprompt", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(chatLanguageModel).chat(captor.capture());
@@ -362,7 +387,9 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-noop-input", AGENT_SLUG, "Hello", null, null, null);
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-noop-input", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         assertThat(capturedUserMessageText()).isEqualTo("Hello");
     }
@@ -376,8 +403,11 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-ticket-style", AGENT_SLUG, "Also check the auth module",
-                "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-ticket-style", AGENT_SLUG)
+                .prompt("Also check the auth module")
+                .repository("https://github.com/org/repo.git", null)
+                .inputParameters(Map.of("text", "Ticket: fix the login bug"))
+                .build());
 
         assertThat(capturedUserMessageText()).isEqualTo(
                 "Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug\n\nAlso check the auth module");
@@ -392,8 +422,11 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-ticket-branch", AGENT_SLUG, "Also check the auth module",
-                "https://github.com/org/repo.git", "feature/my-branch", Map.of("text", "Ticket: fix the login bug"));
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-ticket-branch", AGENT_SLUG)
+                .prompt("Also check the auth module")
+                .repository("https://github.com/org/repo.git", "feature/my-branch")
+                .inputParameters(Map.of("text", "Ticket: fix the login bug"))
+                .build());
 
         assertThat(capturedUserMessageText()).isEqualTo(
                 "Repository: https://github.com/org/repo.git\nBranch: feature/my-branch\n\nTicket: fix the login bug\n\nAlso check the auth module");
@@ -406,7 +439,10 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-branch-no-repo", AGENT_SLUG, "Hello", null, "feature/my-branch", null);
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-branch-no-repo", AGENT_SLUG)
+                .prompt("Hello")
+                .repository(null, "feature/my-branch")
+                .build());
 
         assertThat(capturedUserMessageText()).isEqualTo("Hello");
     }
@@ -420,8 +456,11 @@ class AgentPromptRunnerTest {
         when(chatLanguageModel.chat(any(ChatRequest.class)))
                 .thenReturn(response(AiMessage.from("ok")));
 
-        runner.run(tenantId, userId, "exec-ticket-noprompt", AGENT_SLUG, "",
-                "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the login bug"));
+        runner.run(AgentRunRequest.of(tenantId, userId, "exec-ticket-noprompt", AGENT_SLUG)
+                .prompt("")
+                .repository("https://github.com/org/repo.git", null)
+                .inputParameters(Map.of("text", "Ticket: fix the login bug"))
+                .build());
 
         assertThat(capturedUserMessageText()).isEqualTo("Repository: https://github.com/org/repo.git\n\nTicket: fix the login bug");
     }
@@ -432,7 +471,9 @@ class AgentPromptRunnerTest {
         stubContextFactory("exec-4");
         when(chatLanguageModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("timeout"));
 
-        assertThatThrownBy(() -> runner.run(tenantId, userId, "exec-4", AGENT_SLUG, "Hello"))
+        assertThatThrownBy(() -> runner.run(AgentRunRequest.of(tenantId, userId, "exec-4", AGENT_SLUG)
+                .prompt("Hello")
+                .build()))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("timeout");
     }
@@ -444,16 +485,18 @@ class AgentPromptRunnerTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue(AGENT_SLUG)).thenReturn(Optional.of(definition));
         stubCredentialResolution();
         when(sharedExecutionContextFactory.create(eq(tenantId.toString()), eq("exec-cheap"), eq(LlmProvider.ANTHROPIC),
-                eq("sk-ant-real-key"), eq("claude-cheap-model"), any(), any(), any(), any(), any()))
+                eq("sk-ant-real-key"), eq("claude-cheap-model"), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     @SuppressWarnings("unchecked")
                     List<com.enterprisehub.core.tool.AgentTool> tools = invocation.getArgument(5);
-                    String systemPrompt = invocation.getArgument(6);
-                    return new SharedExecutionContext(tenantId.toString(), "exec-cheap", chatLanguageModel, tools, systemPrompt);
+                    ChatEngineOptions options = invocation.getArgument(7);
+                    return new SharedExecutionContext(tenantId.toString(), "exec-cheap", chatLanguageModel, tools, options);
                 });
         when(chatLanguageModel.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("cheap reply")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-cheap", AGENT_SLUG, "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(AgentRunRequest.of(tenantId, userId, "exec-cheap", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         assertThat(result.reply()).isEqualTo("cheap reply");
         // The definition's own preference wins -- the tenant's own resolved
@@ -471,7 +514,9 @@ class AgentPromptRunnerTest {
         stubContextFactory("exec-default-model");
         when(chatLanguageModel.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("default reply")));
 
-        ToolCallingChatEngine.ToolChatResult result = runner.run(tenantId, userId, "exec-default-model", AGENT_SLUG, "Hello");
+        ToolCallingChatEngine.ToolChatResult result = runner.run(AgentRunRequest.of(tenantId, userId, "exec-default-model", AGENT_SLUG)
+                .prompt("Hello")
+                .build());
 
         assertThat(result.reply()).isEqualTo("default reply");
         verify(tenantLlmProviderResolver).resolveModelName(tenantId, LlmProvider.ANTHROPIC);

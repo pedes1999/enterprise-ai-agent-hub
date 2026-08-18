@@ -4,6 +4,7 @@ import com.enterprisehub.core.SharedExecutionContext;
 import com.enterprisehub.core.SharedExecutionContextFactory;
 import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.AgentTool;
+import com.enterprisehub.core.tool.ChatEngineOptions;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.gateway.agent.catalog.ToolCatalog;
 import com.enterprisehub.gateway.agent.catalog.ToolCreationContext;
@@ -116,37 +117,20 @@ public class AgentPromptRunner {
      * LLM call itself failing) -- callers decide how to surface that (a
      * 4xx/502 HTTP response for the sync spike, a FAILED agent_executions
      * row for the async worker).
+     *
+     * An AgentDefinition with no inputSourceType (general-assistant,
+     * ticket-resolver today) ignores the request's repositoryUrl/
+     * repositoryBranch/inputParameters entirely: assemblePrompt() reduces to
+     * exactly the request's own prompt. See AgentRunRequest for the
+     * per-field contracts.
      */
-    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, UUID userId, String executionId, String agentSlug, String prompt) {
-        return run(tenantId, userId, executionId, agentSlug, prompt, null, null, null, null);
-    }
+    public ToolCallingChatEngine.ToolChatResult run(AgentRunRequest request) {
+        UUID tenantId = request.tenantId();
+        UUID userId = request.userId();
+        String executionId = request.executionId();
+        Integer maxTokensOverride = request.maxTokensOverride();
 
-    /** Same as the 9-arg overload, with no per-execution token budget override (uses the tenant's/server's default). */
-    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, UUID userId, String executionId, String agentSlug, String prompt,
-                                                      String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters) {
-        return run(tenantId, userId, executionId, agentSlug, prompt, repositoryUrl, repositoryBranch, inputParameters, null);
-    }
-
-    /**
-     * repositoryUrl/repositoryBranch/inputParameters/maxTokensOverride are
-     * all optional and additive -- see TriggerAgentExecutionRequest's
-     * javadoc. An AgentDefinition with no inputSourceType (general-assistant,
-     * ticket-resolver today) ignores repositoryUrl/repositoryBranch/
-     * inputParameters entirely: assemblePrompt() reduces to exactly
-     * `prompt`, byte-identical to this method's behavior before any of
-     * these parameters existed. repositoryBranch is only meaningful
-     * alongside a non-blank repositoryUrl -- see assemblePrompt().
-     * maxTokensOverride, when null, falls back to this tenant's own default
-     * (TenantLlmProviderResolver.resolveMaxTokens()) -- the same
-     * "execution overrides tenant overrides server" layering repositoryUrl/
-     * modelName already use elsewhere in this class. userId is who this
-     * runs the LLM call as (see resolveApiKey()) -- there's no tenant-wide
-     * fallback credential, so a null/unknown userId always fails.
-     */
-    public ToolCallingChatEngine.ToolChatResult run(UUID tenantId, UUID userId, String executionId, String agentSlug, String prompt,
-                                                      String repositoryUrl, String repositoryBranch, Map<String, String> inputParameters,
-                                                      Integer maxTokensOverride) {
-        AgentDefinition definition = resolveAgentDefinition(agentSlug);
+        AgentDefinition definition = resolveAgentDefinition(request.agentSlug());
         LlmProvider provider = tenantLlmProviderResolver.resolve(tenantId);
         String apiKey = resolveApiKey(tenantId, userId, provider);
         // The definition's own preferred model (if set) overrides the
@@ -158,16 +142,21 @@ public class AgentPromptRunner {
                 ? definition.getPreferredModelName()
                 : tenantLlmProviderResolver.resolveModelName(tenantId, provider);
         Integer maxTokens = maxTokensOverride != null ? maxTokensOverride : tenantLlmProviderResolver.resolveMaxTokens(tenantId);
-        String resolvedInput = resolveInput(definition, tenantId, inputParameters);
-        String assembledPrompt = assemblePrompt(repositoryUrl, repositoryBranch, resolvedInput, prompt);
+        String resolvedInput = resolveInput(definition, tenantId, request.inputParameters());
+        String assembledPrompt = assemblePrompt(request.repositoryUrl(), request.repositoryBranch(), resolvedInput, request.prompt());
 
         SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId, definition));
         try {
             ToolCreationContext toolContext = new ToolCreationContext(tenantId.toString(), userId == null ? null : userId.toString(), definition.getId());
             List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver, toolContext);
             SharedExecutionContext context = sharedExecutionContextFactory.create(
-                    tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(),
-                    llmProperties.baseUrl(provider), maxTokens, llmProperties.maxToolRounds());
+                    tenantId.toString(), executionId, provider, apiKey, modelName, tools,
+                    llmProperties.baseUrl(provider),
+                    ChatEngineOptions.builder()
+                            .systemPrompt(definition.getSystemPrompt())
+                            .maxTokensBudget(maxTokens)
+                            .maxToolRounds(llmProperties.maxToolRounds())
+                            .build());
 
             return context.chat(assembledPrompt);
         } finally {

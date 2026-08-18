@@ -53,7 +53,9 @@ class AgentExecutionServiceTest {
 
     @Test
     void enqueue_createsQueuedRowWithPromptAndTenantAndAgentSlug() {
-        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build());
 
         assertThat(saved.getTenantId()).isEqualTo(tenantId);
         assertThat(saved.getPrompt()).isEqualTo("list files");
@@ -67,15 +69,20 @@ class AgentExecutionServiceTest {
     void enqueue_llmProvider_reflectsWhateverTheTenantResolvesTo_notAlwaysAnthropic() {
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);
 
-        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build());
 
         assertThat(saved.getLlmProvider()).isEqualTo("LOCAL");
     }
 
     @Test
     void enqueue_repositoryUrlAndInputParameters_persistedOnTheRow() {
-        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent",
-                "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the bug"));
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("fix it")
+                .repositoryUrl("https://github.com/org/repo.git")
+                .inputParameters(Map.of("text", "Ticket: fix the bug"))
+                .build());
 
         assertThat(saved.getRepositoryUrl()).isEqualTo("https://github.com/org/repo.git");
         assertThat(saved.getInputParameters()).contains("\"text\"").contains("Ticket: fix the bug");
@@ -83,8 +90,11 @@ class AgentExecutionServiceTest {
 
     @Test
     void enqueue_repositoryBranchGivenWithUrl_persisted() {
-        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent",
-                "https://github.com/org/repo.git", "feature/my-branch", Map.of());
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("fix it")
+                .repository("https://github.com/org/repo.git", "feature/my-branch")
+                .inputParameters(Map.of())
+                .build());
 
         assertThat(saved.getRepositoryBranch()).isEqualTo("feature/my-branch");
     }
@@ -93,30 +103,42 @@ class AgentExecutionServiceTest {
     void enqueue_repositoryBranchGiven_butNoRepositoryUrl_neverPersisted() {
         // A branch with no repository doesn't mean anything -- silently
         // dropped rather than stored as orphaned state.
-        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent", null, "feature/my-branch", Map.of());
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("fix it")
+                .repository(null, "feature/my-branch")
+                .inputParameters(Map.of())
+                .build());
 
         assertThat(saved.getRepositoryBranch()).isNull();
     }
 
     @Test
     void enqueue_blankRepositoryBranch_treatedSameAsOmitted() {
-        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent",
-                "https://github.com/org/repo.git", "   ", Map.of());
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("fix it")
+                .repository("https://github.com/org/repo.git", "   ")
+                .inputParameters(Map.of())
+                .build());
 
         assertThat(saved.getRepositoryBranch()).isNull();
     }
 
     @Test
     void deserializeInputParameters_roundTripsWhatEnqueueSerialized() {
-        AgentExecution saved = service.enqueue(tenantId, "fix it", "coding-agent",
-                "https://github.com/org/repo.git", null, Map.of("text", "Ticket: fix the bug"));
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("fix it")
+                .repositoryUrl("https://github.com/org/repo.git")
+                .inputParameters(Map.of("text", "Ticket: fix the bug"))
+                .build());
 
         assertThat(service.deserializeInputParameters(saved)).isEqualTo(Map.of("text", "Ticket: fix the bug"));
     }
 
     @Test
     void deserializeInputParameters_noneStored_returnsEmptyMapNotNull() {
-        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build());
 
         assertThat(service.deserializeInputParameters(saved)).isEmpty();
     }
@@ -133,7 +155,9 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("general-assistant"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("general-assistant", "prompt")));
 
-        AgentExecution saved = service.enqueue(tenantId, "Hello", "general-assistant", null, null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "general-assistant")
+                .prompt("Hello")
+                .build());
 
         assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }
@@ -143,7 +167,9 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("general-assistant"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("general-assistant", "prompt")));
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "   ", "general-assistant", null, null, null))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "general-assistant")
+                .prompt("   ")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("Missing required input(s): prompt")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -155,7 +181,11 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));
 
-        AgentExecution saved = service.enqueue(tenantId, "", "coding-agent", "https://github.com/org/repo.git", null, Map.of());
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("")
+                .repositoryUrl("https://github.com/org/repo.git")
+                .inputParameters(Map.of())
+                .build());
 
         assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }
@@ -170,7 +200,9 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));
 
-        AgentExecution saved = service.enqueue(tenantId, null, "coding-agent", "https://github.com/org/repo.git", null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .repositoryUrl("https://github.com/org/repo.git")
+                .build());
 
         assertThat(saved.getPrompt()).isEqualTo("");
     }
@@ -180,7 +212,9 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("coding-agent", "repositoryUrl")));
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "some prompt", "coding-agent", null, null, null))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("some prompt")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("Missing required input(s): repositoryUrl")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -192,7 +226,10 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("ticket-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("ticket-agent", "inputParameters:ticketKey")));
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "", "ticket-agent", null, null, Map.of()))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "ticket-agent")
+                .prompt("")
+                .inputParameters(Map.of())
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("Missing required input(s): inputParameters.ticketKey")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -204,7 +241,10 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("ticket-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("ticket-agent", "inputParameters:ticketKey")));
 
-        AgentExecution saved = service.enqueue(tenantId, "", "ticket-agent", null, null, Map.of("ticketKey", "TICKET-123"));
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "ticket-agent")
+                .prompt("")
+                .inputParameters(Map.of("ticketKey", "TICKET-123"))
+                .build());
 
         assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }
@@ -214,7 +254,9 @@ class AgentExecutionServiceTest {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("ticket-pr-agent"))
                 .thenReturn(Optional.of(definitionWithRequiredInputs("ticket-pr-agent", "repositoryUrl", "inputParameters:ticketKey")));
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "", "ticket-pr-agent", null, null, null))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "ticket-pr-agent")
+                .prompt("")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("Missing required input(s): repositoryUrl, inputParameters.ticketKey")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -225,7 +267,9 @@ class AgentExecutionServiceTest {
     void enqueue_unknownAgentSlug_rejectedBeforePersisting() {
         when(agentDefinitionRepository.findBySlugAndActiveTrue("does-not-exist")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "does-not-exist", null, null, null))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "does-not-exist")
+                .prompt("list files")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("does-not-exist")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -236,7 +280,9 @@ class AgentExecutionServiceTest {
     void enqueue_atConcurrencyLimit_rejectedWithTooManyRequests_neverPersists() {
         when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(5L);
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "coding-agent", null, null, null))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("5")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
@@ -247,7 +293,9 @@ class AgentExecutionServiceTest {
     void enqueue_belowConcurrencyLimit_succeeds() {
         when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(4L);
 
-        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build());
 
         assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }
@@ -256,7 +304,9 @@ class AgentExecutionServiceTest {
     void enqueue_overConcurrencyLimit_stillRejected() {
         when(repository.countByTenantIdAndStatusIn(tenantId, List.of("QUEUED", "RUNNING"))).thenReturn(9L);
 
-        assertThatThrownBy(() -> service.enqueue(tenantId, "list files", "coding-agent", null, null, null))
+        assertThatThrownBy(() -> service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build()))
                 .isInstanceOf(AgentException.class)
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
     }
@@ -268,7 +318,9 @@ class AgentExecutionServiceTest {
         // tenantId itself has nothing active (default 0 stub) -- a busy
         // OTHER tenant must never affect this one.
 
-        AgentExecution saved = service.enqueue(tenantId, "list files", "coding-agent", null, null, null);
+        AgentExecution saved = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build());
 
         assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }

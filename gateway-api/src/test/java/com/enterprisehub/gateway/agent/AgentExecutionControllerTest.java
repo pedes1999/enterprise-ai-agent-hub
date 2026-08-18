@@ -59,7 +59,10 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null), eq(null), eq(userId)))
+        when(executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, AgentPromptRunner.DEFAULT_AGENT_SLUG)
+                .prompt("list files")
+                .triggeredBy(userId)
+                .build()))
                 .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
@@ -76,7 +79,10 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("build a feature"), eq("coding-agent"), eq(null), eq(null), eq(null), eq(null), eq(userId)))
+        when(executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("build a feature")
+                .triggeredBy(userId)
+                .build()))
                 .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
@@ -91,8 +97,12 @@ class AgentExecutionControllerTest {
         AgentExecution queued = new AgentExecution();
         queued.setId(UUID.randomUUID());
         queued.setStatus("QUEUED");
-        when(executionService.enqueue(eq(tenantId), eq("also check the auth module"), eq("coding-agent"),
-                eq("https://github.com/org/repo.git"), eq(null), eq(java.util.Map.of("text", "Ticket: fix the bug")), eq(null), eq(userId)))
+        when(executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("also check the auth module")
+                .repositoryUrl("https://github.com/org/repo.git")
+                .inputParameters(java.util.Map.of("text", "Ticket: fix the bug"))
+                .triggeredBy(userId)
+                .build()))
                 .thenReturn(queued);
 
         mockMvc.perform(post("/agents/execute")
@@ -111,7 +121,10 @@ class AgentExecutionControllerTest {
         // (see AgentExecutionServiceTest for the per-AgentDefinition
         // required-inputs coverage); the controller's job is just to map
         // whatever AgentException it throws to the right status code.
-        when(executionService.enqueue(eq(tenantId), eq(" "), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null), eq(null), eq(userId)))
+        when(executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, AgentPromptRunner.DEFAULT_AGENT_SLUG)
+                .prompt(" ")
+                .triggeredBy(userId)
+                .build()))
                 .thenThrow(new AgentException(org.springframework.http.HttpStatus.BAD_REQUEST, "Missing required input(s): prompt"));
 
         mockMvc.perform(post("/agents/execute")
@@ -123,7 +136,10 @@ class AgentExecutionControllerTest {
 
     @Test
     void execute_tenantAtConcurrencyLimit_returns429() throws Exception {
-        when(executionService.enqueue(eq(tenantId), eq("list files"), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq(null), eq(null), eq(null), eq(null), eq(userId)))
+        when(executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, AgentPromptRunner.DEFAULT_AGENT_SLUG)
+                .prompt("list files")
+                .triggeredBy(userId)
+                .build()))
                 .thenThrow(new AgentException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
                         "This tenant already has 5 agent executions in progress (limit 5) -- wait for one to finish before starting another."));
 

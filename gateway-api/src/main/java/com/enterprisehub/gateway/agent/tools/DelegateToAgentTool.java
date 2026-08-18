@@ -3,6 +3,7 @@ package com.enterprisehub.gateway.agent.tools;
 import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.core.tool.ToolExecutionContext;
 import com.enterprisehub.gateway.agent.AgentExecutionService;
+import com.enterprisehub.gateway.agent.EnqueueExecutionCommand;
 import com.enterprisehub.gateway.entity.AgentExecution;
 
 import java.util.Map;
@@ -84,7 +85,12 @@ public class DelegateToAgentTool implements AgentTool {
 
         try {
             AgentExecution child = executionService.enqueue(
-                    tenantId, prompt, agentSlug, repositoryUrl, null, null, null, triggeredBy, parentExecutionId);
+                    EnqueueExecutionCommand.forAgent(tenantId, agentSlug)
+                            .prompt(prompt)
+                            .repositoryUrl(repositoryUrl)
+                            .triggeredBy(triggeredBy)
+                            .parentExecutionId(parentExecutionId)
+                            .build());
             return "Delegated to a new '" + agentSlug + "' execution (id=" + child.getId() + "), queued. "
                     + "This does not report that execution's eventual result.";
         } catch (RuntimeException e) {

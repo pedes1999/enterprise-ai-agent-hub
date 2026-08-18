@@ -21,6 +21,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -153,7 +154,7 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_delegatesToRunner_returnsItsResult() {
-        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
+        when(agentPromptRunner.run(runFor(AgentPromptRunner.DEFAULT_AGENT_SLUG, "Hello")))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", false, false, null));
 
         AgentToolPingResponse result = service.pingWithTools(tenantId, userId, "Hello", null);
@@ -167,7 +168,7 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_explicitAgentSlug_passedThroughToRunner() {
-        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq("coding-agent"), eq("Hello")))
+        when(agentPromptRunner.run(runFor("coding-agent", "Hello")))
                 .thenReturn(new ToolCallingChatEngine.ToolChatResult("Hi there!", true, false, null));
 
         AgentToolPingResponse result = service.pingWithTools(tenantId, userId, "Hello", "coding-agent");
@@ -185,7 +186,7 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_runnerThrowsGenericRuntimeException_mapsTo502BadGateway() {
-        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq(AgentPromptRunner.DEFAULT_AGENT_SLUG), eq("Hello")))
+        when(agentPromptRunner.run(runFor(AgentPromptRunner.DEFAULT_AGENT_SLUG, "Hello")))
                 .thenThrow(new RuntimeException("timeout"));
 
         assertThatThrownBy(() -> service.pingWithTools(tenantId, userId, "Hello", null))
@@ -195,12 +196,26 @@ class AgentPingServiceTest {
 
     @Test
     void pingWithTools_runnerThrowsAgentException_statusPreserved_notRelabeledAs502() {
-        when(agentPromptRunner.run(eq(tenantId), eq(userId), any(), eq("unknown-agent"), eq("Hello")))
+        when(agentPromptRunner.run(runFor("unknown-agent", "Hello")))
                 .thenThrow(new AgentException(HttpStatus.BAD_REQUEST, "Unknown or inactive agent: unknown-agent"));
 
         assertThatThrownBy(() -> service.pingWithTools(tenantId, userId, "Hello", "unknown-agent"))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("Unknown or inactive agent")
                 .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    /**
+     * Matches the AgentRunRequest AgentPingService builds, pinning every
+     * field except executionId -- that one is a fresh random UUID minted
+     * inside the service for this synchronous spike endpoint (see its
+     * "synthetic id" comment), so it can't be predicted from out here.
+     */
+    private AgentRunRequest runFor(String agentSlug, String prompt) {
+        return argThat(request -> request != null
+                && tenantId.equals(request.tenantId())
+                && userId.equals(request.userId())
+                && agentSlug.equals(request.agentSlug())
+                && prompt.equals(request.prompt()));
     }
 }

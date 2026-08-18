@@ -644,7 +644,7 @@ class ToolCallingChatEngineTest {
         when(model.chat(argThat((ChatRequest req) -> requestsNoTools(req))))
                 .thenReturn(response(AiMessage.from("forced final answer")));
 
-        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, 5);
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().maxToolRounds(5).build());
         ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
 
         // 5 tool-offering rounds (the configured cap, NOT DEFAULT_MAX_TOOL_ROUNDS'
@@ -686,7 +686,7 @@ class ToolCallingChatEngineTest {
         when(model.chat(argThat((ChatRequest req) -> requestsNoTools(req))))
                 .thenReturn(response(AiMessage.from("forced final answer"), new TokenUsage(50, 10, 60)));
 
-        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, 2000);
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().maxTokensBudget(2000).build());
         ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
 
         // Exactly 2 tool-offering rounds (2000 tokens) plus 1 forced final call.
@@ -722,7 +722,7 @@ class ToolCallingChatEngineTest {
         ToolExecutionRequest infiniteRequest = ToolExecutionRequest.builder().id("1").name("echo").arguments("{\"message\":\"again\"}").build();
         when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from(List.of(infiniteRequest))));
 
-        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, 100);
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().maxTokensBudget(100).build());
         ToolCallingChatEngine.ToolChatResult result = engine.chat("never stop");
 
         verify(model, times(ToolCallingChatEngine.DEFAULT_MAX_TOOL_ROUNDS + 1)).chat(any(ChatRequest.class));
@@ -837,7 +837,7 @@ class ToolCallingChatEngineTest {
         ChatModel model = mock(ChatModel.class);
         when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, "You are a coding agent.").chat("hi");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().systemPrompt("You are a coding agent.").build()).chat("hi");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(model).chat(captor.capture());
@@ -865,7 +865,7 @@ class ToolCallingChatEngineTest {
         ChatModel model = mock(ChatModel.class);
         when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, "   ").chat("hi");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().systemPrompt("   ").build()).chat("hi");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(model).chat(captor.capture());
@@ -910,7 +910,7 @@ class ToolCallingChatEngineTest {
         ChatModel model = mock(ChatModel.class);
         when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null).chat("hi");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.DEFAULTS).chat("hi");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(model).chat(captor.capture());
@@ -923,7 +923,7 @@ class ToolCallingChatEngineTest {
         ChatModel model = mock(ChatModel.class);
         when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null, true).chat("hi");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().cacheConversationHistory(true).build()).chat("hi");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(model).chat(captor.capture());
@@ -946,7 +946,7 @@ class ToolCallingChatEngineTest {
                 .thenReturn(response(AiMessage.from(List.of(request))))
                 .thenReturn(response(AiMessage.from("final")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null, true).chat("Echo 'hello'");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().cacheConversationHistory(true).build()).chat("Echo 'hello'");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(model, times(2)).chat(captor.capture());
@@ -977,7 +977,7 @@ class ToolCallingChatEngineTest {
                 .thenReturn(response(toolRequestWithExtraAttribute))
                 .thenReturn(response(AiMessage.from("final")));
 
-        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, null, null, null, true).chat("Echo 'hello'");
+        new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().cacheConversationHistory(true).build()).chat("Echo 'hello'");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(model, times(2)).chat(captor.capture());
@@ -1073,7 +1073,7 @@ class ToolCallingChatEngineTest {
         // compactionWindowRounds=2 -- rounds 0 and 1 age out of the window by
         // the time round 3 finishes; rounds 2 and 3 (the last 2) stay full.
         ToolCallingChatEngine engine = new ToolCallingChatEngine(
-                model, List.of(echoTool), CONTEXT, null, null, null, false, 2);
+                model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().compactionWindowRounds(2).build());
         ToolCallingChatEngine.ToolChatResult result = engine.chat("do four things");
 
         assertThat(result.reply()).isEqualTo("done after four rounds");
@@ -1105,7 +1105,7 @@ class ToolCallingChatEngineTest {
         // window as soon as the NEXT round finishes, so round 0's result is
         // compacted right after round 1 completes.
         ToolCallingChatEngine engine = new ToolCallingChatEngine(
-                model, List.of(echoTool), CONTEXT, null, null, null, false, 0);
+                model, List.of(echoTool), CONTEXT, ChatEngineOptions.builder().compactionWindowRounds(0).build());
         engine.chat("do two things");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
