@@ -20,3 +20,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     CREATE ROLE ${DB_USERNAME:-hub_user} LOGIN PASSWORD '${DB_PASSWORD:-password}';
     CREATE DATABASE agent_hub OWNER ${DB_USERNAME:-hub_user};
 EOSQL
+
+# pgvector must be installed by a superuser -- confirmed against the real
+# pgvector/pgvector:pg16 image: hub_user, deliberately never a superuser
+# (see the note above), gets "permission denied to create extension" even
+# though it owns agent_hub, so V28__enable_pgvector.sql's own
+# `CREATE EXTENSION IF NOT EXISTS vector` can only ever be a no-op confirming
+# it's already there, never the thing that actually installs it. Same
+# posture as role/database creation above: this is the one place a
+# superuser touches anything, and it only needs to run once per database.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" -d agent_hub -c "CREATE EXTENSION IF NOT EXISTS vector;"

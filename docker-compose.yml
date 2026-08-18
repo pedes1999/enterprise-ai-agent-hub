@@ -10,7 +10,14 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector, not plain postgres -- V28__enable_pgvector.sql's
+    # CREATE EXTENSION vector fails outright against the stock image, which
+    # doesn't ship the extension's binary at all (the RAG module needed this
+    # from a fresh `docker compose up`, not just a dev machine that happened
+    # to have pgvector installed separately). Same Postgres major version
+    # (16) as before; pgvector/pgvector only publishes Debian-based tags, no
+    # -alpine variant, so the base image changed too.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres
       # Only the postgres init.sh admin step (create the app role/db) ever

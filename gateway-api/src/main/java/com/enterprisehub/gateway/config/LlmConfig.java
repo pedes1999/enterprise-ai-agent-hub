@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.config;
 
 import com.enterprisehub.core.SharedExecutionContextFactory;
+import com.enterprisehub.core.llm.EmbeddingModelFactory;
 import com.enterprisehub.core.llm.LlmEngineFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,5 +22,10 @@ public class LlmConfig {
     @Bean
     public SharedExecutionContextFactory sharedExecutionContextFactory(LlmEngineFactory llmEngineFactory) {
         return new SharedExecutionContextFactory(llmEngineFactory);
+    }
+
+    @Bean
+    public EmbeddingModelFactory embeddingModelFactory() {
+        return new EmbeddingModelFactory();
     }
 }

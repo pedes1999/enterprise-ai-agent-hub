@@ -9,7 +9,9 @@ import com.enterprisehub.gateway.config.SandboxProperties;
 import com.enterprisehub.gateway.config.SecurityProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -28,8 +30,21 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * queue-capacity keys are that same unused leftover; max-concurrent-per-tenant
  * under the same prefix (see ExecutionLimitProperties) is the one key in
  * that namespace actually bound to anything today.
+ *
+ * @EntityScan / @EnableJpaRepositories are explicit, covering both
+ * com.enterprisehub.gateway and com.enterprisehub.rag, because
+ * @SpringBootApplication's scanBasePackages ONLY widens plain @Component
+ * scanning -- Spring Data JPA's repository-interface scanning and
+ * Hibernate's entity scanning both default to AutoConfigurationPackages
+ * (this class's own package alone) when neither annotation is present,
+ * regardless of scanBasePackages. Without this, rag-service's entities and
+ * repositories compile fine but are invisible at runtime -- confirmed live:
+ * the app failed to start with "No qualifying bean of type
+ * AgentKnowledgeSourceBindingRepository" until these were added.
  */
 @SpringBootApplication(scanBasePackages = "com.enterprisehub")
+@EntityScan(basePackages = {"com.enterprisehub.gateway.entity", "com.enterprisehub.rag.entity"})
+@EnableJpaRepositories(basePackages = {"com.enterprisehub.gateway.repository", "com.enterprisehub.rag.repository"})
 @EnableAsync
 @EnableScheduling
 @EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class, LlmProperties.class,
