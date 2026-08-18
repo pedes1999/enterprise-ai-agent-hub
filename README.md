@@ -334,6 +334,10 @@ every other endpoint. A full request collection covering every endpoint
 (including negative cases like RBAC denials and cross-tenant isolation) is
 in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterprise-ai-agent-hub.postman_collection.json).
 
+Interactive API docs are at `localhost:8080/swagger-ui.html` once the app is
+running — "Authorize" with the JWT from above to try authenticated endpoints
+directly from the browser.
+
 Frontend:
 
 ```bash

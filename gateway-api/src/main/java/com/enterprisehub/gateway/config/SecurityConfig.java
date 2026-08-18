@@ -54,6 +54,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/auth/**", "/actuator/health").permitAll()
                 .requestMatchers("/webhooks/**").permitAll() // signature validation happens in the webhook controller itself
+                // API docs describe the surface, they don't expose it -- every endpoint
+                // listed here still enforces its own auth when actually called.
+                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 // Spring Boot's default error handling forwards any unhandled
                 // exception to /error to render the response. Without this,
                 // that forwarded request re-enters the filter chain as an
