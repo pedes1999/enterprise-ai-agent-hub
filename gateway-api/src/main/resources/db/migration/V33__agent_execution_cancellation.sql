@@ -1,0 +1,16 @@
+-- V33__agent_execution_cancellation.sql
+--
+-- Backs a real cancel feature: a caller can stop a QUEUED or RUNNING
+-- execution instead of only ever waiting for it to hit the round cap or
+-- token budget. A QUEUED row is cancelled synchronously (a conditional
+-- UPDATE straight to CANCELLED, since it was never claimed -- no flag
+-- needed). A RUNNING row can't be stopped that way: the instance that
+-- receives the cancel request over HTTP may not be the instance actually
+-- running the job (same lesson V32__agent_execution_heartbeat.sql's
+-- liveness stamp already had to learn), so this column is the DB-backed
+-- signal AgentJobWorker's in-flight ToolCallingChatEngine loop polls
+-- between rounds. Left non-null once set (never cleared back to null) --
+-- the row's own status becoming a terminal CANCELLED is what marks the
+-- cancellation as actually having taken effect; this column only ever
+-- records that one was asked for, and when.
+ALTER TABLE agent_executions ADD COLUMN cancellation_requested_at TIMESTAMPTZ;

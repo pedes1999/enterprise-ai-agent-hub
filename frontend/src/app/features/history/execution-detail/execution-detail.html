@@ -10,7 +10,18 @@
     <p>
       <span class="badge" [class]="'status-' + exec.status.toLowerCase()">{{ exec.status }}</span>
       <span class="agent-slug">{{ exec.agentSlug }}</span>
+      @if (exec.status === 'RUNNING' && exec.cancellationRequestedAt) {
+        <span class="cancellation-pending">Cancellation requested — stopping…</span>
+      }
+      @if (canCancel(exec.status)) {
+        <button type="button" class="cancel-button" [disabled]="cancelling()" (click)="cancel()">
+          {{ cancelling() ? 'Cancelling…' : 'Cancel' }}
+        </button>
+      }
     </p>
+    @if (cancelError()) {
+      <div class="banner banner-error" role="alert">{{ cancelError() }}</div>
+    }
 
     <section>
       <h2>Details</h2>

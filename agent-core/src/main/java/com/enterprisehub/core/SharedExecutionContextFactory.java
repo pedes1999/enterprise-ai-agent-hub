@@ -45,7 +45,7 @@ public class SharedExecutionContextFactory {
         ChatModel chatModel = llmEngineFactory.create(provider, apiKey, modelName, baseUrl);
         ChatEngineOptions resolvedOptions = new ChatEngineOptions(
                 options.systemPrompt(), options.maxTokensBudget(), options.maxToolRounds(),
-                provider == LlmProvider.ANTHROPIC, options.compactionWindowRounds());
+                provider == LlmProvider.ANTHROPIC, options.compactionWindowRounds(), options.cancellationRequested());
         return new SharedExecutionContext(tenantId, executionId, chatModel, tools, resolvedOptions);
     }
 }

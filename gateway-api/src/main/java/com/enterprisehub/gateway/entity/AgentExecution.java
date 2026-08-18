@@ -129,6 +129,19 @@ public class AgentExecution {
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
+    /**
+     * Non-null once a cancel has been requested (QUEUED or RUNNING) -- never
+     * cleared back to null afterwards. Only meaningful while status is still
+     * RUNNING: AgentJobWorker's in-flight loop polls this between rounds
+     * (see AgentExecutionService.isCancellationRequested()) and transitions
+     * the row to CANCELLED itself once it actually stops. A QUEUED cancel
+     * never sets this at all -- it goes straight to CANCELLED via a
+     * conditional UPDATE, see AgentExecutionService.requestCancellation().
+     * See V33__agent_execution_cancellation.sql.
+     */
+    @Column(name = "cancellation_requested_at")
+    private Instant cancellationRequestedAt;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 

@@ -1,5 +1,7 @@
 package com.enterprisehub.core.tool;
 
+import java.util.function.BooleanSupplier;
+
 /**
  * The optional, tunable knobs of a ToolCallingChatEngine run, as one named
  * value instead of a positional tail of five nullable parameters.
@@ -27,10 +29,11 @@ public record ChatEngineOptions(
         Integer maxTokensBudget,
         Integer maxToolRounds,
         boolean cacheConversationHistory,
-        Integer compactionWindowRounds) {
+        Integer compactionWindowRounds,
+        BooleanSupplier cancellationRequested) {
 
     /** Tune nothing -- every value falls back to the engine's own default. */
-    public static final ChatEngineOptions DEFAULTS = new ChatEngineOptions(null, null, null, false, null);
+    public static final ChatEngineOptions DEFAULTS = new ChatEngineOptions(null, null, null, false, null, null);
 
     public static Builder builder() {
         return new Builder();
@@ -43,6 +46,7 @@ public record ChatEngineOptions(
         private Integer maxToolRounds;
         private boolean cacheConversationHistory;
         private Integer compactionWindowRounds;
+        private BooleanSupplier cancellationRequested;
 
         private Builder() {
         }
@@ -77,9 +81,23 @@ public record ChatEngineOptions(
             return this;
         }
 
+        /**
+         * Polled at the top of every round, before spending anything on that
+         * round -- true means "stop now," no forced final-answer call the way
+         * the round-cap/budget paths get (an explicit cancel means stop
+         * spending, full stop). Null (the default every existing caller gets)
+         * means "never cancels" -- e.g. AgentPingService's synchronous spike
+         * endpoints, which have no agent_executions row to cancel in the
+         * first place.
+         */
+        public Builder cancellationRequested(BooleanSupplier cancellationRequested) {
+            this.cancellationRequested = cancellationRequested;
+            return this;
+        }
+
         public ChatEngineOptions build() {
             return new ChatEngineOptions(systemPrompt, maxTokensBudget, maxToolRounds, cacheConversationHistory,
-                    compactionWindowRounds);
+                    compactionWindowRounds, cancellationRequested);
         }
     }
 }

@@ -327,6 +327,57 @@ public class AgentExecutionService {
                 .record(Duration.between(startedAt, completedAt));
     }
 
+    /**
+     * Tries the QUEUED path (instant, synchronous cancel) first, then the
+     * RUNNING path (sets the flag AgentJobWorker's loop polls) -- both are
+     * conditional UPDATEs, so exactly one of them can ever affect a row
+     * that's genuinely still cancellable, race-safe against the worker
+     * concurrently claiming or completing the same one. 0 rows from both
+     * means the row is already terminal (or never existed for this tenant,
+     * already ruled out by the findForTenant() lookup above) -- a cancel
+     * request against a finished execution is a real error (409), not a
+     * silently ignored no-op.
+     */
+    @Transactional
+    public void requestCancellation(UUID tenantId, UUID executionId) {
+        AgentExecution execution = findForTenant(tenantId, executionId)
+                .orElseThrow(() -> new AgentException(HttpStatus.NOT_FOUND, "No execution with id " + executionId));
+
+        if (repository.cancelIfQueued(executionId, tenantId, Instant.now()) > 0) {
+            return;
+        }
+        if (repository.requestCancellationIfRunning(executionId, tenantId, Instant.now()) > 0) {
+            return;
+        }
+        throw new AgentException(HttpStatus.CONFLICT,
+                "Execution " + executionId + " is already " + execution.getStatus() + " -- nothing to cancel.");
+    }
+
+    /** Polled by AgentJobWorker's in-flight loop, once per tool-calling round -- see the repository method's javadoc. */
+    @Transactional(readOnly = true)
+    public boolean isCancellationRequested(UUID executionId) {
+        return repository.isCancellationRequested(executionId);
+    }
+
+    /**
+     * The terminal transition AgentJobWorker calls once its loop actually
+     * notices a pending cancellation and stops -- mirrors complete()/fail()'s
+     * shape exactly, right down to recording the same "agent.execution"
+     * metric (see recordExecutionOutcome()), just with a third possible
+     * status value.
+     */
+    @Transactional
+    public void cancel(UUID executionId, Integer inputTokens, Integer outputTokens, Integer totalTokens) {
+        repository.findById(executionId).ifPresent(execution -> {
+            execution.setStatus("CANCELLED");
+            execution.setInputTokens(inputTokens);
+            execution.setOutputTokens(outputTokens);
+            execution.setTotalTokens(totalTokens);
+            execution.setCompletedAt(Instant.now());
+            recordExecutionOutcome("CANCELLED", execution.getStartedAt(), execution.getCompletedAt());
+        });
+    }
+
     @Transactional(readOnly = true)
     public Optional<AgentExecution> findForTenant(UUID tenantId, UUID executionId) {
         return repository.findByIdAndTenantId(executionId, tenantId);

@@ -17,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1139,6 +1140,62 @@ class ToolCallingChatEngineTest {
                 .map(ToolExecutionResultMessage.class::cast)
                 .findFirst().orElseThrow();
         assertThat(resultMessage.text()).isEqualTo("echo: hello");
+    }
+
+    // ---------- cancellation (ChatEngineOptions.cancellationRequested) ----------
+
+    @Test
+    void chat_cancellationRequestedBeforeFirstRound_stopsImmediately_neverCallsTheModel() {
+        // The concrete proof cancellation actually stops spending, not just
+        // changes a label: zero interactions with the model at all.
+        ChatModel model = mock(ChatModel.class);
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT,
+                ChatEngineOptions.builder().cancellationRequested(() -> true).build());
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("do the thing");
+
+        assertThat(result.cancelled()).isTrue();
+        assertThat(result.reply()).isNull();
+        assertThat(result.toolWasUsed()).isFalse();
+        verifyNoInteractions(model);
+    }
+
+    @Test
+    void chat_cancellationRequestedMidRun_stopsAtNextRoundBoundary_noForcedFinalAnswerCall() {
+        // Round 0 is already in flight (checked BEFORE it, still false) and
+        // must complete normally; the flag flips true only for round 1's
+        // check, so round 1 never happens -- unlike hitting the round cap or
+        // token budget, there is no forced "one last call for a summary"
+        // here, since an explicit cancel means stop spending, full stop.
+        AtomicInteger checkCount = new AtomicInteger(0);
+        ChatModel model = mock(ChatModel.class);
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("1").name("echo").arguments("{\"message\":\"hello\"}").build();
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from(List.of(request))));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT,
+                ChatEngineOptions.builder().cancellationRequested(() -> checkCount.getAndIncrement() >= 1).build());
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("do the thing");
+
+        assertThat(result.cancelled()).isTrue();
+        assertThat(result.reply()).isNull();
+        assertThat(result.toolWasUsed()).isTrue();
+        assertThat(result.incomplete()).isFalse();
+        verify(model, times(1)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    void chat_noCancellationSignalConfigured_null_behavesExactlyAsBefore() {
+        // ChatEngineOptions.DEFAULTS (what every pre-existing caller/test
+        // gets) leaves cancellationRequested null -- must never NPE and must
+        // never stop early.
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("ok")));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("hi");
+
+        assertThat(result.cancelled()).isFalse();
+        assertThat(result.reply()).isEqualTo("ok");
     }
 
     // ---------- partial usage on a mid-run provider failure ----------

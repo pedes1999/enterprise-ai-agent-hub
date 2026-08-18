@@ -29,6 +29,15 @@ import java.util.UUID;
  * execution -- null for everything triggered directly via POST
  * /agents/execute. See GET /agents/executions/{id}/children for the
  * reverse direction (a parent's own list of what it delegated).
+ *
+ * cancellationRequestedAt is non-null the moment POST
+ * /agents/executions/{id}/cancel succeeds against a RUNNING row -- while
+ * status is still RUNNING, that's the "asked to stop, still stopping"
+ * state (cancellation is cooperative, not instant, see
+ * ChatEngineOptions.cancellationRequested()'s javadoc). It stays set once
+ * status finally reaches CANCELLED. Always null for a QUEUED cancel: that
+ * path goes straight to CANCELLED without ever setting this column, see
+ * AgentExecutionService.requestCancellation().
  */
 public record AgentExecutionStatusResponse(
         UUID id,
@@ -49,6 +58,7 @@ public record AgentExecutionStatusResponse(
         Integer outputTokens,
         Integer totalTokens,
         Integer maxTokensOverride,
-        UUID parentExecutionId
+        UUID parentExecutionId,
+        Instant cancellationRequestedAt
 ) {
 }

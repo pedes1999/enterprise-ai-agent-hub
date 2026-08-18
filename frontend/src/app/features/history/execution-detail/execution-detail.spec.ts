@@ -171,4 +171,87 @@ describe('ExecutionDetail', () => {
 
     expect(fixture.componentInstance.childrenError()).toBe('Failed to load delegated executions.');
   });
+
+  describe('canCancel', () => {
+    it('is true for QUEUED and RUNNING, false for every terminal status', () => {
+      const fixture = TestBed.createComponent(ExecutionDetail);
+      const component = fixture.componentInstance;
+
+      expect(component.canCancel('QUEUED')).toBe(true);
+      expect(component.canCancel('RUNNING')).toBe(true);
+      expect(component.canCancel('SUCCEEDED')).toBe(false);
+      expect(component.canCancel('FAILED')).toBe(false);
+      expect(component.canCancel('CANCELLED')).toBe(false);
+    });
+  });
+
+  describe('cancel', () => {
+    function loadExecution(fixture: ReturnType<typeof TestBed.createComponent<ExecutionDetail>>, status: string) {
+      fixture.detectChanges();
+      httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1`).flush({
+        id: 'exec-1',
+        status,
+        llmProvider: 'ANTHROPIC',
+        agentSlug: 'code-reviewer',
+        prompt: 'hi',
+        repositoryUrl: null,
+        repositoryBranch: null,
+        inputParameters: null,
+        reply: null,
+        toolWasUsed: null,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        startedAt: null,
+        completedAt: null,
+      });
+      httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1/tool-executions`).flush([]);
+      httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1/children`).flush([]);
+    }
+
+    it('on success, re-fetches the execution instead of assuming the outcome', () => {
+      const fixture = TestBed.createComponent(ExecutionDetail);
+      loadExecution(fixture, 'QUEUED');
+
+      fixture.componentInstance.cancel();
+      expect(fixture.componentInstance.cancelling()).toBe(true);
+      httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1/cancel`).flush(null);
+
+      // The re-fetch this test is actually about: cancel() must not just set
+      // status locally, since a RUNNING cancel is only a pending flag, not
+      // an instant transition -- only the server knows which actually happened.
+      httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1`).flush({
+        id: 'exec-1',
+        status: 'CANCELLED',
+        llmProvider: 'ANTHROPIC',
+        agentSlug: 'code-reviewer',
+        prompt: 'hi',
+        repositoryUrl: null,
+        repositoryBranch: null,
+        inputParameters: null,
+        reply: null,
+        toolWasUsed: null,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        startedAt: null,
+        completedAt: '2026-01-01T00:00:06Z',
+      });
+
+      expect(fixture.componentInstance.cancelling()).toBe(false);
+      expect(fixture.componentInstance.execution()?.status).toBe('CANCELLED');
+    });
+
+    it('on failure, shows the error and stops the cancelling state without touching the execution', () => {
+      const fixture = TestBed.createComponent(ExecutionDetail);
+      loadExecution(fixture, 'RUNNING');
+
+      fixture.componentInstance.cancel();
+      httpMock
+        .expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1/cancel`)
+        .flush({ message: 'Execution exec-1 is already SUCCEEDED -- nothing to cancel.' }, { status: 409, statusText: 'Conflict' });
+
+      expect(fixture.componentInstance.cancelling()).toBe(false);
+      expect(fixture.componentInstance.cancelError()).toBe('Execution exec-1 is already SUCCEEDED -- nothing to cancel.');
+      expect(fixture.componentInstance.execution()?.status).toBe('RUNNING');
+    });
+  });
 });

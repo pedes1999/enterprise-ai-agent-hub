@@ -32,7 +32,7 @@ export interface AgentExecutionAccepted {
   status: ExecutionStatus;
 }
 
-export type ExecutionStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+export type ExecutionStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
 export interface AgentExecutionStatusResponse {
   id: string;
@@ -57,6 +57,13 @@ export interface AgentExecutionStatusResponse {
   maxTokensOverride?: number | null;
   /** Non-null only for a child execution the delegate_to_agent tool queued on behalf of another execution -- null for everything triggered directly. */
   parentExecutionId?: string | null;
+  /**
+   * Non-null once a cancel was requested against this execution while it was
+   * RUNNING -- while status is still RUNNING, that's the "asked to stop,
+   * still stopping" state (cancellation is cooperative, not instant). Always
+   * null for a QUEUED cancel, which goes straight to CANCELLED instead.
+   */
+  cancellationRequestedAt?: string | null;
 }
 
 export interface ToolExecutionRecord {

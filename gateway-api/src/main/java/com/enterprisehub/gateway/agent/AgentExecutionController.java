@@ -73,6 +73,23 @@ public class AgentExecutionController {
     }
 
     /**
+     * Cancels a QUEUED or RUNNING execution -- same role gate as triggering
+     * one. 202, same as execute(): a QUEUED cancel is actually already done
+     * by the time this returns, but a RUNNING one only takes effect at the
+     * next tool-calling round boundary (cooperative, not instant -- see
+     * ChatEngineOptions.cancellationRequested()'s javadoc), so "accepted"
+     * is the honest response for both cases uniformly. 404 for an unknown/
+     * wrong-tenant id, 409 if the execution is already terminal -- see
+     * AgentExecutionService.requestCancellation().
+     */
+    @PostMapping("/executions/{id}/cancel")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER')")
+    public ResponseEntity<Void> cancel(@AuthenticationPrincipal PlatformPrincipal principal, @PathVariable UUID id) {
+        executionService.requestCancellation(UUID.fromString(principal.tenantId()), id);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).build();
+    }
+
+    /**
      * "3 / 5 executions running" -- lets a caller see remaining capacity
      * before submitting a trigger request. A literal path segment
      * ("usage"), so Spring's routing resolves it ahead of the {id}
@@ -163,6 +180,6 @@ public class AgentExecutionController {
                 execution.getReply(), execution.getToolWasUsed(), execution.getErrorMessage(),
                 execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt(),
                 execution.getInputTokens(), execution.getOutputTokens(), execution.getTotalTokens(),
-                execution.getMaxTokensOverride(), execution.getParentExecutionId());
+                execution.getMaxTokensOverride(), execution.getParentExecutionId(), execution.getCancellationRequestedAt());
     }
 }

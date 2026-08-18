@@ -34,6 +34,11 @@ export class AgentService {
     return this.http.get<AgentExecutionStatusResponse>(`${environment.apiBaseUrl}/agents/executions/${id}`);
   }
 
+  /** Cooperative, not instant -- see AgentExecutionStatusResponse.cancellationRequestedAt's doc. */
+  cancel(id: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiBaseUrl}/agents/executions/${id}/cancel`, null);
+  }
+
   listExecutions(page: number, size: number, status?: string): Observable<PagedModel<AgentExecutionStatusResponse>> {
     let params = new HttpParams().set('page', page).set('size', size);
     if (status) {

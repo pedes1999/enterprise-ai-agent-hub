@@ -6,6 +6,7 @@ import com.enterprisehub.gateway.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.util.Map;
@@ -83,12 +84,19 @@ class AgentJobWorkerTest {
         job.setAgentType("coding-agent");
         when(executionService.claimNext()).thenReturn(Optional.of(job));
 
-        // AgentRunRequest is a record, so this matches by value across every
-        // field at once -- no per-parameter eq()/any() matchers needed.
-        when(agentPromptRunner.run(AgentRunRequest.of(tenantId, userId, executionId.toString(), "coding-agent")
-                .prompt("list files")
-                .inputParameters(Map.of())
-                .build()))
+        // Can no longer match AgentRunRequest by record value equality now
+        // that it carries a cancellationCheck lambda -- AgentJobWorker
+        // builds a fresh one per call, and two independently-created
+        // lambdas are never equal() to each other. argThat checks every
+        // OTHER field instead, plus that a (non-comparable) check was set.
+        when(agentPromptRunner.run(argThat(request ->
+                request.tenantId().equals(tenantId)
+                        && request.userId().equals(userId)
+                        && request.executionId().equals(executionId.toString())
+                        && request.agentSlug().equals("coding-agent")
+                        && "list files".equals(request.prompt())
+                        && Map.of().equals(request.inputParameters())
+                        && request.cancellationCheck() != null)))
                 .thenAnswer(invocation -> {
                     // The real tenant, not the sentinel, must be active
                     // while the agent actually runs.
@@ -218,6 +226,50 @@ class AgentJobWorkerTest {
         verify(executionService).fail(executionId, "Your credit balance is too low to access the Anthropic API.", 900, 150, 1050);
         verify(executionService, never()).fail(eq(executionId), anyString());
         assertThat(TenantContext.get()).isNull();
+    }
+
+    // ---------- cancellation ----------
+
+    @Test
+    void pollAndProcessOne_resultCancelled_marksCancelledNotFailed() {
+        // A cancel is what the user asked for, not a failure -- must route
+        // to executionService.cancel(), checked BEFORE the incomplete()
+        // branch in AgentJobWorker (a cancelled ToolChatResult happens to
+        // also carry incomplete==false, but cancelled must win the branch).
+        UUID tenantId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = queuedJob(executionId);
+        job.setTenantId(tenantId);
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any())).thenReturn(
+                new ToolCallingChatEngine.ToolChatResult(null, true, false, null, 100, 20, 120, true));
+
+        worker.pollAndProcessOne();
+
+        verify(executionService).cancel(executionId, 100, 20, 120);
+        verify(executionService, never()).fail(any(), any(), any(), any(), any());
+        verify(executionService, never()).fail(any(), any());
+        verify(executionService, never()).complete(any(), any(), anyBoolean(), any(), any(), any());
+    }
+
+    @Test
+    void pollAndProcessOne_cancellationCheckPassedToTheRunner_delegatesToExecutionServiceIsCancellationRequested() {
+        // AgentPromptRunner/agent-core never query the DB themselves --
+        // AgentJobWorker is the one place that builds the actual DB-backed
+        // check, since it's the one class that already knows about the row.
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = queuedJob(executionId);
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any()))
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("done", false, false, null));
+        when(executionService.isCancellationRequested(executionId)).thenReturn(true);
+
+        worker.pollAndProcessOne();
+
+        ArgumentCaptor<AgentRunRequest> captor = ArgumentCaptor.forClass(AgentRunRequest.class);
+        verify(agentPromptRunner).run(captor.capture());
+        assertThat(captor.getValue().cancellationCheck().getAsBoolean()).isTrue();
+        verify(executionService).isCancellationRequested(executionId);
     }
 
     // ---------- heartbeat ownership (see V32__agent_execution_heartbeat.sql) ----------

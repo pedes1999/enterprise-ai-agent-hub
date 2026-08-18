@@ -217,11 +217,14 @@ annotation on a method signature can't carry.
 stateDiagram-v2
     [*] --> QUEUED: POST /agents/execute
     QUEUED --> RUNNING: worker claims it
+    QUEUED --> CANCELLED: POST .../cancel
     RUNNING --> SUCCEEDED: answer produced
     RUNNING --> FAILED: error, or incomplete
     RUNNING --> FAILED: heartbeat went stale
+    RUNNING --> CANCELLED: POST .../cancel, next round boundary
     SUCCEEDED --> [*]
     FAILED --> [*]
+    CANCELLED --> [*]
 ```
 
 `QUEUED` and `RUNNING` **both** count against the tenant's concurrency cap (default 5),
@@ -231,6 +234,16 @@ way to clear it. The fix is a liveness stamp rather than a plain timeout, so two
 instances can never reap each other's live work. `ExecutionHeartbeatMonitor` runs on its own
 executor rather than `@Scheduled`, because Spring's default scheduler pool is one thread and
 the worker occupies it for the entire duration of a run.
+
+**Cancellation is cooperative, not instant.** A `QUEUED` row is cancelled synchronously —
+it was never claimed, so there's nothing to interrupt. A `RUNNING` row can only be flagged:
+the instance that receives the cancel request over HTTP may not be the instance actually
+running the job (the same lesson `V32`'s heartbeat already had to learn), so the flag is a
+DB column `ToolCallingChatEngine`'s round loop polls between rounds, not an in-process
+signal. A tool call already in flight (e.g. a long shell command in the sandbox) still
+finishes; the loop exits at the *next* round boundary, with no forced "let me summarize"
+model call the way hitting the round cap or token budget gets — an explicit cancel means
+stop spending, full stop.
 
 ## Retrieval (RAG)
 
@@ -388,6 +401,7 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | `GET/PUT /tenant-settings` | ADMIN | Tenant LLM provider preference, model override, and per-execution token budget. |
 | `GET /agents/definitions` · `GET /agents/definitions/{slug}` | all roles | Browse the agent catalog; read one definition's full configuration. Browsing only — no admin CRUD. |
 | `POST /agents/execute` | ADMIN, DEVELOPER | The real execution model: enqueues and returns `202` immediately. Rejects an unknown agent (`400`), unmet `requiredInputs` (`400`, listing every one), or a tenant at its concurrency cap (`429`) — all before persisting. |
+| `POST /agents/executions/{id}/cancel` | ADMIN, DEVELOPER | Cancels a `QUEUED` or `RUNNING` execution — instant for the former, cooperative (next round boundary) for the latter, see [Execution states](#execution-states). `404` unknown/wrong-tenant id, `409` if already terminal. |
 | `GET /agents/executions` · `GET /agents/executions/{id}` | all roles | Paginated history and single-execution status. Returns `PagedModel`, not a raw `Page`. |
 | `GET /agents/executions/{id}/tool-executions` | all roles | The ordered tool-call trace — what a skeptical teammate opens to verify what an agent actually did. |
 | `GET /agents/executions/{id}/children` | all roles | Executions that `delegate_to_agent` queued from this one. |
@@ -406,19 +420,18 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 
 | Area | State | Notes |
 |---|---|---|
-| Agent execution | Solid | Queued, durable, tenant-isolated, self-healing after a crash. |
+| Agent execution | Solid | Queued, durable, tenant-isolated, self-healing after a crash. Cancellable — cooperative, DB-coordinated, no forced final API call. |
 | Tools & sandbox | Solid | Nine tools, one shared sandbox session per run, full audit trace. |
 | RAG | Working | Upload, hybrid search, bind to an agent. No document list or delete yet. |
 | Observability | Improved | Execution id in the MDC on every log line beneath a run; `/actuator/prometheus` exposes execution and tool-call metrics (count, latency, outcome). |
 | Live visibility | **Next** | You can't watch a run in progress — the trace only appears once it finishes. |
-| Cancel | **Next** | No way to stop a run. It can burn 100 rounds of paid API calls unattended. |
 | Triggers | Gap | Human-click only. No schedules, no webhooks — `trigger_source` is still hardcoded. |
 | Frontend tidiness | Gap | `credentials.ts` holds four unrelated concerns in one component. |
 
-**Next up**: cancel, then live trace streaming. Both should coordinate through the database
-rather than in-process memory — the same lesson the heartbeat fix taught, since the instance
-handling a cancel request may not be the one running the job. After that: scheduled and
-webhook triggers, which is what turns this from a manual runner into automation.
+**Next up**: live trace streaming — the same "coordinate through the database, not in-process
+memory" lesson cancel just shipped with, since the instance streaming a trace may not be the
+one running the job. After that: scheduled and webhook triggers, which is what turns this
+from a manual runner into automation.
 
 **Further out**: a CLI client and GitHub Actions integration; an automated
 security-patching agent (SonarQube finding → LLM patch → verified PR); and the multi-agent

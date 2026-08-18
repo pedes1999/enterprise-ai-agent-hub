@@ -105,8 +105,15 @@ public class AgentJobWorker {
                             .repository(job.getRepositoryUrl(), job.getRepositoryBranch())
                             .inputParameters(executionService.deserializeInputParameters(job))
                             .maxTokensOverride(job.getMaxTokensOverride())
+                            .cancellationCheck(() -> executionService.isCancellationRequested(job.getId()))
                             .build());
-            if (result.incomplete()) {
+            if (result.cancelled()) {
+                // Checked before incomplete() -- a cancel is what the user
+                // asked for, not a failure, and gets its own terminal status
+                // (see AgentExecutionService.cancel()).
+                log.info("Agent execution cancelled after {}", elapsed(startedAtNanos));
+                executionService.cancel(job.getId(), result.inputTokens(), result.outputTokens(), result.totalTokens());
+            } else if (result.incomplete()) {
                 log.warn("Agent execution did not finish after {}: {}", elapsed(startedAtNanos), result.incompleteReason());
                 executionService.fail(job.getId(), result.incompleteReason(),
                         result.inputTokens(), result.outputTokens(), result.totalTokens());

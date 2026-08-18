@@ -136,6 +136,11 @@ button:disabled {
   background: var(--color-status-failed-bg);
 }
 
+.status-cancelled {
+  color: var(--color-status-cancelled);
+  background: var(--color-status-cancelled-bg);
+}
+
 .block {
   background: var(--color-bg);
   border: 1px solid var(--color-border);

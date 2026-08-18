@@ -27,12 +27,17 @@
   --color-status-running: #2563eb;
   --color-status-succeeded: #15803d;
   --color-status-failed: #dc2626;
+  /* Amber, deliberately distinct from both queued's gray (idle) and
+     failed's red (error) -- a cancel is neither: it's what the user asked
+     for, not a crash. */
+  --color-status-cancelled: #b45309;
 
   /* Status backgrounds (light tint, used behind a dot+label pill) */
   --color-status-queued-bg: #eef0f4;
   --color-status-running-bg: #e6eefd;
   --color-status-succeeded-bg: #e5f6ea;
   --color-status-failed-bg: #fbe9e9;
+  --color-status-cancelled-bg: #fef3c7;
 
   /* Typography */
   --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -100,11 +105,13 @@
     --color-status-running: #60a5fa;
     --color-status-succeeded: #4ade80;
     --color-status-failed: #f87171;
+    --color-status-cancelled: #fbbf24;
 
     --color-status-queued-bg: rgba(156, 163, 175, 0.16);
     --color-status-running-bg: rgba(96, 165, 250, 0.16);
     --color-status-succeeded-bg: rgba(74, 222, 128, 0.16);
     --color-status-failed-bg: rgba(248, 113, 113, 0.16);
+    --color-status-cancelled-bg: rgba(251, 191, 36, 0.16);
 
     /* Shadows read as pure darkening on a light surface -- on a dark
        surface that's invisible, so these lean on a stronger, cooler

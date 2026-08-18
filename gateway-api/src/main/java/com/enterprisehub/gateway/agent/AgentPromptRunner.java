@@ -156,6 +156,7 @@ public class AgentPromptRunner {
                             .systemPrompt(definition.getSystemPrompt())
                             .maxTokensBudget(maxTokens)
                             .maxToolRounds(llmProperties.maxToolRounds())
+                            .cancellationRequested(request.cancellationCheck())
                             .build());
 
             return context.chat(assembledPrompt);

@@ -59,6 +59,44 @@ public interface AgentExecutionRepository extends JpaRepository<AgentExecution, 
     List<AgentExecution> findStaleRunning(@Param("cutoff") Instant cutoff);
 
     /**
+     * Cancels a QUEUED row synchronously and atomically -- it was never
+     * claimed, so there's nothing to signal, just a straight terminal
+     * transition. The status='QUEUED' guard is what makes this race-safe
+     * against AgentJobWorker concurrently claiming the same row: whichever
+     * side's UPDATE commits first wins, and the loser affects 0 rows instead
+     * of the two clobbering each other. See AgentExecutionService.requestCancellation().
+     */
+    @Modifying
+    @Query("update AgentExecution e set e.status = 'CANCELLED', e.completedAt = :now "
+            + "where e.id = :id and e.tenantId = :tenantId and e.status = 'QUEUED'")
+    int cancelIfQueued(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("now") Instant now);
+
+    /**
+     * Sets the cancellation flag on a RUNNING row -- does NOT change status
+     * itself; that only happens once AgentJobWorker's in-flight loop
+     * actually notices (see isCancellationRequested()) and calls
+     * AgentExecutionService.cancel(). The status='RUNNING' guard means this
+     * is a no-op (0 rows) against a row that has already finished by the
+     * time the cancel request arrives -- the caller treats that as "already
+     * terminal," not silently ignored.
+     */
+    @Modifying
+    @Query("update AgentExecution e set e.cancellationRequestedAt = :now "
+            + "where e.id = :id and e.tenantId = :tenantId and e.status = 'RUNNING'")
+    int requestCancellationIfRunning(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("now") Instant now);
+
+    /**
+     * Polled by AgentJobWorker's in-flight ToolCallingChatEngine loop, once
+     * per tool-calling round -- see ChatEngineOptions.cancellationRequested().
+     * No tenant filter: called from inside a job already running under its
+     * own tenant's TenantContext, same as every other in-run lookup, not the
+     * worker-sentinel one claimNext() needs.
+     */
+    @Query("select case when e.cancellationRequestedAt is not null then true else false end "
+            + "from AgentExecution e where e.id = :id")
+    boolean isCancellationRequested(@Param("id") UUID id);
+
+    /**
      * Atomically claims the oldest still-QUEUED job across every tenant.
      * FOR UPDATE SKIP LOCKED means concurrent callers (multiple worker
      * threads, multiple app instances) never block on or double-claim the

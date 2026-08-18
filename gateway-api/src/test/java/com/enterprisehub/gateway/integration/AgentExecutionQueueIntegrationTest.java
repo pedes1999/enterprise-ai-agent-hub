@@ -353,6 +353,131 @@ class AgentExecutionQueueIntegrationTest {
      * GET /agents/executions/{id} and the parent's GET
      * .../{id}/children.
      */
+    // ---------- cancellation ----------
+
+    @Test
+    void cancel_queuedExecution_flipsToCancelledAndFreesTheConcurrencyCapSlot() {
+        AuthResponse tenant = registerTenant("cancel-a");
+        UUID tenantId = UUID.fromString(tenant.tenantId());
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(tenant.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+
+        ResponseEntity<Void> cancelResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId + "/cancel", HttpMethod.POST,
+                new HttpEntity<>(authHeaders(tenant.token())), Void.class);
+        assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+
+        ResponseEntity<AgentExecutionStatusResponse> getResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId, HttpMethod.GET,
+                new HttpEntity<>(authHeaders(tenant.token())), AgentExecutionStatusResponse.class);
+        assertThat(getResponse.getBody().status()).isEqualTo("CANCELLED");
+
+        TenantContext.set(tenantId.toString());
+        try {
+            // A QUEUED cancel was never claimed -- it must stop counting
+            // against the concurrency cap same as any other terminal row.
+            assertThat(executionService.getUsage(tenantId).active()).isZero();
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void cancel_runningExecution_setsTheFlagButLeavesStatusRunning() {
+        // Cooperative, not instant: the row this endpoint touches is
+        // claimed (RUNNING), so it can only flag the pending cancellation --
+        // the actual CANCELLED transition is AgentJobWorker's job once its
+        // loop notices, which this endpoint alone can't simulate without a
+        // real running job. cancellationRequestedAt is the visible proof the
+        // flag was actually set.
+        AuthResponse tenant = registerTenant("cancel-b");
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(tenant.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+        AgentExecution claimed = drainUntilClaimed(executionId);
+        assertThat(claimed.getStatus()).isEqualTo("RUNNING");
+
+        ResponseEntity<Void> cancelResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId + "/cancel", HttpMethod.POST,
+                new HttpEntity<>(authHeaders(tenant.token())), Void.class);
+        assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+
+        ResponseEntity<AgentExecutionStatusResponse> getResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId, HttpMethod.GET,
+                new HttpEntity<>(authHeaders(tenant.token())), AgentExecutionStatusResponse.class);
+        assertThat(getResponse.getBody().status()).isEqualTo("RUNNING");
+        assertThat(getResponse.getBody().cancellationRequestedAt()).isNotNull();
+    }
+
+    @Test
+    void cancel_alreadyTerminalExecution_returns409Conflict() {
+        AuthResponse tenant = registerTenant("cancel-c");
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(tenant.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+        AgentExecution claimed = drainUntilClaimed(executionId);
+        TenantContext.set(tenant.tenantId());
+        try {
+            executionService.complete(claimed.getId(), "done", false);
+        } finally {
+            TenantContext.clear();
+        }
+
+        ResponseEntity<String> cancelResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId + "/cancel", HttpMethod.POST,
+                new HttpEntity<>(authHeaders(tenant.token())), String.class);
+
+        assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void cancel_crossTenant_returns404NotAnotherTenantsData() {
+        AuthResponse tenantA = registerTenant("cancel-d");
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("secret prompt", null, null, null, null, null), authHeaders(tenantA.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+
+        AuthResponse tenantB = registerTenant("cancel-e");
+        ResponseEntity<String> cancelResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId + "/cancel", HttpMethod.POST,
+                new HttpEntity<>(authHeaders(tenantB.token())), String.class);
+
+        assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        // Confirm tenant A's execution was genuinely untouched, not just that
+        // the response was a 404 -- still QUEUED, not CANCELLED.
+        ResponseEntity<AgentExecutionStatusResponse> getResponse = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId, HttpMethod.GET,
+                new HttpEntity<>(authHeaders(tenantA.token())), AgentExecutionStatusResponse.class);
+        assertThat(getResponse.getBody().status()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void cancel_readOnlyRole_forbidden() {
+        AuthResponse admin = registerTenant("cancel-f");
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(admin.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+        AuthResponse readOnly = createReadOnlyAndLogin(admin);
+
+        ResponseEntity<String> response = restTemplate.exchange(
+                baseUrl() + "/agents/executions/" + executionId + "/cancel", HttpMethod.POST,
+                new HttpEntity<>(authHeaders(readOnly.token())), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     @Test
     void enqueueWithParentExecutionId_roundTripsThroughGetAndChildrenEndpoints() {
         AuthResponse tenant = registerTenant("job-i");

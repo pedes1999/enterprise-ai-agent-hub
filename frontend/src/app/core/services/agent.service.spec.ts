@@ -93,4 +93,11 @@ describe('AgentService', () => {
     expect(req.request.method).toBe('GET');
     req.flush({ active: 1, limit: 5 });
   });
+
+  it('cancel() POSTs /agents/executions/{id}/cancel', () => {
+    service.cancel('exec-1').subscribe();
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/agents/executions/exec-1/cancel`);
+    expect(req.request.method).toBe('POST');
+    req.flush(null);
+  });
 });

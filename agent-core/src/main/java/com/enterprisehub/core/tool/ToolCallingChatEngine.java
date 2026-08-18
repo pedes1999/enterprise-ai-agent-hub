@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.BooleanSupplier;
 
 /**
  * A bounded, multi-round tool-calling loop: send the user's message plus
@@ -116,6 +117,7 @@ public class ToolCallingChatEngine {
     private final int maxToolRounds;
     private final boolean cacheConversationHistory;
     private final int compactionWindowRounds;
+    private final BooleanSupplier cancellationRequested;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** Tunes nothing -- see ChatEngineOptions.DEFAULTS for exactly what that means. */
@@ -187,6 +189,7 @@ public class ToolCallingChatEngine {
         this.cacheConversationHistory = options.cacheConversationHistory();
         this.compactionWindowRounds = options.compactionWindowRounds() != null
                 ? options.compactionWindowRounds() : DEFAULT_COMPACTION_WINDOW_ROUNDS;
+        this.cancellationRequested = options.cancellationRequested();
     }
 
     /** Returns the final text answer, and whether a tool was actually invoked along the way (in any round). */
@@ -216,6 +219,16 @@ public class ToolCallingChatEngine {
         List<int[]> roundMessageRanges = new ArrayList<>();
 
         for (int round = 0; round < maxToolRounds; round++) {
+            if (cancellationRequested != null && cancellationRequested.getAsBoolean()) {
+                // Checked BEFORE budgetExceeded and BEFORE spending anything
+                // on this round -- unlike the round-cap/budget paths below,
+                // an explicit cancel does NOT get one more forced-answer
+                // generate() call. Those two exist to leave the model a
+                // chance at a coherent summary; a cancel means stop spending,
+                // full stop, so this returns immediately with no reply.
+                return new ToolChatResult(null, toolWasUsed, false, null,
+                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage), true);
+            }
             if (budgetExceeded(totalUsage)) {
                 // Exceeded during a PREVIOUS round -- stop before spending
                 // more on another generate() call, same "force one final
@@ -246,7 +259,7 @@ public class ToolCallingChatEngine {
                         ? "Model response was truncated (hit the max_tokens limit) before it finished."
                         : null;
                 return new ToolChatResult(aiMessage.text(), toolWasUsed, truncated, incompleteReason,
-                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
+                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage), false);
             }
 
             toolWasUsed = true;
@@ -278,7 +291,7 @@ public class ToolCallingChatEngine {
                 ChatResponse finalResponse = generate(messages, List.of(), totalUsage);
                 totalUsage = accumulate(totalUsage, finalResponse.tokenUsage());
                 return new ToolChatResult(finalResponse.aiMessage().text(), toolWasUsed, false, null,
-                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
+                        inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage), false);
             }
         }
 
@@ -295,7 +308,7 @@ public class ToolCallingChatEngine {
                 ? "Agent execution stopped after exceeding its token budget (" + maxTokensBudget + " tokens)."
                 : "Agent used all " + maxToolRounds + " allowed tool-call rounds without finishing.";
         return new ToolChatResult(finalResponse.aiMessage().text(), toolWasUsed, true, incompleteReason,
-                inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage));
+                inputTokens(totalUsage), outputTokens(totalUsage), totalTokens(totalUsage), false);
     }
 
     /**
@@ -688,13 +701,21 @@ public class ToolCallingChatEngine {
      * whichever "final" call ended it) -- null, not zero, when not a single
      * one of those responses carried usage data, so a caller can tell
      * "genuinely free" apart from "we don't know".
+     *
+     * cancelled is true only for the cancellationRequested early-return in
+     * chat() -- deliberately separate from incomplete: incomplete means "the
+     * model never reached a real stopping point" and a caller treats that as
+     * a FAILED execution, but a cancel is not a failure, it's what the user
+     * asked for. A caller checks cancelled BEFORE incomplete (they're never
+     * both true at once, but cancelled is the one that should win the
+     * branch if a future change ever made that ambiguous).
      */
     public record ToolChatResult(String reply, boolean toolWasUsed, boolean incomplete, String incompleteReason,
-                                  Integer inputTokens, Integer outputTokens, Integer totalTokens) {
+                                  Integer inputTokens, Integer outputTokens, Integer totalTokens, boolean cancelled) {
 
         /** For callers that don't need token usage -- e.g. existing tests predating this field. */
         public ToolChatResult(String reply, boolean toolWasUsed, boolean incomplete, String incompleteReason) {
-            this(reply, toolWasUsed, incomplete, incompleteReason, null, null, null);
+            this(reply, toolWasUsed, incomplete, incompleteReason, null, null, null, false);
         }
     }
 }

@@ -26,6 +26,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class AgentExecutionServiceTest {
@@ -34,6 +35,7 @@ class AgentExecutionServiceTest {
     private AgentDefinitionRepository agentDefinitionRepository;
     private ToolExecutionRepository toolExecutionRepository;
     private TenantLlmProviderResolver tenantLlmProviderResolver;
+    private SimpleMeterRegistry meterRegistry;
     private AgentExecutionService service;
     private final UUID tenantId = UUID.randomUUID();
 
@@ -43,9 +45,10 @@ class AgentExecutionServiceTest {
         agentDefinitionRepository = mock(AgentDefinitionRepository.class);
         toolExecutionRepository = mock(ToolExecutionRepository.class);
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
+        meterRegistry = new SimpleMeterRegistry();
         when(tenantLlmProviderResolver.resolve(any())).thenReturn(LlmProvider.ANTHROPIC);
         service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5),
-                tenantLlmProviderResolver, new SimpleMeterRegistry());
+                tenantLlmProviderResolver, meterRegistry);
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));
@@ -436,6 +439,111 @@ class AgentExecutionServiceTest {
         assertThat(execution.getInputTokens()).isEqualTo(5000);
         assertThat(execution.getOutputTokens()).isEqualTo(1200);
         assertThat(execution.getTotalTokens()).isEqualTo(6200);
+    }
+
+    // ---------- cancellation ----------
+
+    @Test
+    void requestCancellation_queuedRow_cancelsAtomicallyViaConditionalUpdate_neverTouchesTheRunningPath() {
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setTenantId(tenantId);
+        execution.setStatus("QUEUED");
+        when(repository.findByIdAndTenantId(id, tenantId)).thenReturn(Optional.of(execution));
+        when(repository.cancelIfQueued(eq(id), eq(tenantId), any())).thenReturn(1);
+
+        service.requestCancellation(tenantId, id);
+
+        verify(repository).cancelIfQueued(eq(id), eq(tenantId), any());
+        verify(repository, never()).requestCancellationIfRunning(any(), any(), any());
+    }
+
+    @Test
+    void requestCancellation_runningRow_setsTheFlagOnly_statusUnchangedOnTheInMemoryEntity() {
+        // requestCancellationIfRunning() only touches cancellation_requested_at
+        // -- the actual CANCELLED transition happens later, when
+        // AgentJobWorker's loop notices and calls cancel(). This method must
+        // not mutate the entity's status itself.
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setTenantId(tenantId);
+        execution.setStatus("RUNNING");
+        when(repository.findByIdAndTenantId(id, tenantId)).thenReturn(Optional.of(execution));
+        when(repository.cancelIfQueued(eq(id), eq(tenantId), any())).thenReturn(0);
+        when(repository.requestCancellationIfRunning(eq(id), eq(tenantId), any())).thenReturn(1);
+
+        service.requestCancellation(tenantId, id);
+
+        verify(repository).requestCancellationIfRunning(eq(id), eq(tenantId), any());
+        assertThat(execution.getStatus()).isEqualTo("RUNNING");
+    }
+
+    @Test
+    void requestCancellation_alreadyTerminal_throwsConflictNamingTheCurrentStatus() {
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setTenantId(tenantId);
+        execution.setStatus("SUCCEEDED");
+        when(repository.findByIdAndTenantId(id, tenantId)).thenReturn(Optional.of(execution));
+        when(repository.cancelIfQueued(eq(id), eq(tenantId), any())).thenReturn(0);
+        when(repository.requestCancellationIfRunning(eq(id), eq(tenantId), any())).thenReturn(0);
+
+        assertThatThrownBy(() -> service.requestCancellation(tenantId, id))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("SUCCEEDED")
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void requestCancellation_unknownOrWrongTenantId_throwsNotFound() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByIdAndTenantId(id, tenantId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.requestCancellation(tenantId, id))
+                .isInstanceOf(AgentException.class)
+                .satisfies(e -> assertThat(((AgentException) e).getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        verify(repository, never()).cancelIfQueued(any(), any(), any());
+        verify(repository, never()).requestCancellationIfRunning(any(), any(), any());
+    }
+
+    @Test
+    void isCancellationRequested_delegatesToTheRepository() {
+        UUID id = UUID.randomUUID();
+        when(repository.isCancellationRequested(id)).thenReturn(true);
+
+        assertThat(service.isCancellationRequested(id)).isTrue();
+    }
+
+    @Test
+    void cancel_setsCancelledStatusAndRecordsTheExecutionMetric() {
+        UUID id = UUID.randomUUID();
+        AgentExecution execution = new AgentExecution();
+        execution.setId(id);
+        execution.setStatus("RUNNING");
+        execution.setStartedAt(Instant.now().minusSeconds(5));
+        when(repository.findById(id)).thenReturn(Optional.of(execution));
+
+        service.cancel(id, 900, 100, 1000);
+
+        assertThat(execution.getStatus()).isEqualTo("CANCELLED");
+        assertThat(execution.getCompletedAt()).isNotNull();
+        assertThat(execution.getInputTokens()).isEqualTo(900);
+        assertThat(execution.getOutputTokens()).isEqualTo(100);
+        assertThat(execution.getTotalTokens()).isEqualTo(1000);
+
+        double recordedCount = meterRegistry.get("agent.execution").tag("status", "CANCELLED").timer().count();
+        assertThat(recordedCount).isEqualTo(1);
+    }
+
+    @Test
+    void cancel_unknownId_doesNothing_doesNotThrow() {
+        when(repository.findById(any())).thenReturn(Optional.empty());
+
+        service.cancel(UUID.randomUUID(), null, null, null);
+        // no exception -- nothing to assert beyond that
     }
 
     @Test

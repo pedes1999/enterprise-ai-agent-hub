@@ -145,3 +145,35 @@ dd {
   color: var(--color-status-failed);
   background: var(--color-status-failed-bg);
 }
+
+.status-cancelled {
+  color: var(--color-status-cancelled);
+  background: var(--color-status-cancelled-bg);
+}
+
+.cancel-button {
+  margin-left: var(--space-2);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-status-failed);
+  background: var(--color-surface);
+  color: var(--color-status-failed);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background: var(--color-status-failed-bg);
+}
+
+.cancel-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cancellation-pending {
+  margin-left: var(--space-2);
+  color: var(--color-status-cancelled);
+  font-size: var(--font-size-xs);
+}
