@@ -39,9 +39,10 @@ public class ToolCatalog {
      * caller error -- see AgentPromptRunner).
      */
     public List<AgentTool> instantiate(List<String> toolNames, SandboxSession session,
-                                        ToolExecutionListener listener, CredentialResolver credentialResolver) {
+                                        ToolExecutionListener listener, CredentialResolver credentialResolver,
+                                        ToolCreationContext toolContext) {
         return toolNames.stream()
-                .map(name -> factoryFor(name).create(session, listener, credentialResolver))
+                .map(name -> factoryFor(name).create(session, listener, credentialResolver, toolContext))
                 .toList();
     }
 

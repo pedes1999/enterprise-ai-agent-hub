@@ -18,6 +18,7 @@ class ToolCatalogTest {
     private final SandboxSession session = mock(SandboxSession.class);
     private final ToolExecutionListener listener = mock(ToolExecutionListener.class);
     private final CredentialResolver credentialResolver = mock(CredentialResolver.class);
+    private final ToolCreationContext toolContext = new ToolCreationContext("tenant-1", "user-1", null);
 
     private ToolFactory fakeFactory(String name) {
         return new ToolFactory() {
@@ -32,7 +33,7 @@ class ToolCatalogTest {
             }
 
             @Override
-            public AgentTool create(SandboxSession s, ToolExecutionListener l, CredentialResolver c) {
+            public AgentTool create(SandboxSession s, ToolExecutionListener l, CredentialResolver c, ToolCreationContext ctx) {
                 return mock(AgentTool.class);
             }
         };
@@ -42,7 +43,7 @@ class ToolCatalogTest {
     void instantiate_buildsOneToolPerRequestedName_inOrder() {
         ToolCatalog catalog = new ToolCatalog(List.of(fakeFactory("a"), fakeFactory("b")));
 
-        List<AgentTool> tools = catalog.instantiate(List.of("b", "a"), session, listener, credentialResolver);
+        List<AgentTool> tools = catalog.instantiate(List.of("b", "a"), session, listener, credentialResolver, toolContext);
 
         assertThat(tools).hasSize(2);
     }
@@ -51,7 +52,7 @@ class ToolCatalogTest {
     void instantiate_unknownToolName_throwsInternalServerError() {
         ToolCatalog catalog = new ToolCatalog(List.of(fakeFactory("a")));
 
-        assertThatThrownBy(() -> catalog.instantiate(List.of("does_not_exist"), session, listener, credentialResolver))
+        assertThatThrownBy(() -> catalog.instantiate(List.of("does_not_exist"), session, listener, credentialResolver, toolContext))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("does_not_exist");
     }

@@ -14,6 +14,7 @@
         <module>common-dto</module>
         <module>agent-core</module>
         <module>agent-runtime</module>
+        <module>rag-service</module>
         <module>gateway-api</module>
     </modules>
 
@@ -33,6 +34,8 @@
         <!-- Shared dependency versions across modules -->
         <langchain4j.version>1.18.1</langchain4j.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <pgvector.version>0.1.6</pgvector.version>
+        <pdfbox.version>3.0.3</pdfbox.version>
     </properties>
 
     <!-- Version management only here; each module declares which deps it actually needs -->
@@ -53,6 +56,25 @@
                 <groupId>com.enterprisehub</groupId>
                 <artifactId>agent-runtime</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprisehub</groupId>
+                <artifactId>rag-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- pgvector: JDBC type + Hibernate 6 usertype for the `vector` column -->
+            <dependency>
+                <groupId>com.pgvector</groupId>
+                <artifactId>pgvector</artifactId>
+                <version>${pgvector.version}</version>
+            </dependency>
+
+            <!-- PDFBox: PDF text extraction for document ingestion -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
             </dependency>
 
             <!-- LangChain4j -->

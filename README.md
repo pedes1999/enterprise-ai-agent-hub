@@ -1,19 +1,91 @@
 # Enterprise AI Agent Hub
 
-Model-agnostic, multi-tenant platform for automating full-stack engineering
-workflows via LLM-driven agents. A tenant registers, adds its own vendor API
-credentials (Anthropic/OpenAI/Gemini), and triggers agents that read code,
-call an LLM, and act on a real repository — with tenant isolation enforced
-at the database layer (Postgres RLS), not just in application code.
+## Why this exists
+
+Every engineering org is being asked "can we let an LLM touch our codebase
+safely?" — and most answers to that stop at a demo: a single-tenant script
+with an API key in an environment variable and no real isolation story. This
+project is my answer to what it takes to run that safely as a real product:
+**multiple customers on shared infrastructure, each tenant's data
+provably invisible to every other tenant, agents that don't just talk about
+code but actually clone it, edit it, run it, and open real pull requests
+inside a sandbox, and every one of those actions audited.** It's built the
+way I'd want a system like this built if I were the one accountable for a
+customer's credentials or their private repository ending up somewhere it
+shouldn't.
+
+Concretely, that means the parts of this repo worth a second look:
+
+- **Multi-tenant isolation enforced at the database, not the application** —
+  Postgres Row-Level Security on every tenant-scoped table, `FORCE`d so even
+  the app's own connection role can't accidentally bypass it. This is the
+  same isolation model real SaaS platforms (and their SOC 2 auditors) expect.
+- **Agents that actually act, inside a real sandbox** — not chat-only demos.
+  A ticket becomes a cloned repo, a code change, a re-run test suite, and a
+  genuine GitHub pull request, with every tool call audited.
+- **Credentials treated like credentials** — AES-256-GCM envelope encryption
+  at rest, per-user vendor keys (never a shared tenant-wide secret), a
+  fail-closed encryption key check at startup, and a documented trail of the
+  real security bugs found and fixed along the way (see the bottom of this
+  README) rather than a claim that nothing ever went wrong.
+- **Retrieval-augmented generation as a first-class, multi-tenant capability**
+  — not a bolted-on vector-search demo. See [RAG architecture](#rag-architecture)
+  below.
+
+If you're evaluating this for an engineering role: the interesting signal
+isn't any single feature, it's the pattern repeated across all of them —
+new capabilities plug into existing abstractions (RLS, the credential model,
+the tool-calling contract) instead of each one inventing its own isolation
+or security story. That consistency, and the discipline to document the
+bugs found along the way instead of only the features shipped, is the part
+meant to read as "how I'd actually build this at work," not just "a project
+that runs."
+
+## Architecture
+
+```mermaid
+flowchart TB
+    FE["Angular Frontend<br/>(JWT)"]
+    API["Platform API key caller<br/>(CI / webhook / Postman)"]
+
+    subgraph GWBOX["gateway-api — Spring Boot"]
+        GW["Auth · Tenant Context (RLS session var)<br/>REST Controllers"]
+        Worker["AgentJobWorker<br/>polls agent_executions"]
+    end
+
+    FE --> GW
+    API --> GW
+
+    GW --> Core["agent-core<br/>ToolCallingChatEngine<br/>LlmEngineFactory / EmbeddingModelFactory"]
+    GW --> Runtime["agent-runtime<br/>sandboxed tools: git_clone, read_file,<br/>write_file, run_shell_command, open_pull_request"]
+    GW --> Rag["rag-service<br/>ParagraphChunker · HybridScoreMerger · retrieval tool"]
+    Worker --> Core
+    Worker --> Runtime
+    Worker --> Rag
+
+    Runtime -->|HTTP| Sidecar["E2B Sidecar (Node.js)<br/>Firecracker microVM per execution"]
+    Core -->|decrypted per-user API key| LLM[("Anthropic / OpenAI /<br/>Gemini / Local")]
+    Rag -->|embed chunks & queries| LLM
+
+    GW --> DB[("Postgres<br/>FORCE ROW LEVEL SECURITY<br/>on every tenant-scoped table")]
+    Rag -.->|knowledge_source<br/>document_chunk<br/>agent_knowledge_source_binding| DB
+```
+
+`gateway-api` is the only Spring Boot application and the only module
+allowed to depend on all the others — `agent-core`, `agent-runtime`, and
+`rag-service` are plain library modules with their own narrow
+responsibilities (LLM abstraction, sandboxed tool execution, retrieval),
+each reusable independently of the web layer.
 
 ## Module layout
 
 | Module | Responsibility |
 |---|---|
 | `common-dto` | Shared request/response contracts. No framework dependency. |
-| `agent-core` | Provider-agnostic LLM abstraction (LangChain4j). Framework-light — no Spring dependency. |
+| `agent-core` | Provider-agnostic LLM + embedding abstraction (LangChain4j). Framework-light — no Spring dependency. |
 | `agent-runtime` | Sandboxed tool execution via E2B microVMs (through an internal sidecar — see below). Five real tools: `RunShellCommandTool`, `GitCloneTool`, `ReadFileTool`, `WriteFileTool`, `OpenPullRequestTool`, all sharing one persistent per-execution sandbox (`SandboxSession`). |
-| `gateway-api` | Spring Boot app: auth, tenant/user/credential management, agent invocation. |
+| `rag-service` | Retrieval-augmented generation: paragraph-aware chunking, hybrid (vector + full-text) search, and the `retrieval` `AgentTool` — see [RAG architecture](#rag-architecture) below. |
+| `gateway-api` | Spring Boot app: auth, tenant/user/credential management, agent invocation, and every REST controller (including `rag-service`'s knowledge-source endpoints). |
 
 ## Architecture notes
 
@@ -247,6 +319,77 @@ real exit code/stdout/stderr; and `/workspace` at the sandbox's filesystem
 root isn't writable by its default user (`/tmp` is). Both fixed, both now
 covered by tests that lock in the corrected behavior.
 
+## RAG architecture
+
+A tenant uploads documents into a `knowledge_source` (`POST /knowledge-sources`,
+`POST /knowledge-sources/{id}/documents`); any `AgentDefinition` can then be
+bound to one via a per-tenant `agent_knowledge_source_binding` row
+(`PUT /knowledge-sources/{id}/agent-bindings/{agentSlug}`, ADMIN-only), which
+is what "attach a knowledge source to an agent via config, without writing
+new code" actually means here — a data row, not a deploy. Once bound, that
+agent gets a `retrieval` tool it can call mid-execution (`ticket-resolver`
+does today, see `V31__ticket_resolver_retrieval_tool.sql`) the same way it
+calls `git_clone` or `read_file` — through the same `AgentTool` contract,
+no special-casing anywhere in `ToolCallingChatEngine`.
+
+**Why hybrid search, not vector search alone.** Vector similarity finds
+semantically related passages even when the wording is completely
+different — genuinely useful for "how does this codebase handle X"-style
+questions. But it can miss a query that hinges on one exact term: an error
+code, a specific function name, a config key — the kind of query full-text
+search is precise on and paraphrase-based vector search sometimes isn't.
+Combining both signals (`DocumentChunkRepository`'s two native queries —
+pgvector's `<=>` cosine-distance operator, and Postgres `ts_rank` over a
+`to_tsvector` GIN index) and merging them in `HybridScoreMerger` covers more
+real queries than either alone. The two signals live on completely
+different, incomparable numeric scales, so each is min-max normalized to
+`[0, 1]` **within its own candidate set** before being combined with a
+configurable weight — a chunk that only appears in one candidate set still
+contributes its full normalized score for that signal rather than being
+dropped, since it still had a real hit.
+
+**Why paragraph-aware chunking, not fixed-size splitting.** Splitting a
+document every N characters is simpler and perfectly index-friendly, but it
+routinely severs a sentence — or an entire idea — mid-thought at an
+arbitrary offset. An embedding computed over half a sentence glued to the
+unrelated start of the next one is a measurably worse semantic
+representation than embedding either sentence whole, and a chunk shown as a
+citation that begins or ends mid-word reads as broken to whoever's reading
+it. `ParagraphChunker` splits on paragraph boundaries first, only falling
+back to sentence boundaries for a single paragraph that alone exceeds the
+chunk budget, with a configurable character overlap carried from one
+chunk's tail into the next chunk's start — so a sentence that happens to
+fall right on a chunk boundary still appears whole in at least one chunk.
+It costs more implementation complexity than a one-line substring loop and
+produces variable-sized chunks instead of uniform ones, in exchange for
+each chunk staying a coherent unit of meaning.
+
+**How tenant isolation is inherited, not reimplemented.** `knowledge_source`,
+`document_chunk`, and `agent_knowledge_source_binding` all follow the exact
+same pattern as every other tenant-scoped table in this schema: a
+`tenant_id` column, `ENABLE` + `FORCE ROW LEVEL SECURITY` together, and a
+`tenant_isolation_<table>` policy keyed off
+`current_setting('app.current_tenant_id')`. Nothing in `rag-service` sets
+that session variable itself — `TenantAwareDataSource` (`gateway-api`)
+already does it on every JDBC connection checkout for the app's one shared
+`DataSource`, and `rag-service`'s Spring Data repositories run through that
+exact same `DataSource`. The moment `document_chunk` had `FORCE ROW LEVEL
+SECURITY`, tenant isolation for it was already correct, with zero new
+session-scoping code — the same reason `rag-service` could be added as a
+persistence-owning module at all despite being new: `GatewayApplication`'s
+`scanBasePackages = "com.enterprisehub"` already covers it.
+
+**Embeddings are tenant-funded, like every other LLM call here.** Anthropic
+has no embeddings API, so `EmbeddingModelFactory` (`agent-core`, sibling to
+`LlmEngineFactory`) only implements `OPENAI` and `GEMINI` — resolved from
+the *triggering user's own* vendor credential (`EmbeddingProviderResolver`,
+OpenAI checked first), never a platform-wide key, matching the BYO-key model
+every other LLM call in this app already uses. Both providers are coerced to
+the same 768-dimension output (`OpenAiEmbeddingModel`'s `dimensions`
+parameter, Gemini's native size) so `document_chunk.embedding` can be one
+fixed `vector(768)` column regardless of which vendor actually produced a
+given row.
+
 ## Setup
 
 Requires a local Postgres instance and a dedicated app role (never the
@@ -263,6 +406,30 @@ Override `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` (see `application.yml`) if
 you're not using these exact local defaults. `JWT_SECRET` and
 `CREDENTIAL_LOCAL_KEY` also have dev-only defaults baked in — override both
 in any shared/production environment.
+
+RAG features need the `pgvector` extension **installed by a superuser**,
+once per database, before `hub_user` (or any non-superuser role) ever
+connects — confirmed against a real `pgvector/pgvector:pg16` instance:
+`hub_user` gets `permission denied to create extension "vector"` even
+though it owns `agent_hub`, so `V28__enable_pgvector.sql`'s own
+`CREATE EXTENSION IF NOT EXISTS vector` can only ever *confirm* it's already
+there, never actually install it — same posture as `hub_user` never being
+the Postgres superuser above. As the `postgres` superuser (`docker-compose`'s
+`init.sh` does this automatically for the docker path):
+
+```sql
+\c agent_hub
+CREATE EXTENSION IF NOT EXISTS vector;
+\c agent_hub_test
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+The extension binary itself still needs to be present on the server first if
+you're not using `docker-compose`'s `pgvector/pgvector` image — most managed
+Postgres providers (RDS 15.2+, Supabase, Neon, Timescale) ship it, but a
+plain local Postgres install needs the OS package for your Postgres version
+(e.g. `postgresql-16-pgvector` on Debian/Ubuntu, `brew install pgvector` on
+macOS) before the `CREATE EXTENSION` above will find it.
 
 For sandboxed tool execution (`RunShellCommandTool`, `GitCloneTool`,
 `ReadFileTool`, `WriteFileTool`, `OpenPullRequestTool` — reached via
@@ -330,6 +497,10 @@ in [`postman/enterprise-ai-agent-hub.postman_collection.json`](postman/enterpris
 | `GET /agents/executions/{id}/tool-executions` | ADMIN, DEVELOPER, READONLY | The ordered tool-call trace for one execution (tool name, duration, outcome, error if any) — what a skeptical teammate opens to verify what an agent actually did. 404s if the execution itself doesn't exist or belongs to another tenant. |
 | `GET /agents/definitions` | ADMIN, DEVELOPER, READONLY | The browsable agent catalog — slug, name, description, and tool list for every active `AgentDefinition`. This is how a caller discovers what `agentSlug` values are valid. |
 | `GET /agents/definitions/{slug}` | ADMIN, DEVELOPER, READONLY | Full, **read-only** configuration for one definition — system prompt, tool list, `inputSourceType`, `requiredInputs`. "View configuration" on a catalog card, not an edit form; `AgentDefinition` still has no admin CRUD API, this is browsing only. |
+| `POST /knowledge-sources` · `GET /knowledge-sources` | ADMIN, DEVELOPER | Create/list a tenant's RAG knowledge sources (`name` + `sourceType`: `upload`/`url`/`repo`, only `upload` implemented today). |
+| `POST /knowledge-sources/{id}/documents` | ADMIN, DEVELOPER | Multipart upload (`file`, PDF or plain text) — synchronously extracts text, chunks it (`ParagraphChunker`), embeds every chunk (batched, tenant's own OpenAI/Gemini credential), and stores it. Returns the chunk count. |
+| `POST /knowledge-sources/{id}/query` | ADMIN, DEVELOPER | Direct hybrid-search query against one knowledge source, for testing/debugging outside of an agent run — same `RetrievalQueryService` an agent's `retrieval` tool call uses. Returns ranked chunks with source document name and relevance score. |
+| `PUT /knowledge-sources/{id}/agent-bindings/{agentSlug}` · `DELETE .../agent-bindings/{agentSlug}` | ADMIN | Attach/detach a knowledge source to/from an `AgentDefinition` for the caller's tenant — see [RAG architecture](#rag-architecture). |
 | `GET /actuator/health` | none | Health check |
 
 ## Test
@@ -343,8 +514,8 @@ against `agent_hub_test`, a **separate** database, so test runs never
 create or leave behind data in the dev DB (`agent_hub`). Flyway migrates it
 automatically on first test run, same as the dev DB.
 
-399 automated tests as of the last update (20 `agent-core` + 88
-`agent-runtime` + 291 `gateway-api`) — unit tests (mocked) for every
+585 automated tests as of the last update (54 `agent-core` + 110
+`agent-runtime` + 17 `rag-service` + 404 `gateway-api`) — unit tests (mocked) for every
 service/security/util class, plus integration tests that boot the real
 Spring context, real security filter chain, and real Postgres RLS to catch
 the class of bug mocks can't (e.g. cross-tenant isolation, RBAC denials,
@@ -363,6 +534,19 @@ definition, system prompt passed through) cover the agent catalog.
 `OpenPullRequestToolTest` covers the test-gate specifically: a failing
 `testCommand` never reaches the git/push/curl steps at all (verified via
 a mock call-count assertion, not just a returned message).
+`ParagraphChunkerTest` and `HybridScoreMergerTest` (`rag-service`) cover the
+chunking and hybrid-rerank logic as pure functions, no DB needed —
+`RetrievalEvalTest` is a separate retrieval-quality eval (not a correctness
+test), skipped unless a real `OPENAI_API_KEY` is set:
+
+```bash
+OPENAI_API_KEY=sk-... mvn -pl rag-service test -Dtest=RetrievalEvalTest
+```
+
+It chunks and embeds a small fixture document set, runs 10 questions against
+it through the real chunker and hybrid merger, and prints a precision@3
+report — see the class javadoc for why it computes candidates in memory
+rather than against a live Postgres.
 
 Two additional manual integration tests exist for `agent-runtime`
 (`*ManualIT` naming — excluded from `mvn test` by Surefire's default
@@ -395,7 +579,8 @@ Following a self-imposed weekly build plan (~3.5h/day, 5 days/week):
 - [x] **Backend additions for the Angular frontend** — built ahead of the frontend itself, per its own build order: CORS (one configurable origin, never a wildcard, live-verified with real preflight requests); credential health (`lastUsedAt`/`lastValidatedAt`, migration `V11`) plus live test-connection endpoints for `ANTHROPIC` (real billed API call) and `GITHUB` (validity-only check); `GET /agents/definitions/{slug}` for read-only "view configuration"; paginated `GET /agents/executions` (as `PagedModel`, not a raw `Page`) with `repositoryUrl`/`inputParameters` added to the status response; `GET /agents/executions/{id}/tool-executions` for the ordered tool-call trace; `GET /agents/executions/usage` for a "N / limit" indicator; and `POST /users` now generates + emails a temporary password via Brevo SMTP instead of accepting one from the caller (migration `V12` adds `AppUser.name`). All fully unit- and integration-tested, live-verified against real Postgres.
 - [x] **`coding-agent` renamed and repurposed to `ticket-resolver`** (migration `V13`) — a focused Ticket-to-PR persona (explicit ROLE/SCOPE/PROCESS/HARD CONSTRAINTS/STOP CONDITION system prompt) instead of a generic "can use git tools" one. `requiredInputs` is now `['repositoryUrl', 'prompt']` (both, not just `repositoryUrl`) — the ticket description is pasted as the free-text `prompt`; no live Jira API integration exists (that would need a new `ToolCredentialKind` and a real `InputSourceResolver` hitting Jira's REST API — deliberately out of scope). Also raised `ToolCallingChatEngine.MAX_TOOL_ROUNDS` from 6 to 14: the new prompt's own "one corrected attempt if tests fail" policy needs a read/write/retry cycle on top of the ~5 rounds a first-try clone→explore→fix→PR already takes, and 6 was measured too tight for that combined shape (the round cap would hit mid-retry, forcing a text-only answer with no tool calls left instead of a real PR or a clear stop reason).
 - [x] **Second agent: `test-fixer`** (migration `V16`) — proactive rather than ticket-driven: given only a repository, it discovers its own test command (no assumed stack — investigates `package.json`/`pom.xml`/`requirements.txt`/`go.mod`/etc. itself rather than guessing), runs the suite, and fixes genuine failures one at a time, explicitly reasoning about whether the SOURCE or the TEST ITSELF is stale before touching anything, re-running the FULL suite after each individual fix. Reuses `ticket-resolver`'s exact tool set — no new tools needed. `requiredInputs` is just `['repositoryUrl']` (`prompt` stays optional, for extra guidance). Raised `ToolCallingChatEngine.MAX_TOOL_ROUNDS` from 14 to 30: this prompt's per-fix full-suite-re-run discipline costs more rounds than ticket-resolver's single clone→fix→PR shape on a repo with several genuine failures.
-- [ ] The Angular frontend itself — not started yet as of this backend pass; see the process note in this repo's session history for the confirmed design token system (cool-neutral palette, Inter + JetBrains Mono, sidebar-nav dashboard layout) it'll be built against.
+- [x] **Retrieval-augmented generation (`rag-service`)** — a new persistence-owning library module (`knowledge_source`/`document_chunk`/`agent_knowledge_source_binding`, all RLS-scoped exactly like every other tenant table), paragraph-aware chunking with configurable overlap, hybrid vector + full-text search merged by a standalone, unit-tested `HybridScoreMerger`, and a `retrieval` `AgentTool` wired into `ticket-resolver`. Embeddings are tenant-funded via the user's own OpenAI/Gemini credential — see [RAG architecture](#rag-architecture) for the full design rationale.
+- [x] **Angular frontend** (`frontend/`) — auth (login/register/forced password change), the agent catalog + definition detail views, trigger-an-execution, execution history + detail, team management, and credentials (vendor + tool, plus per-agent LLM preference), against the design token system noted above (cool-neutral palette, Inter + JetBrains Mono, sidebar-nav dashboard layout), with dark mode and reduced-motion support. RAG's admin UI (creating knowledge sources, attaching them to agents) isn't built yet — today that's API-only, see the RAG architecture section above.
 - [ ] Week 11 — CLI client, GitHub Actions integration, webhook receiver
 - [ ] Weeks 12–13 — Agent #1: automated security patching (SonarQube → LLM patch → verified PR)
 - [ ] Multi-agent "Ticket → PR" pipeline — the actual end product this is building toward: a Planner/Coder/Reviewer sequence of agent executions per ticket (each a named `AgentDefinition` from the catalog above), using `agent_executions.agent_type` to distinguish stages, ending with the now-real `OpenPullRequestTool` step. Not started.

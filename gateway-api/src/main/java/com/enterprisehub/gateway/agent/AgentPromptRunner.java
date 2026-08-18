@@ -6,6 +6,7 @@ import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.gateway.agent.catalog.ToolCatalog;
+import com.enterprisehub.gateway.agent.catalog.ToolCreationContext;
 import com.enterprisehub.gateway.agent.input.InputSourceResolverRegistry;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
@@ -162,7 +163,8 @@ public class AgentPromptRunner {
 
         SandboxSession session = new SandboxSession(sandboxClient, buildSessionSpec(tenantId, executionId, definition));
         try {
-            List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver);
+            ToolCreationContext toolContext = new ToolCreationContext(tenantId.toString(), userId == null ? null : userId.toString(), definition.getId());
+            List<AgentTool> tools = toolCatalog.instantiate(definition.getToolNames(), session, toolExecutionListener, credentialResolver, toolContext);
             SharedExecutionContext context = sharedExecutionContextFactory.create(
                     tenantId.toString(), executionId, provider, apiKey, modelName, tools, definition.getSystemPrompt(),
                     llmProperties.baseUrl(provider), maxTokens, llmProperties.maxToolRounds());

@@ -17,7 +17,8 @@ import com.enterprisehub.runtime.sandbox.SandboxSession;
  * execution (see AgentPromptRunner) -- a factory doesn't get to decide
  * whether its tool shares state with others, that's SandboxSession's job.
  * A tool that doesn't need sandboxing at all (e.g. CurrentDateTimeTool)
- * just ignores the parameters it doesn't need.
+ * just ignores the parameters it doesn't need -- same for toolContext,
+ * which only RetrievalToolFactory actually reads (see ToolCreationContext).
  */
 public interface ToolFactory {
 
@@ -27,5 +28,6 @@ public interface ToolFactory {
     /** Free-text grouping for a future catalog browsing UI (e.g. "utility", "git", "filesystem", "shell"). Not enforced. */
     String category();
 
-    AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver);
+    AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver,
+                      ToolCreationContext toolContext);
 }

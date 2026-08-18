@@ -21,7 +21,8 @@ public class RunShellCommandToolFactory implements ToolFactory {
     }
 
     @Override
-    public AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver) {
+    public AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver,
+                             ToolCreationContext toolContext) {
         return new RunShellCommandTool(session, listener);
     }
 }

@@ -16,6 +16,17 @@ spring:
         format_sql: false
     open-in-view: false     # Avoid lazy-loading traps outside the transaction boundary
 
+  servlet:
+    multipart:
+      # POST /knowledge-sources/{id}/documents is the first upload endpoint
+      # in this app -- Spring Boot's own defaults (1MB file / 10MB request)
+      # are too small for a real PDF. 20MB comfortably covers a typical
+      # multi-page document without opening the door to arbitrarily large
+      # uploads; MaxUploadSizeExceededException past this is handled by
+      # GlobalExceptionHandler.
+      max-file-size: 20MB
+      max-request-size: 20MB
+
   flyway:
     enabled: true
     locations: classpath:db/migration
