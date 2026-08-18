@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.rag;
 
+import com.enterprisehub.dto.AgentKnowledgeSourceBindingSummary;
 import com.enterprisehub.dto.CreateKnowledgeSourceRequest;
 import com.enterprisehub.dto.IngestDocumentResponse;
 import com.enterprisehub.dto.KnowledgeSourceSummary;
@@ -90,6 +91,22 @@ public class KnowledgeSourceController {
         return ResponseEntity.ok(results.stream()
                 .map(r -> new RetrievedChunkResult(r.chunkId(), r.documentName(), r.content(), r.score()))
                 .toList());
+    }
+
+    /**
+     * "agent-bindings/{agentSlug}" ahead of the {id}-scoped PUT/DELETE below
+     * is a different path shape (two segments after knowledge-sources here,
+     * three there) -- no routing ambiguity, same non-issue noted elsewhere
+     * in this codebase for literal path segments ahead of a {id} pattern
+     * (see AgentExecutionController's "usage" vs "{id}").
+     */
+    @GetMapping("/agent-bindings/{agentSlug}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AgentKnowledgeSourceBindingSummary> getBindingForAgent(@AuthenticationPrincipal PlatformPrincipal principal,
+                                                                                  @PathVariable String agentSlug) {
+        return bindingService.findForAgent(UUID.fromString(principal.tenantId()), agentSlug)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @PutMapping("/{id}/agent-bindings/{agentSlug}")

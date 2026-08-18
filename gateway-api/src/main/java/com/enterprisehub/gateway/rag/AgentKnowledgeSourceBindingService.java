@@ -1,5 +1,6 @@
 package com.enterprisehub.gateway.rag;
 
+import com.enterprisehub.dto.AgentKnowledgeSourceBindingSummary;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.rag.entity.AgentKnowledgeSourceBinding;
@@ -7,7 +8,9 @@ import com.enterprisehub.rag.entity.KnowledgeSource;
 import com.enterprisehub.rag.repository.AgentKnowledgeSourceBindingRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -33,6 +36,7 @@ public class AgentKnowledgeSourceBindingService {
     }
 
     /** Upsert -- attaching a different source to the same agent replaces the previous binding (see the table's UNIQUE (tenant_id, agent_definition_id)). */
+    @Transactional
     public void attach(UUID tenantId, UUID knowledgeSourceId, String agentSlug) {
         KnowledgeSource source = knowledgeSourceService.getOwned(tenantId, knowledgeSourceId);
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
@@ -45,9 +49,18 @@ public class AgentKnowledgeSourceBindingService {
         bindingRepository.save(binding);
     }
 
+    @Transactional
     public void detach(UUID tenantId, String agentSlug) {
         AgentDefinition definition = resolveAgentDefinition(agentSlug);
         bindingRepository.deleteByTenantIdAndAgentDefinitionId(tenantId, definition.getId());
+    }
+
+    /** Empty when nothing is currently bound -- not an error, most tenant/agent pairs have no knowledge source attached. */
+    public Optional<AgentKnowledgeSourceBindingSummary> findForAgent(UUID tenantId, String agentSlug) {
+        AgentDefinition definition = resolveAgentDefinition(agentSlug);
+        return bindingRepository.findByTenantIdAndAgentDefinitionId(tenantId, definition.getId())
+                .map(binding -> knowledgeSourceService.getOwned(tenantId, binding.getKnowledgeSourceId()))
+                .map(source -> new AgentKnowledgeSourceBindingSummary(source.getId().toString(), source.getName()));
     }
 
     private AgentDefinition resolveAgentDefinition(String agentSlug) {
