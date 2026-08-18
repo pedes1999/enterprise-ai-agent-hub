@@ -11,6 +11,8 @@ import {
   VendorCredentialSummary,
 } from '../../core/models/credential.model';
 import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
+import { extractErrorMessage } from '../../shared/http/error-message';
+import { RowMessage } from '../../shared/models/row-message';
 
 interface VendorProviderDef {
   provider: string;
@@ -22,11 +24,6 @@ interface ToolKindDef {
   credentialKind: string;
   label: string;
   testSupported: boolean;
-}
-
-interface RowMessage {
-  kind: 'success' | 'error';
-  text: string;
 }
 
 export const VENDOR_PROVIDERS: VendorProviderDef[] = [
@@ -170,7 +167,7 @@ export class Credentials implements OnInit {
         done();
       },
       error: (err) => {
-        this.loadError.set(this.extractMessage(err, 'Failed to load vendor credentials.'));
+        this.loadError.set(extractErrorMessage(err, 'Failed to load vendor credentials.'));
         done();
       },
     });
@@ -182,7 +179,7 @@ export class Credentials implements OnInit {
           done();
         },
         error: (err) => {
-          this.loadError.set(this.extractMessage(err, 'Failed to load tool credentials.'));
+          this.loadError.set(extractErrorMessage(err, 'Failed to load tool credentials.'));
           done();
         },
       });
@@ -198,7 +195,7 @@ export class Credentials implements OnInit {
           done();
         },
         error: (err) => {
-          this.loadError.set(this.extractMessage(err, 'Failed to load LLM provider preference.'));
+          this.loadError.set(extractErrorMessage(err, 'Failed to load LLM provider preference.'));
           done();
         },
       });
@@ -216,7 +213,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.teamLoading.set(false);
-        this.teamError.set(this.extractMessage(err, 'Failed to load team credentials.'));
+        this.teamError.set(extractErrorMessage(err, 'Failed to load team credentials.'));
       },
     });
   }
@@ -234,7 +231,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.deactivatingKey.set(null);
-        this.teamError.set(this.extractMessage(err, 'Failed to deactivate credential.'));
+        this.teamError.set(extractErrorMessage(err, 'Failed to deactivate credential.'));
       },
     });
   }
@@ -268,10 +265,6 @@ export class Credentials implements OnInit {
 
   private refreshToolCredentials(): void {
     this.credentialService.listToolCredentials().subscribe((list) => this.toolCredentials.set(list));
-  }
-
-  private extractMessage(err: any, fallback: string): string {
-    return err?.error?.message ?? fallback;
   }
 
   vendorSummary(provider: string): VendorCredentialSummary | undefined {
@@ -312,7 +305,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.loadingModels.set(false);
-        this.modelsError.set(this.extractMessage(err, 'Failed to load models.'));
+        this.modelsError.set(extractErrorMessage(err, 'Failed to load models.'));
       },
     });
   }
@@ -342,7 +335,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.savingPreference.set(false);
-        this.preferenceMessage.set({ kind: 'error', text: this.extractMessage(err, 'Failed to save preference.') });
+        this.preferenceMessage.set({ kind: 'error', text: extractErrorMessage(err, 'Failed to save preference.') });
       },
     });
   }
@@ -380,7 +373,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.savingKey.set(null);
-        this.vendorMessages[provider] = { kind: 'error', text: this.extractMessage(err, 'Failed to save key.') };
+        this.vendorMessages[provider] = { kind: 'error', text: extractErrorMessage(err, 'Failed to save key.') };
       },
     });
   }
@@ -416,13 +409,13 @@ export class Credentials implements OnInit {
           },
           error: (err) => {
             this.savingKey.set(null);
-            this.toolMessages[alsoSaveAs] = { kind: 'error', text: this.extractMessage(err, 'Failed to save value.') };
+            this.toolMessages[alsoSaveAs] = { kind: 'error', text: extractErrorMessage(err, 'Failed to save value.') };
           },
         });
       },
       error: (err) => {
         this.savingKey.set(null);
-        this.toolMessages[credentialKind] = { kind: 'error', text: this.extractMessage(err, 'Failed to save value.') };
+        this.toolMessages[credentialKind] = { kind: 'error', text: extractErrorMessage(err, 'Failed to save value.') };
       },
     });
   }
@@ -439,7 +432,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.removingKey.set(null);
-        this.vendorMessages[provider] = { kind: 'error', text: this.extractMessage(err, 'Failed to remove credential.') };
+        this.vendorMessages[provider] = { kind: 'error', text: extractErrorMessage(err, 'Failed to remove credential.') };
       },
     });
   }
@@ -455,7 +448,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.removingKey.set(null);
-        this.toolMessages[credentialKind] = { kind: 'error', text: this.extractMessage(err, 'Failed to remove credential.') };
+        this.toolMessages[credentialKind] = { kind: 'error', text: extractErrorMessage(err, 'Failed to remove credential.') };
       },
     });
   }
@@ -471,7 +464,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.testingKey.set(null);
-        this.vendorMessages[provider] = { kind: 'error', text: this.extractMessage(err, 'Test connection failed.') };
+        this.vendorMessages[provider] = { kind: 'error', text: extractErrorMessage(err, 'Test connection failed.') };
       },
     });
   }
@@ -487,7 +480,7 @@ export class Credentials implements OnInit {
       },
       error: (err) => {
         this.testingKey.set(null);
-        this.toolMessages[credentialKind] = { kind: 'error', text: this.extractMessage(err, 'Test connection failed.') };
+        this.toolMessages[credentialKind] = { kind: 'error', text: extractErrorMessage(err, 'Test connection failed.') };
       },
     });
   }

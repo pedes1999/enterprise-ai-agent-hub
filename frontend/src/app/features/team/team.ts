@@ -5,11 +5,8 @@ import { AuthService } from '../../core/services/auth.service';
 import { Role } from '../../core/models/auth.model';
 import { UserSummary } from '../../core/models/user.model';
 import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
-
-interface RowMessage {
-  kind: 'success' | 'error';
-  text: string;
-}
+import { extractErrorMessage } from '../../shared/http/error-message';
+import { RowMessage } from '../../shared/models/row-message';
 
 @Component({
   selector: 'app-team',
@@ -50,7 +47,7 @@ export class Team implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.loadError.set(err.error?.message ?? 'Failed to load team members.');
+        this.loadError.set(extractErrorMessage(err, 'Failed to load team members.'));
         this.loading.set(false);
       },
     });
@@ -75,7 +72,7 @@ export class Team implements OnInit {
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err.error?.message ?? 'Failed to create user.');
+        this.createError.set(extractErrorMessage(err, 'Failed to create user.'));
       },
     });
   }
@@ -91,7 +88,7 @@ export class Team implements OnInit {
       },
       error: (err) => {
         this.pendingUserId.set(null);
-        this.rowMessages[user.id] = { kind: 'error', text: err.error?.message ?? 'Failed to update role.' };
+        this.rowMessages[user.id] = { kind: 'error', text: extractErrorMessage(err, 'Failed to update role.') };
       },
     });
   }
@@ -106,7 +103,7 @@ export class Team implements OnInit {
       },
       error: (err) => {
         this.pendingUserId.set(null);
-        this.rowMessages[user.id] = { kind: 'error', text: err.error?.message ?? 'Failed to remove user.' };
+        this.rowMessages[user.id] = { kind: 'error', text: extractErrorMessage(err, 'Failed to remove user.') };
       },
     });
   }

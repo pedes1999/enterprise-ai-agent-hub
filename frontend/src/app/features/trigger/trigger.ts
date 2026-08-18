@@ -10,6 +10,7 @@ import {
   AgentTokenUsageStats,
   ExecutionUsage,
 } from '../../core/models/agent.model';
+import { extractErrorMessage } from '../../shared/http/error-message';
 
 export const POLL_INTERVAL_MS = 2000;
 
@@ -74,7 +75,7 @@ export class Trigger implements OnInit, OnDestroy {
         }
       },
       error: (err) => {
-        this.definitionError.set(err.error?.message ?? 'Failed to load this agent.');
+        this.definitionError.set(extractErrorMessage(err, 'Failed to load this agent.'));
         this.definitionLoading.set(false);
       },
     });
@@ -138,13 +139,13 @@ export class Trigger implements OnInit, OnDestroy {
           this.submitting.set(false);
           if (err.status === 429) {
             this.errorKind.set('rate-limit');
-            this.errorMessage.set(err.error?.message ?? 'Execution limit reached for this organization.');
-          } else if (err.status === 400 && (err.error?.message ?? '').startsWith('Missing required input')) {
+            this.errorMessage.set(extractErrorMessage(err, 'Execution limit reached for this organization.'));
+          } else if (err.status === 400 && (extractErrorMessage(err, '')).startsWith('Missing required input')) {
             this.errorKind.set('required-inputs');
             this.errorMessage.set(err.error.message);
           } else {
             this.errorKind.set('generic');
-            this.errorMessage.set(err.error?.message ?? 'Failed to trigger the agent.');
+            this.errorMessage.set(extractErrorMessage(err, 'Failed to trigger the agent.'));
           }
         },
       });
@@ -158,7 +159,7 @@ export class Trigger implements OnInit, OnDestroy {
       )
       .subscribe({
         next: (exec) => this.execution.set(exec),
-        error: (err) => this.pollError.set(err.error?.message ?? 'Lost connection while checking execution status.'),
+        error: (err) => this.pollError.set(extractErrorMessage(err, 'Lost connection while checking execution status.')),
       });
   }
 }

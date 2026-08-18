@@ -3,6 +3,7 @@ import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 import { strongPasswordValidator } from '../../../shared/validators/password.validator';
+import { extractErrorMessage } from '../../../shared/http/error-message';
 
 @Component({
   selector: 'app-register',
@@ -44,7 +45,7 @@ export class Register {
         if (err.status === 409) {
           this.errorMessage.set('That organization slug is already taken.');
         } else if (err.status === 400) {
-          this.errorMessage.set(err.error?.message ?? 'Registration failed. Please try again.');
+          this.errorMessage.set(extractErrorMessage(err, 'Registration failed. Please try again.'));
         } else {
           this.errorMessage.set('Registration failed. Please try again.');
         }

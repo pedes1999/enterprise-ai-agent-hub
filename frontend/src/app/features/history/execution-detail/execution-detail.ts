@@ -3,6 +3,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AgentService } from '../../../core/services/agent.service';
 import { AgentExecutionStatusResponse, ToolExecutionRecord } from '../../../core/models/agent.model';
 import { LocalDateTimePipe } from '../../../shared/pipes/local-date-time.pipe';
+import { extractErrorMessage } from '../../../shared/http/error-message';
 
 @Component({
   selector: 'app-execution-detail',
@@ -30,17 +31,17 @@ export class ExecutionDetail implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.loadError.set(err.error?.message ?? 'Failed to load this execution.');
+        this.loadError.set(extractErrorMessage(err, 'Failed to load this execution.'));
         this.loading.set(false);
       },
     });
     this.agentService.getToolExecutions(id).subscribe({
       next: (records) => this.toolExecutions.set(records),
-      error: (err) => this.traceError.set(err.error?.message ?? 'Failed to load the tool-call trace.'),
+      error: (err) => this.traceError.set(extractErrorMessage(err, 'Failed to load the tool-call trace.')),
     });
     this.agentService.getChildren(id).subscribe({
       next: (records) => this.children.set(records),
-      error: (err) => this.childrenError.set(err.error?.message ?? 'Failed to load delegated executions.'),
+      error: (err) => this.childrenError.set(extractErrorMessage(err, 'Failed to load delegated executions.')),
     });
   }
 }

@@ -3,6 +3,7 @@ import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Va
 import { Router } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 import { strongPasswordValidator } from '../../../shared/validators/password.validator';
+import { extractErrorMessage } from '../../../shared/http/error-message';
 
 function passwordsMatchValidator(control: AbstractControl): ValidationErrors | null {
   const newPassword = control.get('newPassword')?.value;
@@ -52,7 +53,7 @@ export class ChangePassword {
       },
       error: (err) => {
         this.submitting.set(false);
-        this.errorMessage.set(err.error?.message ?? 'Could not change your password. Please try again.');
+        this.errorMessage.set(extractErrorMessage(err, 'Could not change your password. Please try again.'));
       },
     });
   }

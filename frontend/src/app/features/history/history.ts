@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { AgentService } from '../../core/services/agent.service';
 import { AgentExecutionStatusResponse, ExecutionStatus, PagedModel } from '../../core/models/agent.model';
 import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
+import { extractErrorMessage } from '../../shared/http/error-message';
 
 const PAGE_SIZE = 20;
 
@@ -35,7 +36,7 @@ export class History implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.loadError.set(err.error?.message ?? 'Failed to load execution history.');
+        this.loadError.set(extractErrorMessage(err, 'Failed to load execution history.'));
         this.loading.set(false);
       },
     });

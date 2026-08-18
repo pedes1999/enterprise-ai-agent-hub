@@ -3,11 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { KnowledgeService } from '../../core/services/knowledge.service';
 import { KnowledgeSourceSummary, RetrievedChunkResult } from '../../core/models/knowledge.model';
 import { LocalDateTimePipe } from '../../shared/pipes/local-date-time.pipe';
-
-interface RowMessage {
-  kind: 'success' | 'error';
-  text: string;
-}
+import { extractErrorMessage } from '../../shared/http/error-message';
+import { RowMessage } from '../../shared/models/row-message';
 
 @Component({
   selector: 'app-knowledge',
@@ -50,7 +47,7 @@ export class Knowledge implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.loadError.set(err.error?.message ?? 'Failed to load knowledge sources.');
+        this.loadError.set(extractErrorMessage(err, 'Failed to load knowledge sources.'));
         this.loading.set(false);
       },
     });
@@ -71,7 +68,7 @@ export class Knowledge implements OnInit {
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err.error?.message ?? 'Failed to create knowledge source.');
+        this.createError.set(extractErrorMessage(err, 'Failed to create knowledge source.'));
       },
     });
   }
@@ -103,7 +100,7 @@ export class Knowledge implements OnInit {
       },
       error: (err) => {
         this.uploadingId.set(null);
-        this.uploadMessages[sourceId] = { kind: 'error', text: err.error?.message ?? 'Upload failed.' };
+        this.uploadMessages[sourceId] = { kind: 'error', text: extractErrorMessage(err, 'Upload failed.') };
       },
     });
   }
@@ -126,7 +123,7 @@ export class Knowledge implements OnInit {
       },
       error: (err) => {
         this.queryingId.set(null);
-        this.queryError[sourceId] = err.error?.message ?? 'Query failed.';
+        this.queryError[sourceId] = extractErrorMessage(err, 'Query failed.');
       },
     });
   }

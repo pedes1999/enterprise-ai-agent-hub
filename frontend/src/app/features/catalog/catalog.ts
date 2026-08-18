@@ -2,6 +2,7 @@ import { Component, inject, OnInit, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AgentService } from '../../core/services/agent.service';
 import { AgentDefinitionSummary } from '../../core/models/agent.model';
+import { extractErrorMessage } from '../../shared/http/error-message';
 
 @Component({
   selector: 'app-catalog',
@@ -23,7 +24,7 @@ export class Catalog implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.loadError.set(err.error?.message ?? 'Failed to load the agent catalog.');
+        this.loadError.set(extractErrorMessage(err, 'Failed to load the agent catalog.'));
         this.loading.set(false);
       },
     });

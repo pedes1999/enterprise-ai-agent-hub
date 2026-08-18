@@ -6,6 +6,7 @@ import { KnowledgeService } from '../../../core/services/knowledge.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { AgentDefinitionDetail } from '../../../core/models/agent.model';
 import { AgentKnowledgeSourceBindingSummary, KnowledgeSourceSummary } from '../../../core/models/knowledge.model';
+import { extractErrorMessage } from '../../../shared/http/error-message';
 
 @Component({
   selector: 'app-definition-detail',
@@ -48,7 +49,7 @@ export class DefinitionDetail implements OnInit {
         if (err.status === 404) {
           this.notFound.set(true);
         } else {
-          this.loadError.set(err.error?.message ?? 'Failed to load this agent.');
+          this.loadError.set(extractErrorMessage(err, 'Failed to load this agent.'));
         }
         this.loading.set(false);
       },
@@ -92,7 +93,7 @@ export class DefinitionDetail implements OnInit {
       },
       error: (err) => {
         this.attaching.set(false);
-        this.bindingActionError.set(err.error?.message ?? 'Failed to attach knowledge source.');
+        this.bindingActionError.set(extractErrorMessage(err, 'Failed to attach knowledge source.'));
       },
     });
   }
@@ -107,7 +108,7 @@ export class DefinitionDetail implements OnInit {
       },
       error: (err) => {
         this.detaching.set(false);
-        this.bindingActionError.set(err.error?.message ?? 'Failed to detach knowledge source.');
+        this.bindingActionError.set(extractErrorMessage(err, 'Failed to detach knowledge source.'));
       },
     });
   }
