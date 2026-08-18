@@ -7,3 +7,9 @@ target/
 *.log
 .DS_Store
 node_modules/
+
+# Personal debugging reference, not third-party-facing docs (see README's
+# other companion doc, USER_STORIES.md, which stays tracked) -- kept
+# locally, updated freely, deliberately untracked so it can drift/scratch
+# without needing a commit for every edit.
+CODE_WALKTHROUGH.md
