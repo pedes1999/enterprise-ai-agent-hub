@@ -13,6 +13,7 @@ COPY pom.xml .
 COPY common-dto/pom.xml common-dto/pom.xml
 COPY agent-core/pom.xml agent-core/pom.xml
 COPY agent-runtime/pom.xml agent-runtime/pom.xml
+COPY rag-service/pom.xml rag-service/pom.xml
 COPY gateway-api/pom.xml gateway-api/pom.xml
 RUN mvn -q -pl gateway-api -am dependency:go-offline
 
@@ -20,6 +21,7 @@ COPY common-dto common-dto
 COPY agent-core agent-core
 COPY agent-runtime/pom.xml agent-runtime/pom.xml
 COPY agent-runtime/src agent-runtime/src
+COPY rag-service rag-service
 COPY gateway-api gateway-api
 RUN mvn -q -pl gateway-api -am -DskipTests package
 
