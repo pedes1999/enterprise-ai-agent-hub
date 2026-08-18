@@ -22,10 +22,14 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.enterprisehub.gateway.agent.EnqueueExecutionCommand;
 
 /**
@@ -68,6 +72,127 @@ class AgentExecutionQueueIntegrationTest {
         String slug = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
         RegisterRequest request = new RegisterRequest(slug, slug, "admin@" + slug + ".com", "p@ssword123");
         return restTemplate.postForEntity(baseUrl() + "/auth/register", request, AuthResponse.class).getBody();
+    }
+
+    /**
+     * The lockout fixed by V32__agent_execution_heartbeat.sql, end to end
+     * against real Postgres: a job claimed by an instance that then dies
+     * stays RUNNING forever, and because RUNNING counts toward the
+     * per-tenant concurrency cap, those rows permanently consume the
+     * tenant's capacity until it can never trigger anything again.
+     *
+     * Simulating the crash is exactly "claim the row and then never touch
+     * it again", which is what the claim-without-complete below does -- no
+     * heartbeat is ever stamped for it, which is precisely how a real dead
+     * instance looks to every surviving one.
+     */
+    @Test
+    void abandonedRunningExecutions_areReapedAndStopConsumingTheConcurrencyCap() {
+        AuthResponse tenant = registerTenant("reap");
+        UUID tenantId = UUID.fromString(tenant.tenantId());
+
+        // Fill the tenant's entire concurrency allowance with jobs, then
+        // claim each one and walk away -- the crash-mid-run state.
+        int cap = executionService.getUsage(tenantId).limit();
+        List<UUID> abandonedIds = new ArrayList<>();
+        TenantContext.set(tenantId.toString());
+        try {
+            for (int i = 0; i < cap; i++) {
+                abandonedIds.add(executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "general-assistant")
+                        .prompt("abandoned job " + i)
+                        .build()).getId());
+            }
+        } finally {
+            TenantContext.clear();
+        }
+        // Claim each of THIS tenant's jobs specifically. claimNext() takes the
+        // oldest QUEUED row across every tenant (that's the worker-sentinel
+        // carve-out working as designed), so on a shared test database a plain
+        // "claim cap times" would mostly claim other tests' rows and leave
+        // this tenant's still QUEUED -- which counts toward the cap too, and
+        // would make the reap below look like it had failed.
+        abandonedIds.forEach(this::drainUntilClaimed);
+
+        // The tenant is now locked out: every slot is held by a RUNNING row
+        // that nothing will ever finish.
+        TenantContext.set(tenantId.toString());
+        try {
+            assertThat(executionService.getUsage(tenantId).active()).isEqualTo(cap);
+            assertThatThrownBy(() -> executionService.enqueue(
+                    EnqueueExecutionCommand.forAgent(tenantId, "general-assistant").prompt("blocked").build()))
+                    .hasMessageContaining("executions in progress");
+        } finally {
+            TenantContext.clear();
+        }
+
+        // A sweep with a zero staleness window treats anything not stamped
+        // *right now* as abandoned -- the same code path the scheduled
+        // reaper runs, just without waiting out the real 5-minute window.
+        TenantContext.set(TenantContext.SYSTEM_WORKER_TENANT_ID);
+        int reaped;
+        try {
+            reaped = executionService.reapStaleRunning(Duration.ZERO);
+        } finally {
+            TenantContext.clear();
+        }
+        assertThat(reaped).isGreaterThanOrEqualTo(cap);
+
+        // Capacity is back, and the reaped rows explain themselves rather
+        // than just vanishing.
+        TenantContext.set(tenantId.toString());
+        try {
+            assertThat(executionService.getUsage(tenantId).active()).isZero();
+            AgentExecution recovered = executionService.enqueue(
+                    EnqueueExecutionCommand.forAgent(tenantId, "general-assistant").prompt("now allowed").build());
+            assertThat(recovered.getStatus()).isEqualTo("QUEUED");
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    /**
+     * A job the owning instance is still stamping must survive a sweep --
+     * the failure mode that would make this whole mechanism worse than the
+     * bug it fixes, by killing live, paid-for agent runs.
+     */
+    @Test
+    void heartbeatedRunningExecution_survivesTheReaper() {
+        AuthResponse tenant = registerTenant("beat");
+        UUID tenantId = UUID.fromString(tenant.tenantId());
+
+        UUID executionId;
+        TenantContext.set(tenantId.toString());
+        try {
+            executionId = executionService.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "general-assistant")
+                    .prompt("a job that is genuinely still running")
+                    .build()).getId();
+        } finally {
+            TenantContext.clear();
+        }
+
+        AgentExecution claimed = drainUntilClaimed(executionId);
+        assertThat(claimed.getStatus()).isEqualTo("RUNNING");
+
+        TenantContext.set(TenantContext.SYSTEM_WORKER_TENANT_ID);
+        try {
+            // What ExecutionHeartbeatMonitor does on every tick for the jobs
+            // its instance owns.
+            executionService.heartbeat(List.of(executionId));
+            // A one-minute window: the beat above is seconds old, so this row
+            // is comfortably inside it and must be left alone.
+            executionService.reapStaleRunning(Duration.ofMinutes(1));
+        } finally {
+            TenantContext.clear();
+        }
+
+        TenantContext.set(tenantId.toString());
+        try {
+            assertThat(executionService.findForTenant(tenantId, executionId))
+                    .get()
+                    .satisfies(execution -> assertThat(execution.getStatus()).isEqualTo("RUNNING"));
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     /**

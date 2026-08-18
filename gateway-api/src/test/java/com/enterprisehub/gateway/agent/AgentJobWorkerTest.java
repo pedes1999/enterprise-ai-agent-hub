@@ -6,6 +6,7 @@ import com.enterprisehub.gateway.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.util.Map;
 import java.util.Optional;
@@ -21,13 +22,15 @@ class AgentJobWorkerTest {
 
     private AgentExecutionService executionService;
     private AgentPromptRunner agentPromptRunner;
+    private ExecutionHeartbeatMonitor heartbeatMonitor;
     private AgentJobWorker worker;
 
     @BeforeEach
     void setUp() {
         executionService = mock(AgentExecutionService.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
-        worker = new AgentJobWorker(executionService, agentPromptRunner);
+        heartbeatMonitor = mock(ExecutionHeartbeatMonitor.class);
+        worker = new AgentJobWorker(executionService, agentPromptRunner, heartbeatMonitor);
         // Every AgentExecution mocked in this test file leaves inputParameters
         // unset -- matches AgentExecutionService's own real "none stored" contract.
         when(executionService.deserializeInputParameters(any())).thenReturn(Map.of());
@@ -215,5 +218,58 @@ class AgentJobWorkerTest {
         verify(executionService).fail(executionId, "Your credit balance is too low to access the Anthropic API.", 900, 150, 1050);
         verify(executionService, never()).fail(eq(executionId), anyString());
         assertThat(TenantContext.get()).isNull();
+    }
+
+    // ---------- heartbeat ownership (see V32__agent_execution_heartbeat.sql) ----------
+
+    @Test
+    void pollAndProcessOne_registersTheJobForHeartbeatingBeforeRunningIt() {
+        // Ordering matters: if the job were only tracked after the run, a
+        // long execution would go unstamped for its whole duration and the
+        // reaper would fail it out from under itself.
+        UUID executionId = UUID.randomUUID();
+        AgentExecution job = queuedJob(executionId);
+        when(executionService.claimNext()).thenReturn(Optional.of(job));
+        when(agentPromptRunner.run(any()))
+                .thenReturn(new ToolCallingChatEngine.ToolChatResult("done", false, false, null));
+
+        worker.pollAndProcessOne();
+
+        InOrder inOrder = inOrder(heartbeatMonitor, agentPromptRunner);
+        inOrder.verify(heartbeatMonitor).track(executionId);
+        inOrder.verify(agentPromptRunner).run(any());
+        inOrder.verify(heartbeatMonitor).untrack(executionId);
+    }
+
+    @Test
+    void pollAndProcessOne_runFailed_stillStopsHeartbeatingTheJob() {
+        // An id left in the in-flight set would be stamped forever, keeping
+        // a dead row looking alive to the reaper -- exactly the state the
+        // heartbeat exists to detect.
+        UUID executionId = UUID.randomUUID();
+        when(executionService.claimNext()).thenReturn(Optional.of(queuedJob(executionId)));
+        when(agentPromptRunner.run(any())).thenThrow(new RuntimeException("boom"));
+
+        worker.pollAndProcessOne();
+
+        verify(heartbeatMonitor).untrack(executionId);
+    }
+
+    @Test
+    void pollAndProcessOne_nothingQueued_tracksNothing() {
+        when(executionService.claimNext()).thenReturn(Optional.empty());
+
+        worker.pollAndProcessOne();
+
+        verifyNoInteractions(heartbeatMonitor);
+    }
+
+    private AgentExecution queuedJob(UUID executionId) {
+        AgentExecution job = new AgentExecution();
+        job.setId(executionId);
+        job.setTenantId(UUID.randomUUID());
+        job.setPrompt("do something");
+        job.setAgentType("coding-agent");
+        return job;
     }
 }

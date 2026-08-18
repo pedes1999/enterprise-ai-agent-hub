@@ -12,8 +12,10 @@ import com.enterprisehub.gateway.repository.ToolExecutionRepository;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -581,5 +583,60 @@ class AgentExecutionServiceTest {
         assertThat(stats.minTokens()).isNull();
         assertThat(stats.avgTokens()).isNull();
         assertThat(stats.maxTokens()).isNull();
+    }
+
+    // ---------- heartbeat / reaping (see V32__agent_execution_heartbeat.sql) ----------
+
+    @Test
+    void heartbeat_noExecutionsInFlight_doesNotTouchTheDatabase() {
+        // The common case on an idle instance -- issuing an UPDATE ... WHERE
+        // id IN () every tick would be pure noise.
+        service.heartbeat(List.of());
+
+        verify(repository, never()).heartbeat(any(), any());
+    }
+
+    @Test
+    void heartbeat_stampsEveryInFlightExecution() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+
+        service.heartbeat(List.of(first, second));
+
+        verify(repository).heartbeat(eq(List.of(first, second)), any(Instant.class));
+    }
+
+    @Test
+    void reapStaleRunning_marksAbandonedRowsFailedWithAnExplanation() {
+        AgentExecution abandoned = new AgentExecution();
+        abandoned.setId(UUID.randomUUID());
+        abandoned.setStatus("RUNNING");
+        when(repository.findStaleRunning(any(Instant.class))).thenReturn(List.of(abandoned));
+
+        int reaped = service.reapStaleRunning(Duration.ofMinutes(5));
+
+        assertThat(reaped).isEqualTo(1);
+        assertThat(abandoned.getStatus()).isEqualTo("FAILED");
+        assertThat(abandoned.getCompletedAt()).isNotNull();
+        assertThat(abandoned.getErrorMessage()).contains("abandoned").contains("restarted or killed");
+    }
+
+    @Test
+    void reapStaleRunning_agesRowsAgainstTheGivenStalenessWindow() {
+        service.reapStaleRunning(Duration.ofMinutes(5));
+
+        ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
+        verify(repository).findStaleRunning(cutoff.capture());
+        // Cutoff is "now minus the window", so a row last seen more recently
+        // than 5 minutes ago is outside it and must not be reaped.
+        assertThat(cutoff.getValue()).isBefore(Instant.now().minus(Duration.ofMinutes(4)));
+        assertThat(cutoff.getValue()).isAfter(Instant.now().minus(Duration.ofMinutes(6)));
+    }
+
+    @Test
+    void reapStaleRunning_nothingStale_reportsZeroAndChangesNothing() {
+        when(repository.findStaleRunning(any(Instant.class))).thenReturn(List.of());
+
+        assertThat(service.reapStaleRunning(Duration.ofMinutes(5))).isZero();
     }
 }

@@ -118,6 +118,17 @@ public class AgentExecution {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * Liveness stamp refreshed by whichever app instance currently owns this
+     * RUNNING execution -- see ExecutionHeartbeatMonitor and
+     * V32__agent_execution_heartbeat.sql. Null for rows that have never been
+     * claimed (QUEUED), for terminal rows, and for rows that were already
+     * RUNNING before V32; the reaper falls back to startedAt/createdAt in
+     * those cases rather than treating null as "fresh".
+     */
+    @Column(name = "last_heartbeat_at")
+    private Instant lastHeartbeatAt;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 

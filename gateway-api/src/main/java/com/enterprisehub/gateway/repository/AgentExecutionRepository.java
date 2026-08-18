@@ -4,8 +4,11 @@ import com.enterprisehub.gateway.entity.AgentExecution;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +29,34 @@ public interface AgentExecutionRepository extends JpaRepository<AgentExecution, 
 
     /** Backs GET /agents/executions?status=... */
     Page<AgentExecution> findByTenantIdAndStatus(UUID tenantId, String status, Pageable pageable);
+
+    /**
+     * Stamps the liveness signal for every execution this instance is
+     * currently running -- see ExecutionHeartbeatMonitor. Deliberately a
+     * bulk UPDATE rather than load-mutate-flush: this runs on a timer for
+     * the whole life of a job and touches exactly one column, so there's no
+     * reason to pull entities into the persistence context to do it. Like
+     * claimNextQueued() it runs under the worker sentinel, so it can reach
+     * rows across every tenant (see V5's RLS carve-out).
+     */
+    @Modifying
+    @Query("update AgentExecution e set e.lastHeartbeatAt = :now where e.id in :ids")
+    int heartbeat(@Param("ids") Collection<UUID> ids, @Param("now") Instant now);
+
+    /**
+     * RUNNING rows that no app instance is stamping any more -- i.e. whose
+     * owner died mid-run. COALESCE, not a plain comparison: last_heartbeat_at
+     * is null both for rows that were already RUNNING when V32 added the
+     * column and for the brief window before a freshly-claimed job's first
+     * beat, and in both cases the row's own start time is the right thing to
+     * age against. Treating null as "never stale" would leave exactly the
+     * pre-existing orphans this was written to clear; treating it as
+     * "infinitely stale" would reap jobs a fraction of a second after they
+     * were legitimately claimed.
+     */
+    @Query("select e from AgentExecution e where e.status = 'RUNNING' "
+            + "and coalesce(e.lastHeartbeatAt, e.startedAt, e.createdAt) < :cutoff")
+    List<AgentExecution> findStaleRunning(@Param("cutoff") Instant cutoff);
 
     /**
      * Atomically claims the oldest still-QUEUED job across every tenant.

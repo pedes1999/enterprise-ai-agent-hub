@@ -158,6 +158,15 @@ app:
     # poller against rows they're asserting on.
     enabled: ${JOB_WORKER_ENABLED:true}
     poll-interval-ms: ${JOB_WORKER_POLL_INTERVAL_MS:2000}
+    # ExecutionHeartbeatMonitor: how often this instance stamps the
+    # executions it's running, how often it sweeps for abandoned ones, and
+    # how long a RUNNING row may go unstamped before it's treated as
+    # abandoned and failed. stale-after MUST stay comfortably larger than
+    # heartbeat-interval-ms -- JobWorkerProperties rejects a config where it
+    # isn't, rather than letting healthy jobs get reaped between beats.
+    heartbeat-interval-ms: ${JOB_WORKER_HEARTBEAT_INTERVAL_MS:30000}
+    reap-interval-ms: ${JOB_WORKER_REAP_INTERVAL_MS:60000}
+    stale-after: ${JOB_WORKER_STALE_AFTER:5m}
   mail:
     # Must be a sender address verified in the Brevo account above, or
     # Brevo rejects the send outright.
@@ -167,3 +176,14 @@ logging:
   level:
     com.enterprisehub: INFO
     org.springframework.security: INFO
+  pattern:
+    # Renders AgentJobWorker's executionId MDC value on every line logged
+    # beneath a claimed job (including from AgentPromptRunner and the tools
+    # underneath it), so one agent run can be grepped out of the log by the
+    # same id the API and history UI already show the user. Extending
+    # `level` rather than replacing `console`/`file` deliberately: it's the
+    # one pattern property Spring Boot intends for this, so the default
+    # layout, colours, and file/console differences all stay intact.
+    # Renders as an empty [] on ordinary request-thread logging, which has
+    # no execution to correlate to.
+    level: "%5p [%X{executionId:-}]"

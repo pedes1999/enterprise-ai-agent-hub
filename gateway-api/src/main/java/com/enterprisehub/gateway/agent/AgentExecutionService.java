@@ -21,8 +21,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -223,6 +225,45 @@ public class AgentExecutionService {
             execution.setStartedAt(Instant.now());
             return execution;
         });
+    }
+
+    /**
+     * Refreshes the liveness stamp for every execution the calling instance
+     * still owns -- see ExecutionHeartbeatMonitor for who calls this and how
+     * often. No-ops on an empty set rather than issuing a pointless UPDATE
+     * (the common case: an idle instance running nothing).
+     */
+    @Transactional
+    public void heartbeat(Collection<UUID> executionIds) {
+        if (executionIds.isEmpty()) {
+            return;
+        }
+        repository.heartbeat(executionIds, Instant.now());
+    }
+
+    /**
+     * Fails every RUNNING execution whose owner has stopped stamping it --
+     * the recovery half of the lockout described in
+     * V32__agent_execution_heartbeat.sql. Marked FAILED rather than given a
+     * new terminal status of its own: from every consumer's point of view
+     * (the concurrency cap, GET /agents/executions, the history UI) an
+     * abandoned run IS a failed one, and errorMessage carries the specific
+     * reason, so nothing downstream needs to learn a new status value.
+     *
+     * Returns how many rows were reaped so the caller can log it -- a
+     * non-zero count here means an instance died mid-run, which is worth
+     * seeing rather than silently repairing.
+     */
+    @Transactional
+    public int reapStaleRunning(Duration staleAfter) {
+        List<AgentExecution> stale = repository.findStaleRunning(Instant.now().minus(staleAfter));
+        for (AgentExecution execution : stale) {
+            execution.setStatus("FAILED");
+            execution.setErrorMessage("Execution was abandoned -- the worker running it stopped reporting for more than "
+                    + staleAfter.toMinutes() + " minute(s) (most likely the app was restarted or killed mid-run).");
+            execution.setCompletedAt(Instant.now());
+        }
+        return stale.size();
     }
 
     @Transactional

@@ -5,9 +5,12 @@ import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import java.time.Duration;
 
 /**
  * The "durable job orchestration" piece: a poll loop claiming one QUEUED
@@ -36,12 +39,23 @@ public class AgentJobWorker {
 
     private static final Logger log = LoggerFactory.getLogger(AgentJobWorker.class);
 
+    /**
+     * Every log line emitted anywhere beneath a claimed job carries this,
+     * so a whole run -- including failures raised deep inside
+     * AgentPromptRunner or a tool -- can be pulled out of the log by the
+     * same execution id the API and UI already show the user.
+     */
+    private static final String MDC_EXECUTION_ID = "executionId";
+
     private final AgentExecutionService executionService;
     private final AgentPromptRunner agentPromptRunner;
+    private final ExecutionHeartbeatMonitor heartbeatMonitor;
 
-    public AgentJobWorker(AgentExecutionService executionService, AgentPromptRunner agentPromptRunner) {
+    public AgentJobWorker(AgentExecutionService executionService, AgentPromptRunner agentPromptRunner,
+                           ExecutionHeartbeatMonitor heartbeatMonitor) {
         this.executionService = executionService;
         this.agentPromptRunner = agentPromptRunner;
+        this.heartbeatMonitor = heartbeatMonitor;
     }
 
     @Scheduled(fixedDelayString = "${app.job-worker.poll-interval-ms:2000}")
@@ -72,6 +86,18 @@ public class AgentJobWorker {
         // tenant's own RLS-scoped data, not the sentinel's "see everything"
         // view, which only ever applies to the claim query above.
         TenantContext.set(job.getTenantId().toString());
+        // From here until the finally block this row is this instance's
+        // responsibility: the monitor stamps it on a timer so no other
+        // instance reaps it as abandoned. Registered BEFORE any work starts
+        // and removed in the finally regardless of outcome -- an id left
+        // behind here would keep being stamped forever, which is precisely
+        // the "RUNNING but nobody's actually running it" state this whole
+        // mechanism exists to prevent.
+        heartbeatMonitor.track(job.getId());
+        MDC.put(MDC_EXECUTION_ID, job.getId().toString());
+        long startedAtNanos = System.nanoTime();
+        log.info("Starting agent execution: agent={} tenant={} repository={}",
+                job.getAgentType(), job.getTenantId(), job.getRepositoryUrl());
         try {
             ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
                     AgentRunRequest.of(job.getTenantId(), job.getTriggeredBy(), job.getId().toString(), job.getAgentType())
@@ -81,6 +107,7 @@ public class AgentJobWorker {
                             .maxTokensOverride(job.getMaxTokensOverride())
                             .build());
             if (result.incomplete()) {
+                log.warn("Agent execution did not finish after {}: {}", elapsed(startedAtNanos), result.incompleteReason());
                 executionService.fail(job.getId(), result.incompleteReason(),
                         result.inputTokens(), result.outputTokens(), result.totalTokens());
             } else if (result.toolWasUsed() && (result.reply() == null || result.reply().isBlank())) {
@@ -92,10 +119,13 @@ public class AgentJobWorker {
                 // already recorded in tool_executions (see ToolExecutionListener),
                 // but nothing previously made the execution itself reflect that;
                 // it silently reported SUCCEEDED with nothing to show for it.
+                log.warn("Agent execution used tools but produced no final summary after {}", elapsed(startedAtNanos));
                 executionService.fail(job.getId(),
                         "Agent used tools but produced no final summary -- check the tool-call trace for repeated failures.",
                         result.inputTokens(), result.outputTokens(), result.totalTokens());
             } else {
+                log.info("Agent execution succeeded in {}: toolWasUsed={} totalTokens={}",
+                        elapsed(startedAtNanos), result.toolWasUsed(), result.totalTokens());
                 executionService.complete(job.getId(), result.reply(), result.toolWasUsed(),
                         result.inputTokens(), result.outputTokens(), result.totalTokens());
             }
@@ -105,13 +135,20 @@ public class AgentJobWorker {
             // and were genuinely billed -- see PartialUsageException's
             // javadoc. Recording that spend here is the whole reason this
             // catch exists ahead of the plain RuntimeException one below.
-            log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);
+            log.warn("Agent execution failed after {}", elapsed(startedAtNanos), e);
             executionService.fail(job.getId(), e.getMessage(), e.inputTokens(), e.outputTokens(), e.totalTokens());
         } catch (RuntimeException e) {
-            log.warn("Agent execution {} (tenant {}) failed", job.getId(), job.getTenantId(), e);
+            log.warn("Agent execution failed after {}", elapsed(startedAtNanos), e);
             executionService.fail(job.getId(), e.getMessage());
         } finally {
+            heartbeatMonitor.untrack(job.getId());
+            MDC.remove(MDC_EXECUTION_ID);
             TenantContext.clear();
         }
+    }
+
+    /** Wall-clock for one run, for the log line only -- the authoritative timing is startedAt/completedAt on the row. */
+    private static Duration elapsed(long startedAtNanos) {
+        return Duration.ofNanos(System.nanoTime() - startedAtNanos);
     }
 }

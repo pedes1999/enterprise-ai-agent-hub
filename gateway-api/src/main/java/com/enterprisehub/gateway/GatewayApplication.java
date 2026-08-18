@@ -3,6 +3,7 @@ package com.enterprisehub.gateway;
 import com.enterprisehub.gateway.config.CorsProperties;
 import com.enterprisehub.gateway.config.CredentialsProperties;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
+import com.enterprisehub.gateway.config.JobWorkerProperties;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.config.MailProperties;
 import com.enterprisehub.gateway.config.SandboxProperties;
@@ -48,7 +49,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableAsync
 @EnableScheduling
 @EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class, LlmProperties.class,
-        SandboxProperties.class, ExecutionLimitProperties.class, CorsProperties.class, MailProperties.class})
+        SandboxProperties.class, ExecutionLimitProperties.class, CorsProperties.class, MailProperties.class,
+        JobWorkerProperties.class})
 public class GatewayApplication {
 
     public static void main(String[] args) {
