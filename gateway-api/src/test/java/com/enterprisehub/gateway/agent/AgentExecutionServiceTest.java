@@ -10,6 +10,7 @@ import com.enterprisehub.gateway.repository.AgentDefinitionRepository;
 import com.enterprisehub.gateway.repository.AgentExecutionRepository;
 import com.enterprisehub.gateway.repository.ToolExecutionRepository;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -44,7 +45,7 @@ class AgentExecutionServiceTest {
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         when(tenantLlmProviderResolver.resolve(any())).thenReturn(LlmProvider.ANTHROPIC);
         service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5),
-                tenantLlmProviderResolver);
+                tenantLlmProviderResolver, new SimpleMeterRegistry());
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));

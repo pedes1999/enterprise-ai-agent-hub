@@ -4,6 +4,7 @@ import com.enterprisehub.gateway.entity.ToolExecution;
 import com.enterprisehub.gateway.repository.ToolExecutionRepository;
 import com.enterprisehub.runtime.audit.ToolExecutionAuditRecord;
 import com.enterprisehub.runtime.audit.ToolExecutionOutcome;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -18,7 +19,8 @@ class JpaToolExecutionListenerTest {
     @Test
     void onToolExecuted_success_mapsEveryFieldOntoTheEntity() {
         ToolExecutionRepository repository = mock(ToolExecutionRepository.class);
-        JpaToolExecutionListener listener = new JpaToolExecutionListener(repository);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        JpaToolExecutionListener listener = new JpaToolExecutionListener(repository, meterRegistry);
         UUID tenantId = UUID.randomUUID();
 
         listener.onToolExecuted(new ToolExecutionAuditRecord(
@@ -34,12 +36,17 @@ class JpaToolExecutionListenerTest {
         assertThat(saved.getDurationMs()).isEqualTo(250);
         assertThat(saved.getOutcome()).isEqualTo("SUCCESS");
         assertThat(saved.getErrorMessage()).isNull();
+
+        double recordedMillis = meterRegistry.get("agent.tool.execution")
+                .tag("tool", "run_shell_command").tag("outcome", "SUCCESS")
+                .timer().totalTime(java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertThat(recordedMillis).isEqualTo(250.0);
     }
 
     @Test
     void onToolExecuted_failure_persistsErrorMessage() {
         ToolExecutionRepository repository = mock(ToolExecutionRepository.class);
-        JpaToolExecutionListener listener = new JpaToolExecutionListener(repository);
+        JpaToolExecutionListener listener = new JpaToolExecutionListener(repository, new SimpleMeterRegistry());
 
         listener.onToolExecuted(new ToolExecutionAuditRecord(
                 UUID.randomUUID().toString(), "exec-2", "run_shell_command",

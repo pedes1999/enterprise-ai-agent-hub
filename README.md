@@ -398,6 +398,7 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | `POST /knowledge-sources/{id}/query` | ADMIN, DEVELOPER | Hybrid-search one source directly, for testing outside an agent run. |
 | `PUT/DELETE /knowledge-sources/{id}/agent-bindings/{slug}` · `GET /knowledge-sources/agent-bindings/{slug}` | ADMIN | Attach, detach, and read which source is bound to an agent. |
 | `GET /actuator/health` | none | Health check. |
+| `GET /actuator/prometheus` | any | Metrics in Prometheus exposition format: `agent.execution` (count + latency by `status`) and `agent.tool.execution` (by `tool` + `outcome`). Deliberately not public like health — a scrape job authenticates with a platform API key like any other caller. |
 
 ---
 
@@ -408,7 +409,7 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | Agent execution | Solid | Queued, durable, tenant-isolated, self-healing after a crash. |
 | Tools & sandbox | Solid | Nine tools, one shared sandbox session per run, full audit trace. |
 | RAG | Working | Upload, hybrid search, bind to an agent. No document list or delete yet. |
-| Observability | Improved | Execution id in the MDC on every log line beneath a run. |
+| Observability | Improved | Execution id in the MDC on every log line beneath a run; `/actuator/prometheus` exposes execution and tool-call metrics (count, latency, outcome). |
 | Live visibility | **Next** | You can't watch a run in progress — the trace only appears once it finishes. |
 | Cancel | **Next** | No way to stop a run. It can burn 100 rounds of paid API calls unattended. |
 | Triggers | Gap | Human-click only. No schedules, no webhooks — `trigger_source` is still hardcoded. |

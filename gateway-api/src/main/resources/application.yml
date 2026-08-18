@@ -60,6 +60,16 @@ management:
     # via condition: service_healthy.
     mail:
       enabled: false
+  endpoints:
+    web:
+      exposure:
+        # health stays unauthenticated (SecurityConfig permitAll's it, for
+        # docker-compose's healthcheck). prometheus deliberately does NOT --
+        # it falls through to the same anyRequest().authenticated() every
+        # other endpoint gets, consistent with this app's deny-by-default
+        # posture, so a scrape job authenticates with a platform API key
+        # like any other caller instead of metrics being world-readable.
+        include: health,prometheus
 
 server:
   port: ${SERVER_PORT:8080}

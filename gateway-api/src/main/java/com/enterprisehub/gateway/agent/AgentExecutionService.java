@@ -13,6 +13,8 @@ import com.enterprisehub.gateway.repository.AgentExecutionRepository;
 import com.enterprisehub.gateway.repository.ToolExecutionRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -58,16 +60,18 @@ public class AgentExecutionService {
     private final ToolExecutionRepository toolExecutionRepository;
     private final ExecutionLimitProperties executionLimitProperties;
     private final TenantLlmProviderResolver tenantLlmProviderResolver;
+    private final MeterRegistry meterRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository,
                                   ToolExecutionRepository toolExecutionRepository, ExecutionLimitProperties executionLimitProperties,
-                                  TenantLlmProviderResolver tenantLlmProviderResolver) {
+                                  TenantLlmProviderResolver tenantLlmProviderResolver, MeterRegistry meterRegistry) {
         this.repository = repository;
         this.agentDefinitionRepository = agentDefinitionRepository;
         this.toolExecutionRepository = toolExecutionRepository;
         this.executionLimitProperties = executionLimitProperties;
         this.tenantLlmProviderResolver = tenantLlmProviderResolver;
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -262,6 +266,7 @@ public class AgentExecutionService {
             execution.setErrorMessage("Execution was abandoned -- the worker running it stopped reporting for more than "
                     + staleAfter.toMinutes() + " minute(s) (most likely the app was restarted or killed mid-run).");
             execution.setCompletedAt(Instant.now());
+            recordExecutionOutcome("FAILED", execution.getStartedAt(), execution.getCompletedAt());
         }
         return stale.size();
     }
@@ -282,6 +287,7 @@ public class AgentExecutionService {
             execution.setOutputTokens(outputTokens);
             execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
+            recordExecutionOutcome("SUCCEEDED", execution.getStartedAt(), execution.getCompletedAt());
         });
     }
 
@@ -300,7 +306,25 @@ public class AgentExecutionService {
             execution.setOutputTokens(outputTokens);
             execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
+            recordExecutionOutcome("FAILED", execution.getStartedAt(), execution.getCompletedAt());
         });
+    }
+
+    /**
+     * The three terminal transitions above (complete, fail, and the abandoned-run
+     * branch of reapStaleRunning) all funnel through here, so "how many executions
+     * finished, how long did they take, split by outcome" is always one Prometheus
+     * query away. Tagged by status only -- never tenant or agent slug -- to keep
+     * this metric's cardinality fixed regardless of how many tenants or agents exist.
+     */
+    private void recordExecutionOutcome(String status, Instant startedAt, Instant completedAt) {
+        if (startedAt == null) {
+            return;
+        }
+        Timer.builder("agent.execution")
+                .tag("status", status)
+                .register(meterRegistry)
+                .record(Duration.between(startedAt, completedAt));
     }
 
     @Transactional(readOnly = true)
