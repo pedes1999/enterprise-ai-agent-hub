@@ -45,6 +45,11 @@ describe('Credentials', () => {
     httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([]);
     httpMock.expectOne(`${environment.apiBaseUrl}/tool-credentials`).flush([]);
     httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(settings);
+    // A saved provider now auto-fetches its model catalog on load (no more
+    // manual "Load models" button) -- see onProviderSelectionChange()/loadModels().
+    if (settings.preferredLlmProvider) {
+      httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/${settings.preferredLlmProvider}/models`).flush([]);
+    }
     httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials/team`).flush([]);
     return fixture;
   }
@@ -81,6 +86,9 @@ describe('Credentials', () => {
     putReq.flush(activeAnthropic);
 
     httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([activeAnthropic]);
+    // Connecting/replacing a vendor credential also re-fetches availableProviders()
+    // so the Agent defaults dropdown reflects it immediately -- see refreshAvailableProviders().
+    httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(noPreference);
 
     expect(component.vendorSummary('ANTHROPIC')?.active).toBe(true);
     expect(component.vendorInputs['ANTHROPIC']).toBe('');
@@ -104,6 +112,7 @@ describe('Credentials', () => {
     putReq.flush({ ...activeAnthropic, provider: 'LOCAL' });
 
     httpMock.expectOne(`${environment.apiBaseUrl}/vendor-credentials`).flush([{ ...activeAnthropic, provider: 'LOCAL' }]);
+    httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`).flush(noPreference);
 
     expect(component.vendorSummary('LOCAL')?.active).toBe(true);
     expect(component.vendorMessages['LOCAL']).toEqual({ kind: 'success', text: 'Connected.' });

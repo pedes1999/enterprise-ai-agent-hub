@@ -194,6 +194,7 @@ export class Credentials implements OnInit {
           this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
           this.availableProviders.set(settings.availableProviders);
           this.markSaved();
+          this.loadModels();
           done();
         },
         error: (err) => {
@@ -249,6 +250,22 @@ export class Credentials implements OnInit {
     this.credentialService.listVendorCredentials().subscribe((list) => this.vendorCredentials.set(list));
   }
 
+  /**
+   * Connecting/removing a vendor credential changes which providers
+   * hasActiveCredential() allows picking in the Agent defaults section --
+   * without this, that dropdown keeps showing a just-connected provider as
+   * "(no credential connected)" and disabled until a full page reload,
+   * even though the credential row above it already flipped to "connected".
+   * Only availableProviders() is touched here, never the form fields
+   * themselves, so an in-progress (unsaved) edit in Agent defaults survives.
+   */
+  private refreshAvailableProviders(): void {
+    if (!this.isAdmin()) {
+      return;
+    }
+    this.tenantSettingsService.getSettings().subscribe((settings) => this.availableProviders.set(settings.availableProviders));
+  }
+
   private refreshToolCredentials(): void {
     this.credentialService.listToolCredentials().subscribe((list) => this.toolCredentials.set(list));
   }
@@ -274,9 +291,14 @@ export class Credentials implements OnInit {
   onProviderSelectionChange(): void {
     this.modelOptions.set([]);
     this.modelsError.set(null);
+    this.loadModels();
   }
 
+  /** Fetches the model catalog for whichever provider is currently selected -- called on provider change and on initial load, never needs a manual trigger. No-ops for "Server default" (no provider to fetch a catalog for) and while a fetch is already in flight. */
   loadModels(): void {
+    if (this.loadingModels()) {
+      return;
+    }
     const provider = this.preferredProviderSelection();
     if (!provider) {
       return;
@@ -354,6 +376,7 @@ export class Credentials implements OnInit {
         this.vendorInputs[provider] = '';
         this.vendorMessages[provider] = { kind: 'success', text: successMessage };
         this.refreshVendorCredentials();
+        this.refreshAvailableProviders();
       },
       error: (err) => {
         this.savingKey.set(null);
@@ -412,6 +435,7 @@ export class Credentials implements OnInit {
         this.removingKey.set(null);
         this.vendorMessages[provider] = { kind: 'success', text: 'Credential removed.' };
         this.refreshVendorCredentials();
+        this.refreshAvailableProviders();
       },
       error: (err) => {
         this.removingKey.set(null);
