@@ -9,6 +9,11 @@ jobs:
   backend:
     name: Backend (Maven)
     runs-on: ubuntu-latest
+    # write is only actually used by the badge-commit step below, and only on
+    # a push to master -- needed regardless so that step has the permission
+    # available when its own `if` lets it run.
+    permissions:
+      contents: write
     services:
       # Started as the default postgres superuser, matching docker/postgres/init.sh's
       # assumption -- the "create hub_user" step below then mirrors that script so
@@ -66,6 +71,30 @@ jobs:
         run: mvn -B -ntp test
         env:
           TEST_DB_URL: jdbc:postgresql://localhost:5432/agent_hub_test
+
+      - name: Generate coverage badge
+        # Reads each module's jacoco.csv (report goal emits csv alongside
+        # html/xml by default -- see the jacoco-maven-plugin block in the
+        # root pom.xml) and appends a coverage table to this run's job
+        # summary. common-dto is omitted: it has no tests, so it has no
+        # jacoco.csv to read.
+        uses: cicirello/jacoco-badge-generator@v2
+        with:
+          jacoco-csv-file: >
+            agent-core/target/site/jacoco/jacoco.csv
+            agent-runtime/target/site/jacoco/jacoco.csv
+            rag-service/target/site/jacoco/jacoco.csv
+            gateway-api/target/site/jacoco/jacoco.csv
+
+      - name: Commit updated coverage badge
+        # Only on a real push to master, never on a PR -- a PR from a fork
+        # can't be granted contents:write, and committing a badge update
+        # into every PR branch would just be noise on top of that.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update coverage badge [skip ci]"
+          file_pattern: ".github/badges/*.svg"
 
   frontend:
     name: Frontend (Angular)

@@ -1,5 +1,9 @@
 # Enterprise AI Agent Hub
 
+[![CI](https://github.com/pedes1999/enterprise-ai-agent-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/pedes1999/enterprise-ai-agent-hub/actions/workflows/ci.yml)
+![Coverage](.github/badges/jacoco.svg)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
+
 A multi-tenant platform for running LLM agents that actually touch code — clone a
 repository, edit it, run its tests, and open a real pull request — with every tenant's data
 isolated at the database level and every tool call audited.
