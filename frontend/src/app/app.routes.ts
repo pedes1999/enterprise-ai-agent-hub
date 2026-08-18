@@ -59,6 +59,14 @@ export const routes: Routes = [
     loadComponent: () => import('./features/credentials/credentials').then((m) => m.Credentials),
   },
   {
+    // Same access tier as Credentials -- ADMIN and DEVELOPER can each
+    // create/ingest/query knowledge sources; attaching one to an agent is
+    // ADMIN-only, gated client-side on the definition-detail page instead.
+    path: 'knowledge',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/knowledge/knowledge').then((m) => m.Knowledge),
+  },
+  {
     path: 'team',
     canActivate: [authGuard, adminGuard],
     loadComponent: () => import('./features/team/team').then((m) => m.Team),

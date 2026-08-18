@@ -43,5 +43,48 @@
         </ul>
       }
     </section>
+
+    @if (isAdmin()) {
+      <section>
+        <h2>Knowledge source</h2>
+        @if (bindingLoading()) {
+          <div class="loading-state"><span class="spinner"></span> Loading…</div>
+        } @else if (binding(); as bound) {
+          <p>
+            Attached: <strong>{{ bound.knowledgeSourceName }}</strong>
+          </p>
+          <button type="button" class="secondary" (click)="detachSource()" [disabled]="detaching()">
+            @if (detaching()) {
+              <span class="spinner"></span> Detaching…
+            } @else {
+              Detach
+            }
+          </button>
+        } @else if (availableSources().length === 0) {
+          <p class="empty">
+            No knowledge sources exist yet — <a routerLink="/knowledge">create one</a> first.
+          </p>
+        } @else {
+          <div class="binding-row">
+            <select [(ngModel)]="selectedSourceId">
+              <option value="">Select a knowledge source…</option>
+              @for (source of availableSources(); track source.id) {
+                <option [value]="source.id">{{ source.name }}</option>
+              }
+            </select>
+            <button type="button" (click)="attachSource()" [disabled]="attaching() || !selectedSourceId()">
+              @if (attaching()) {
+                <span class="spinner"></span> Attaching…
+              } @else {
+                Attach
+              }
+            </button>
+          </div>
+        }
+        @if (bindingActionError()) {
+          <div class="banner banner-error">{{ bindingActionError() }}</div>
+        }
+      </section>
+    }
   }
 </div>

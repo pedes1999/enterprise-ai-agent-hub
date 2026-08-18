@@ -1,0 +1,121 @@
+<div class="knowledge-page">
+  <h1>Knowledge sources</h1>
+  <p class="subtitle">
+    Upload documents an agent can search mid-execution via its retrieval tool. Attach a source to an
+    agent from that agent's page in the catalog.
+  </p>
+
+  @if (loading()) {
+    <div class="loading-state"><span class="spinner"></span> Loading knowledge sources…</div>
+  } @else {
+    @if (loadError()) {
+      <div class="banner banner-error" role="alert">{{ loadError() }}</div>
+    }
+
+    <section class="card">
+      <h2>New knowledge source</h2>
+      <div class="field-grid">
+        <div class="field">
+          <label for="newName">Name</label>
+          <input id="newName" type="text" [(ngModel)]="newName" placeholder="e.g. Internal API docs" />
+        </div>
+        <div class="field">
+          <label for="newSourceType">Source type</label>
+          <select id="newSourceType" [(ngModel)]="newSourceType">
+            <option value="upload">Upload</option>
+          </select>
+        </div>
+      </div>
+      @if (createError()) {
+        <div class="banner banner-error">{{ createError() }}</div>
+      }
+      <div class="card-footer">
+        <span></span>
+        <button type="button" (click)="create()" [disabled]="creating() || !newName().trim()">
+          @if (creating()) {
+            <span class="spinner"></span> Creating…
+          } @else {
+            Create
+          }
+        </button>
+      </div>
+    </section>
+
+    @if (sources().length === 0) {
+      <p class="empty">No knowledge sources yet — create one above.</p>
+    } @else {
+      @for (source of sources(); track source.id) {
+        <section class="card source-card">
+          <div class="source-header">
+            <h2>{{ source.name }}</h2>
+            <p class="mono">{{ source.sourceType }} · created {{ source.createdAt | localDateTime }}</p>
+          </div>
+
+          <div class="upload-row">
+            <input type="file" (change)="onFileSelected(source.id, $event)" />
+            <button type="button" (click)="upload(source.id)" [disabled]="uploadingId() === source.id || !hasSelectedFile(source.id)">
+              @if (uploadingId() === source.id) {
+                <span class="spinner"></span> Uploading…
+              } @else {
+                Upload
+              }
+            </button>
+          </div>
+          @if (uploadMessages[source.id]; as msg) {
+            <div class="banner" [class.banner-success]="msg.kind === 'success'" [class.banner-error]="msg.kind === 'error'">
+              {{ msg.text }}
+            </div>
+          }
+
+          <button type="button" class="secondary query-toggle" (click)="toggleQuery(source.id)">
+            {{ queryOpenId() === source.id ? 'Hide test query' : 'Test query' }}
+          </button>
+
+          @if (queryOpenId() === source.id) {
+            <div class="query-panel">
+              <div class="query-row">
+                <input
+                  type="text"
+                  [(ngModel)]="queryText[source.id]"
+                  placeholder="Ask something this document should answer"
+                  (keyup.enter)="runQuery(source.id)"
+                />
+                <button
+                  type="button"
+                  (click)="runQuery(source.id)"
+                  [disabled]="queryingId() === source.id || !queryText[source.id]?.trim()"
+                >
+                  @if (queryingId() === source.id) {
+                    <span class="spinner"></span> Searching…
+                  } @else {
+                    Search
+                  }
+                </button>
+              </div>
+              @if (queryError[source.id]) {
+                <div class="banner banner-error">{{ queryError[source.id] }}</div>
+              }
+              @if (queryResults[source.id]; as results) {
+                @if (results.length === 0) {
+                  <p class="empty">No relevant content found.</p>
+                } @else {
+                  <ol class="results">
+                    @for (result of results; track result.chunkId) {
+                      <li>
+                        <div class="result-meta">
+                          <span class="mono">{{ result.documentName }}</span>
+                          <span class="mono">relevance {{ result.score.toFixed(2) }}</span>
+                        </div>
+                        <p class="result-content">{{ result.content }}</p>
+                      </li>
+                    }
+                  </ol>
+                }
+              }
+            </div>
+          }
+        </section>
+      }
+    }
+  }
+</div>

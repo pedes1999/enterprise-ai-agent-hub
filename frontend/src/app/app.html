@@ -26,6 +26,7 @@
       <a routerLink="/executions" routerLinkActive="active">Executions</a>
       @if (authService.canManageOwnCredentials()) {
         <a routerLink="/credentials" routerLinkActive="active">Credentials</a>
+        <a routerLink="/knowledge" routerLinkActive="active">Knowledge</a>
       }
       @if (authService.isAdmin()) {
         <a routerLink="/team" routerLinkActive="active">Team</a>
