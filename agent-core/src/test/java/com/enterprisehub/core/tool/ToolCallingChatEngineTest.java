@@ -162,6 +162,72 @@ class ToolCallingChatEngineTest {
     }
 
     @Test
+    void chat_modelLeaksToolCallAsPlainText_recoveredAndExecutedAnyway() {
+        // Observed with qwen2.5-coder:7b served via Ollama's OpenAI-compatible
+        // endpoint: instead of populating the real tool_calls field, the model
+        // writes the call as ordinary assistant text. hasToolExecutionRequests()
+        // is false here (this is a genuine AiMessage.from(String), not
+        // AiMessage.from(List<ToolExecutionRequest>)) -- recoverToolCallsFromText()
+        // is what's actually under test.
+        ChatModel model = mock(ChatModel.class);
+        String leakedToolCall = "{\"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}";
+
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(leakedToolCall)))
+                .thenReturn(response(AiMessage.from("Final answer using tool result")));
+
+        ToolCallingChatEngine engine = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT);
+        ToolCallingChatEngine.ToolChatResult result = engine.chat("Echo 'hello'");
+
+        assertThat(result.toolWasUsed()).isTrue();
+        assertThat(result.reply()).isEqualTo("Final answer using tool result");
+        verify(model, times(2)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    void chat_modelLeaksToolCallAsJsonArray_recoveredAndExecuted() {
+        ChatModel model = mock(ChatModel.class);
+        String leakedToolCalls = "[{\"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]";
+
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(leakedToolCalls)))
+                .thenReturn(response(AiMessage.from("done")));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("go");
+
+        assertThat(result.toolWasUsed()).isTrue();
+        verify(model, times(2)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    void chat_textLooksLikeAToolCallButNameIsNotRegistered_treatedAsPlainFinalAnswer() {
+        // The safety check: an unrecognized "name" must never be guessed at --
+        // this stays a genuine final answer (the leaked JSON, verbatim) rather
+        // than silently being dropped or misrouted to some other tool.
+        ChatModel model = mock(ChatModel.class);
+        String notARealTool = "{\"name\": \"delete_everything\", \"arguments\": {}}";
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from(notARealTool)));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("go");
+
+        assertThat(result.toolWasUsed()).isFalse();
+        assertThat(result.reply()).isEqualTo(notARealTool);
+        verify(model, times(1)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    void chat_plainProseAnswer_neverMisparsedAsToolCall() {
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from("The answer is 42.")));
+
+        ToolCallingChatEngine.ToolChatResult result = new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("what?");
+
+        assertThat(result.toolWasUsed()).isFalse();
+        assertThat(result.reply()).isEqualTo("The answer is 42.");
+        verify(model, times(1)).chat(any(ChatRequest.class));
+    }
+
+    @Test
     void chat_toolReceivesTheExecutionContextPassedToTheEngine() {
         AtomicReference<ToolExecutionContext> observed = new AtomicReference<>();
         AgentTool observingTool = new AgentTool() {

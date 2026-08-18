@@ -1,6 +1,7 @@
 package com.enterprisehub.core.tool;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -250,6 +251,12 @@ public class ToolCallingChatEngine {
             ChatResponse response = generate(messages, toolSpecifications, totalUsage);
             totalUsage = accumulate(totalUsage, response.tokenUsage());
             AiMessage aiMessage = response.aiMessage();
+            if (!aiMessage.hasToolExecutionRequests()) {
+                List<ToolExecutionRequest> recoveredToolCalls = recoverToolCallsFromText(aiMessage.text());
+                if (!recoveredToolCalls.isEmpty()) {
+                    aiMessage = AiMessage.builder().toolExecutionRequests(recoveredToolCalls).build();
+                }
+            }
 
             if (!aiMessage.hasToolExecutionRequests()) {
                 // A "final" answer that was actually cut off mid-generation (the
@@ -588,6 +595,67 @@ public class ToolCallingChatEngine {
         return result.substring(0, MAX_TOOL_RESULT_CHARS)
                 + "\n... (truncated " + (result.length() - MAX_TOOL_RESULT_CHARS) + " more characters -- "
                 + "re-run this tool with a narrower target if you need what was cut off)";
+    }
+
+    /**
+     * Some models -- observed with qwen2.5-coder:7b served locally through
+     * Ollama's OpenAI-compatible endpoint (see LlmEngineFactory's LOCAL
+     * branch), not exclusive to it -- don't reliably populate the OpenAI
+     * wire format's structured tool_calls field even though the request
+     * genuinely declared tools. Instead the call comes back as ordinary
+     * assistant TEXT shaped like {"name": "...", "arguments": {...}}, which
+     * langchain4j maps to an AiMessage with hasToolExecutionRequests() ==
+     * false -- without this, that JSON silently becomes the execution's
+     * "final answer" and the tool never actually runs (the exact failure
+     * this recovers from). Deliberately conservative: only fires when the
+     * ENTIRE trimmed response is a single JSON object (or array of them)
+     * shaped exactly like a tool call, and only when every "name" matches
+     * an actually-registered tool -- a real prose final answer that merely
+     * mentions JSON never matches this, and one malformed/unrecognized
+     * entry in an array rejects the whole batch rather than guessing.
+     */
+    private List<ToolExecutionRequest> recoverToolCallsFromText(String text) {
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+        String trimmed = text.trim();
+        if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+            return List.of();
+        }
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(trimmed);
+        } catch (Exception e) {
+            return List.of();
+        }
+        List<JsonNode> candidates = new ArrayList<>();
+        if (root.isArray()) {
+            root.forEach(candidates::add);
+        } else {
+            candidates.add(root);
+        }
+
+        List<ToolExecutionRequest> recovered = new ArrayList<>();
+        int index = 0;
+        for (JsonNode candidate : candidates) {
+            JsonNode nameNode = candidate.get("name");
+            JsonNode argumentsNode = candidate.get("arguments");
+            if (nameNode == null || !nameNode.isTextual() || argumentsNode == null
+                    || !toolsByName.containsKey(nameNode.asText())) {
+                return List.of();
+            }
+            // The model wrote arguments as a real JSON object (the observed shape)
+            // rather than the OpenAI-protocol-correct pre-serialized string --
+            // re-serialize so parseArguments() below sees exactly what it always
+            // expects, regardless of which shape actually arrived.
+            String argumentsJson = argumentsNode.isTextual() ? argumentsNode.asText() : argumentsNode.toString();
+            recovered.add(ToolExecutionRequest.builder()
+                    .id("recovered-" + index++)
+                    .name(nameNode.asText())
+                    .arguments(argumentsJson)
+                    .build());
+        }
+        return recovered;
     }
 
     private Map<String, String> parseArguments(String argumentsJson) throws Exception {
