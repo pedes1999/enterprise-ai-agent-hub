@@ -85,3 +85,48 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build -- --configuration production
+      # --omit=dev: dev-only tooling (Angular CLI, karma, etc.) has a much
+      # larger and noisier vuln surface than what actually ships; --audit-level
+      # high so a moderate finding in some transitive dep doesn't block every push.
+      - run: npm audit --omit=dev --audit-level=high
+
+  dependency-review:
+    name: Dependency review
+    # Diffs the dependency graph against base and flags newly-introduced
+    # vulnerable/disallowed packages -- only meaningful on a PR, which is why
+    # this isn't just another step in backend/frontend (those run on push too).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+
+  docker-build:
+    name: Docker build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: gateway-api
+            context: .
+            dockerfile: gateway-api/Dockerfile
+          - image: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+          - image: sidecar
+            context: agent-runtime/sidecar
+            dockerfile: agent-runtime/sidecar/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          # Exercises every layer (incl. the Maven/npm build stages) without
+          # needing to `docker load` the result anywhere -- this job only
+          # needs to know the image builds, not to keep the artifact around.
