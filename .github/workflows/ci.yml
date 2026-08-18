@@ -15,7 +15,14 @@ jobs:
       # tests run against the same non-superuser role prod does (superuser bypasses
       # RLS entirely, which would silently hide a real RLS bug from these tests).
       postgres:
-        image: postgres:16-alpine
+        # pgvector/pgvector, not plain postgres: rag-service's
+        # V28__enable_pgvector.sql runs CREATE EXTENSION vector, and the
+        # stock image doesn't ship the extension binary at all -- the
+        # migration fails with "extension \"vector\" is not available"
+        # (IF NOT EXISTS doesn't help; it only suppresses "already exists"),
+        # taking every gateway-api integration test down with it. Same image
+        # docker-compose.yml uses, for the same reason.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -47,6 +54,13 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres \
             -c "CREATE ROLE hub_user LOGIN PASSWORD 'password';" \
             -c "CREATE DATABASE agent_hub_test OWNER hub_user;"
+          # As the superuser, and only here -- hub_user owns agent_hub_test
+          # but still gets "permission denied to create extension", so
+          # V28 can only ever confirm the extension is already present,
+          # never install it. Mirrors docker/postgres/init.sh, which does
+          # exactly this for the docker-compose path.
+          PGPASSWORD=postgres psql -h localhost -U postgres -d agent_hub_test \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
       - name: mvn test
         run: mvn -B -ntp test
