@@ -245,6 +245,15 @@ finishes; the loop exits at the *next* round boundary, with no forced "let me su
 model call the way hitting the round cap or token budget gets — an explicit cancel means
 stop spending, full stop.
 
+The corollary, confirmed against a live local model: **a run that never starts another
+round can't be stopped.** A single-round answer (no tool calls) has no second boundary at
+which to notice the flag, so it finishes normally and reports `SUCCEEDED` with
+`cancellationRequestedAt` set — an honest record of "you asked, it had already finished".
+That's the intended tradeoff: cancellation exists to stop the expensive case (a long
+multi-round tool loop burning paid calls), and the in-flight provider call itself is not
+interruptible. Where it does bite, it bites hard — a run cancelled before its first round
+stops in ~16ms having spent **zero** tokens.
+
 ## Retrieval (RAG)
 
 A knowledge source is a tenant-owned collection of uploaded documents. On upload, text is
@@ -404,6 +413,7 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | `POST /agents/executions/{id}/cancel` | ADMIN, DEVELOPER | Cancels a `QUEUED` or `RUNNING` execution — instant for the former, cooperative (next round boundary) for the latter, see [Execution states](#execution-states). `404` unknown/wrong-tenant id, `409` if already terminal. |
 | `GET /agents/executions` · `GET /agents/executions/{id}` | all roles | Paginated history and single-execution status. Returns `PagedModel`, not a raw `Page`. |
 | `GET /agents/executions/{id}/tool-executions` | all roles | The ordered tool-call trace — what a skeptical teammate opens to verify what an agent actually did. |
+| `GET /agents/executions/{id}/stream` | all roles | The same trace, pushed live over Server-Sent Events: a `status` event on every status change, a `tool` event per tool call, then the stream closes when the run is terminal. Replays everything so far on connect, so it never matters how late you attach. |
 | `GET /agents/executions/{id}/children` | all roles | Executions that `delegate_to_agent` queued from this one. |
 | `GET /agents/executions/usage` · `GET /agents/executions/token-usage-stats` | all roles | Remaining concurrency capacity; past token usage, so a trigger form can suggest a budget. |
 | `POST /agents/ping` · `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Synchronous spike endpoints. Prove the credential → provider chain and the full tool loop respectively. Not the real execution model. |
@@ -424,14 +434,13 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | Tools & sandbox | Solid | Nine tools, one shared sandbox session per run, full audit trace. |
 | RAG | Working | Upload, hybrid search, bind to an agent. No document list or delete yet. |
 | Observability | Improved | Execution id in the MDC on every log line beneath a run; `/actuator/prometheus` exposes execution and tool-call metrics (count, latency, outcome). |
-| Live visibility | **Next** | You can't watch a run in progress — the trace only appears once it finishes. |
-| Triggers | Gap | Human-click only. No schedules, no webhooks — `trigger_source` is still hardcoded. |
+| Live visibility | Working | SSE stream per execution — status changes and tool calls arrive as they happen, DB-polled so it works across instances. |
+| Triggers | **Next** | Human-click only. No schedules, no webhooks — `trigger_source` is still hardcoded. |
 | Frontend tidiness | Gap | `credentials.ts` holds four unrelated concerns in one component. |
 
-**Next up**: live trace streaming — the same "coordinate through the database, not in-process
-memory" lesson cancel just shipped with, since the instance streaming a trace may not be the
-one running the job. After that: scheduled and webhook triggers, which is what turns this
-from a manual runner into automation.
+**Next up**: scheduled and webhook triggers, which is what turns this from a manual runner
+into automation — `trigger_source` already exists on the row as a hardcoded placeholder
+waiting for exactly this.
 
 **Further out**: a CLI client and GitHub Actions integration; an automated
 security-patching agent (SonarQube finding → LLM patch → verified PR); and the multi-agent

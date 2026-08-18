@@ -177,3 +177,41 @@ dd {
   color: var(--color-status-cancelled);
   font-size: var(--font-size-xs);
 }
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: var(--space-2);
+  color: var(--color-status-running);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-status-running);
+  animation: live-pulse 1.6s var(--ease-standard) infinite;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* The pulse is decorative -- it conveys nothing the "Live" label doesn't
+   already say, so it's the exact kind of motion to drop for anyone who
+   asked not to see it. */
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none;
+  }
+}

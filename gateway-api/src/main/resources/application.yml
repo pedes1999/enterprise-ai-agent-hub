@@ -177,6 +177,14 @@ app:
     heartbeat-interval-ms: ${JOB_WORKER_HEARTBEAT_INTERVAL_MS:30000}
     reap-interval-ms: ${JOB_WORKER_REAP_INTERVAL_MS:60000}
     stale-after: ${JOB_WORKER_STALE_AFTER:5m}
+  execution-stream:
+    # GET /agents/executions/{id}/stream -- see ExecutionStreamProperties for
+    # why this polls faster than the job worker does, and what the timeout
+    # actually bounds. poll-threads caps how many streams can be polled
+    # concurrently; each open stream holds one slot only while its tick runs.
+    poll-interval-ms: ${EXECUTION_STREAM_POLL_INTERVAL_MS:1000}
+    timeout: ${EXECUTION_STREAM_TIMEOUT:10m}
+    poll-threads: ${EXECUTION_STREAM_POLL_THREADS:4}
   mail:
     # Must be a sender address verified in the Brevo account above, or
     # Brevo rejects the send outright.

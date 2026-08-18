@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.UUID;
@@ -44,10 +45,15 @@ public class AgentExecutionController {
 
     private final AgentExecutionService executionService;
     private final AgentDefinitionService agentDefinitionService;
+    private final AgentExecutionResponseMapper responseMapper;
+    private final ExecutionStreamService executionStreamService;
 
-    public AgentExecutionController(AgentExecutionService executionService, AgentDefinitionService agentDefinitionService) {
+    public AgentExecutionController(AgentExecutionService executionService, AgentDefinitionService agentDefinitionService,
+                                     AgentExecutionResponseMapper responseMapper, ExecutionStreamService executionStreamService) {
         this.executionService = executionService;
         this.agentDefinitionService = agentDefinitionService;
+        this.responseMapper = responseMapper;
+        this.executionStreamService = executionStreamService;
     }
 
     @PostMapping("/execute")
@@ -143,6 +149,28 @@ public class AgentExecutionController {
         return ResponseEntity.ok(new PagedModel<>(page.map(this::toResponse)));
     }
 
+    /**
+     * Server-Sent Events: the same trace as the endpoint below, but pushed
+     * as it happens instead of only after the run finishes. Emits a "status"
+     * event whenever the execution's status changes and a "tool" event per
+     * tool call, then completes once the run reaches a terminal status. A
+     * caller attaching mid-run gets everything so far first, so it never
+     * matters how late you connect -- see ExecutionStreamService.
+     *
+     * Same 3-role read access as the polled endpoints: watching a run is
+     * reading it, not controlling it (cancel is the ADMIN/DEVELOPER one).
+     */
+    // Deliberately no produces=text/event-stream: SseEmitter's own return-value
+    // handler sets that content type anyway, but declaring it here also
+    // constrains ERROR responses from this handler, so the 404 below could no
+    // longer be rendered as its normal JSON body -- content negotiation failed
+    // and the client got a 500 instead (observed, not theoretical).
+    @GetMapping("/executions/{id}/stream")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public SseEmitter streamExecution(@AuthenticationPrincipal PlatformPrincipal principal, @PathVariable UUID id) {
+        return executionStreamService.stream(UUID.fromString(principal.tenantId()), id);
+    }
+
     /** The ordered tool-call trace for one execution -- what a skeptical teammate opens to verify what an agent actually did. */
     @GetMapping("/executions/{id}/tool-executions")
     @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
@@ -174,12 +202,6 @@ public class AgentExecutionController {
     }
 
     private AgentExecutionStatusResponse toResponse(AgentExecution execution) {
-        return new AgentExecutionStatusResponse(
-                execution.getId(), execution.getStatus(), execution.getLlmProvider(), execution.getAgentType(), execution.getPrompt(),
-                execution.getRepositoryUrl(), execution.getRepositoryBranch(), executionService.deserializeInputParameters(execution),
-                execution.getReply(), execution.getToolWasUsed(), execution.getErrorMessage(),
-                execution.getCreatedAt(), execution.getStartedAt(), execution.getCompletedAt(),
-                execution.getInputTokens(), execution.getOutputTokens(), execution.getTotalTokens(),
-                execution.getMaxTokensOverride(), execution.getParentExecutionId(), execution.getCancellationRequestedAt());
+        return responseMapper.toResponse(execution);
     }
 }

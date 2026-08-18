@@ -52,6 +52,18 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // Authorize the initial REQUEST dispatch only, not ASYNC ones.
+                // Spring Security 6 filters every dispatcher type by default,
+                // which breaks any streaming response (SseEmitter, see
+                // ExecutionStreamService): the async dispatch that completes
+                // the stream carries no SecurityContext, so it was denied,
+                // and the resulting 403 could not be written onto an
+                // already-committed response -- the connection was torn
+                // instead, and the client saw a truncated chunked body
+                // rather than a clean end of stream (observed, not theoretical).
+                // An async dispatch is a continuation of a request this same
+                // chain already authorized, so re-authorizing it adds nothing.
+                .shouldFilterAllDispatcherTypes(false)
                 .requestMatchers("/auth/**", "/actuator/health").permitAll()
                 .requestMatchers("/webhooks/**").permitAll() // signature validation happens in the webhook controller itself
                 // API docs describe the surface, they don't expose it -- every endpoint

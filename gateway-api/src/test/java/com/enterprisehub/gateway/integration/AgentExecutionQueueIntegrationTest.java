@@ -22,6 +22,10 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -476,6 +480,87 @@ class AgentExecutionQueueIntegrationTest {
                 new HttpEntity<>(authHeaders(readOnly.token())), String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    // ---------- live trace streaming (SSE) ----------
+
+    /**
+     * Proves the actual SSE wire format over a real HTTP connection, not
+     * just that the service emits objects: a client has to be able to parse
+     * `event:`/`data:` framing off the socket, and the frontend's own
+     * hand-rolled parser (AgentService.streamExecution) depends on exactly
+     * this shape.
+     *
+     * Streams an ALREADY-TERMINAL execution deliberately: the stream closes
+     * itself on a terminal status, so the request completes on its own
+     * rather than hanging until the emitter timeout. (AgentJobWorker is
+     * disabled in this profile, so a QUEUED row would never progress and the
+     * connection would stay open for the full 10 minutes.)
+     */
+    @Test
+    void stream_terminalExecution_emitsAStatusEventInSseFormatThenCloses() throws Exception {
+        AuthResponse tenant = registerTenant("stream-a");
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("list files", null, null, null, null, null), authHeaders(tenant.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+        AgentExecution claimed = drainUntilClaimed(executionId);
+        TenantContext.set(tenant.tenantId());
+        try {
+            executionService.complete(claimed.getId(), "a.txt, b.txt", false);
+        } finally {
+            TenantContext.clear();
+        }
+
+        String body = readStream(executionId, tenant.token());
+
+        assertThat(body).contains("event:status");
+        assertThat(body).contains("SUCCEEDED");
+        assertThat(body).contains("a.txt, b.txt");
+    }
+
+    @Test
+    void stream_crossTenant_returns404AndStreamsNothing() throws Exception {
+        AuthResponse tenantA = registerTenant("stream-b");
+        ResponseEntity<AgentExecutionAccepted> postResponse = restTemplate.exchange(
+                baseUrl() + "/agents/execute", HttpMethod.POST,
+                new HttpEntity<>(new TriggerAgentExecutionRequest("secret prompt", null, null, null, null, null), authHeaders(tenantA.token())),
+                AgentExecutionAccepted.class);
+        UUID executionId = postResponse.getBody().executionId();
+
+        AuthResponse tenantB = registerTenant("stream-c");
+        // The tenant check happens on the request thread, BEFORE the emitter
+        // is returned, precisely so this is a plain 404 rather than a 200
+        // whose body later admits it has nothing -- once the first byte of
+        // an SSE stream is written the status line can't be taken back.
+        HttpResponse<String> response = rawStreamRequest(executionId, tenantB.token());
+
+        assertThat(response.statusCode()).isEqualTo(404);
+        assertThat(response.body()).doesNotContain("secret prompt");
+    }
+
+    /** Reads a completing SSE stream to the end -- fine here only because the streamed execution is already terminal, so the server closes it. */
+    private String readStream(UUID executionId, String token) throws Exception {
+        HttpResponse<String> response = rawStreamRequest(executionId, token);
+        assertThat(response.statusCode()).isEqualTo(200);
+        return response.body();
+    }
+
+    private HttpResponse<String> rawStreamRequest(UUID executionId, String token) throws Exception {
+        // java.net.http rather than TestRestTemplate: this needs the raw,
+        // undecoded text/event-stream body, not an object mapped out of it.
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl() + "/agents/executions/" + executionId + "/stream"))
+                .header("Authorization", "Bearer " + token)
+                // Same pair the frontend sends -- a stream on success, the
+                // API's ordinary JSON error body otherwise. See
+                // AgentService.streamExecution()'s comment on why both.
+                .header("Accept", "text/event-stream, application/json")
+                .timeout(Duration.ofSeconds(30))
+                .GET()
+                .build();
+        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     @Test

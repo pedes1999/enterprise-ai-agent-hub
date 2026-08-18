@@ -101,7 +101,14 @@
     </section>
 
     <section>
-      <h2>Tool-call trace</h2>
+      <h2>
+        Tool-call trace
+        @if (streaming() && canCancel(exec.status)) {
+          <span class="live-indicator" title="Updating live as the run progresses">
+            <span class="live-dot"></span> Live
+          </span>
+        }
+      </h2>
       @if (traceError()) {
         <div class="banner banner-error" role="alert">{{ traceError() }}</div>
       } @else if (toolExecutions().length === 0) {

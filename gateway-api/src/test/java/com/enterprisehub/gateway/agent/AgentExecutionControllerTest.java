@@ -31,6 +31,7 @@ class AgentExecutionControllerTest {
 
     private AgentExecutionService executionService;
     private AgentDefinitionService agentDefinitionService;
+    private ExecutionStreamService executionStreamService;
     private MockMvc mockMvc;
     private final UUID tenantId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
@@ -39,7 +40,9 @@ class AgentExecutionControllerTest {
     void setUp() {
         executionService = mock(AgentExecutionService.class);
         agentDefinitionService = mock(AgentDefinitionService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new AgentExecutionController(executionService, agentDefinitionService))
+        executionStreamService = mock(ExecutionStreamService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new AgentExecutionController(executionService, agentDefinitionService,
+                        new AgentExecutionResponseMapper(executionService), executionStreamService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver(), new PageableHandlerMethodArgumentResolver())
                 .build();
