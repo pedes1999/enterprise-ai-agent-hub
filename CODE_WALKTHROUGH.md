@@ -15,10 +15,20 @@ Package prefix `com.enterprisehub.` is dropped everywhere below for brevity
 ```
 common-dto     <- request/response records only. No logic, no framework.
      ^
-agent-core     <- LangChain4j lives here ONLY. Provider-agnostic LLM + tool-calling loop.
+agent-core     <- LangChain4j lives here ONLY. Provider-agnostic LLM + embedding + tool-calling loop.
      ^
 agent-runtime  <- Sandboxed tool implementations. Knows agent-core's AgentTool interface,
                   knows NOTHING about Spring, JPA, or HTTP controllers.
+     ^
+rag-service    <- The one exception to "no Spring below gateway-api": owns real JPA entities/
+                  repositories directly (knowledge_source, document_chunk, agent_knowledge_
+                  source_binding), because GatewayApplication's @EntityScan/@EnableJpaRepositories
+                  cover it explicitly (see below) -- picked up automatically, no wiring needed
+                  in gateway-api beyond that. Also owns chunking, hybrid-search score merging,
+                  and the retrieval AgentTool. Embedding/credential resolution still lives in
+                  gateway-api (needs VendorCredentialService + agent-core's EmbeddingModelFactory
+                  together), same "gateway-api is the only module allowed to depend on everything"
+                  rule as always.
      ^
 gateway-api    <- The actual Spring Boot app. Wires everything together: DB, security,
                   controllers, and the concrete SandboxClient/CredentialResolver/
@@ -113,6 +123,26 @@ controller method body.
 | `agent.AgentExecutionController` | `POST /agents/execute` (ADMIN/DEVELOPER), `GET /agents/executions/{id}` (ADMIN/DEVELOPER/READONLY) — the **real, durable, async** path, see §8 — and `GET /agents/definitions` (ADMIN/DEVELOPER/READONLY), the catalog listing. |
 | `agent.AgentExecutionService` | Every state transition of an `agent_executions` row: `enqueue()`, `claimNext()` (flips `QUEUED`→`RUNNING`), `complete()`/`fail()`, `findForTenant()`. Each is its own short `@Transactional` method — `claimNext()` in particular must commit fast so its row lock isn't held for the whole agent run that follows. |
 | `agent.AgentJobWorker` | `@Scheduled` poll loop (`app.job-worker.poll-interval-ms`, default 2000ms). The only place `TenantContext.SYSTEM_WORKER_TENANT_ID` is ever set. See §8. Absent as a bean entirely (not just inert) when `app.job-worker.enabled=false` — set in `application-test.yml` so integration tests don't race it. |
+
+### RAG: knowledge sources, chunking, hybrid search (`rag-service`, `gateway-api/.../rag`)
+
+| Class | Responsibility |
+|---|---|
+| `rag.entity.KnowledgeSource` / `rag.entity.DocumentChunk` / `rag.entity.AgentKnowledgeSourceBinding` | Tenant-scoped JPA entities, `FORCE ROW LEVEL SECURITY` like everything else (V28-V30). `AgentKnowledgeSourceBinding` is a separate join table, not a column on `agent_definitions` -- that catalog is platform-wide with no RLS, so a column there would leak one tenant's source to every tenant running the same agent. |
+| `rag.entity.VectorType` | Hand-written Hibernate 6 `UserType<float[]>` mapping `document_chunk.embedding` to Postgres's `vector` column -- pgvector-java ships the JDBC-level `PGvector` type but no ready Hibernate mapping. |
+| `rag.chunking.ParagraphChunker` | Paragraph-first, sentence-fallback-only-when-oversized splitting with configurable character overlap. Pure, no DB/Spring. |
+| `rag.retrieval.HybridScoreMerger` | Pure function: two `(chunkId, rawScore)` candidate lists (pgvector cosine distance, Postgres `ts_rank`) -> one ranked list, each signal min-max normalized within its own set before a weighted combine. |
+| `rag.repository.DocumentChunkRepository` | Two `@Query(nativeQuery = true)` methods (vector KNN via `<=>`, full-text via `to_tsvector`/`ts_rank`) returning `(id, score)` projections only -- `HybridScoreMerger` merges, then the surviving ids get hydrated once. |
+| `rag.tool.RetrievalTool` | `implements AgentTool`, name `retrieval`. No sandbox. Which knowledge source (if any) it can search is resolved ONCE at construction time by `RetrievalToolFactory`, not per-call -- the model only ever supplies `query`, never a source id. |
+| `rag.retrieval.RetrievalQueryService` | Interface `RetrievalTool` calls through -- lives in `rag-service` so the tool doesn't depend on `gateway-api`; `RetrievalServiceImpl` (gateway-api) is the real implementation (needs `VendorCredentialService` + `EmbeddingModelFactory` together). Same dependency-inversion shape as `CredentialResolver`. |
+| `gateway.agent.catalog.RetrievalToolFactory` | The only `ToolFactory` that reads `ToolCreationContext` (added alongside it) -- looks up `AgentKnowledgeSourceBinding` for `(tenantId, agentDefinitionId)` once, at tool-construction time. |
+| `gateway.agent.catalog.ToolCreationContext` | `record(tenantId, userId, agentDefinitionId)` -- construction-time-only info a `ToolFactory` might need, distinct from the per-call `SandboxSession`/`CredentialResolver`. Every factory except `RetrievalToolFactory` ignores it. |
+| `core.llm.EmbeddingModelFactory` (agent-core) | Sibling to `LlmEngineFactory`. `OPENAI`/`GEMINI`/`LOCAL` implemented (`ANTHROPIC` has no embeddings API, throws). Fixed `EMBEDDING_DIMENSIONS = 768` regardless of provider -- OpenAI truncates via its `dimensions` param, Gemini and Ollama's `nomic-embed-text` both output 768 natively. |
+| `gateway.rag.EmbeddingProviderResolver` | Resolves the triggering user's own active OpenAI/Gemini/Local vendor credential (in that order) and builds the `EmbeddingModel` -- same per-user, no-tenant-fallback rule as `AgentPromptRunner.resolveApiKey()`. |
+| `gateway.rag.IngestionService` | Synchronous: extract text (`rag.ingest.DocumentTextExtractor` -- PDFBox or plain-text passthrough) -> chunk -> `embedAll()` (one batched call, not one per chunk) -> save. No job queue. |
+| `gateway.rag.RetrievalServiceImpl` | `implements RetrievalQueryService`. Embeds the query text, pulls a wider candidate pool than requested `topK` from each of `DocumentChunkRepository`'s two queries, merges via `HybridScoreMerger`, hydrates the survivors. |
+| `gateway.rag.AgentKnowledgeSourceBindingService` | `attach`/`detach`/`findForAgent` -- the last one backs the frontend's "is a source already attached to this agent" check (`GET /knowledge-sources/agent-bindings/{agentSlug}`). |
+| `gateway.rag.KnowledgeSourceController` | `POST`/`GET /knowledge-sources`, `POST .../{id}/documents` (multipart -- the app's first upload endpoint), `POST .../{id}/query`, `GET`/`PUT`/`DELETE .../agent-bindings/{agentSlug}`. Create/ingest/query are ADMIN+DEVELOPER (same tier as vendor-credentials); the binding endpoints are ADMIN-only (changes what every tenant member's runs of that agent do). |
 
 ---
 
@@ -451,6 +481,61 @@ LOCKED`) or increasing the scheduler's thread pool, neither of which has been do
 
 ---
 
+## 6b. RAG call stack: a `retrieval` tool call inside an agent execution
+
+Picks up from `ToolCallingChatEngine.executeTool()` in §4, when `request.name()` is `"retrieval"`.
+Construction-time binding resolution (once per execution, in `AgentPromptRunner.run()`, alongside
+tool assembly) matters as much here as the per-call path.
+
+```
+AgentPromptRunner.run()
+ │  toolContext = new ToolCreationContext(tenantId, userId, definition.getId())
+ │  tools = toolCatalog.instantiate(definition.getToolNames(), session, listener, credentialResolver, toolContext)
+ │       -> for "retrieval": RetrievalToolFactory.create(session, listener, credentialResolver, toolContext)
+ │            knowledgeSourceId = bindingRepository.findByTenantIdAndAgentDefinitionId(tenantId, toolContext.agentDefinitionId())
+ │                 .map(AgentKnowledgeSourceBinding::getKnowledgeSourceId)   // Optional -- empty for most tenant/agent pairs
+ │            return new RetrievalTool(knowledgeSourceId, toolContext.userId(), retrievalQueryService)
+ │  -- every OTHER ToolFactory ignores toolContext entirely, same as before this existed
+ │
+ └─ (later, mid-loop) model requests a "retrieval" call with {"query": "..."}
+      RetrievalTool.execute(context, arguments)
+       │  if knowledgeSourceId is empty: return "No knowledge source is attached..." (NOT an error -- most
+       │     tenants using ticket-resolver have never set up RAG at all, see V31's migration comment)
+       │  results = retrievalQueryService.query(context.tenantId(), userId, knowledgeSourceId, query, TOP_K=5)
+       │       -> RetrievalServiceImpl.query()
+       │            embeddingModel = EmbeddingProviderResolver.resolve(tenantId, userId)
+       │                 -- checks OPENAI, then GEMINI, then LOCAL vendor credentials for THIS user;
+       │                 -- throws RagException(400) if none active (caught centrally by
+       │                 -- ToolCallingChatEngine.executeTool(), fed back to the model as text, not a 500)
+       │            queryVector = embeddingModel.embed(query).content().vector()   // REAL embedding API call
+       │            vectorCandidates = documentChunkRepository.findNearestByEmbedding(sourceId, vectorLiteral, 20)
+       │            textCandidates = documentChunkRepository.findByFullTextSearch(sourceId, query, 20)
+       │            merged = hybridScoreMerger.merge(vectorCandidates, textCandidates, topK=5)
+       │            chunks = documentChunkRepository.findAllById(merged ids)   // one hydration query, not N
+       │            return merged.map(scored -> RetrievedChunk(chunk.content, chunk.documentName, scored.score))
+       │  return formatted string (one numbered block per chunk: source doc name, relevance score, content)
+       -- fed back into the SAME multi-round loop as any other tool result (§4) -- the model sees it on
+          its next chatModel.generate() call and can choose to call retrieval again, call a different
+          tool, or answer.
+```
+
+**Ingestion** (`POST /knowledge-sources/{id}/documents`) is the other real API call in this module,
+and it's synchronous end to end -- no job queue, confirmed deliberate:
+
+```
+KnowledgeSourceController.ingest() -> IngestionService.ingest(tenantId, userId, sourceId, filename, bytes)
+ │  knowledgeSourceService.getOwned(tenantId, sourceId)      // 404s if missing/another tenant's -- same
+ │                                                             // ownership-check pattern as everywhere else
+ │  text = DocumentTextExtractor.extract(bytes, filename)     // PDFBox if .pdf, UTF-8 passthrough otherwise
+ │  chunks = ParagraphChunker.chunk(text)                     // pure, in-process
+ │  embeddingModel = EmbeddingProviderResolver.resolve(tenantId, userId)
+ │  embeddings = embeddingModel.embedAll(chunks.map(TextSegment::from))   // ONE batched call, not one per chunk
+ │  documentChunkRepository.saveAll(...)                      // real pgvector INSERTs, RLS-scoped as always
+ └─ return IngestDocumentResponse(sourceId, filename, chunkCount)
+```
+
+---
+
 ## 7. Where to look, by symptom
 
 | Symptom | Start here |
@@ -488,6 +573,12 @@ LOCKED`) or increasing the scheduler's thread pool, neither of which has been do
 | CORS preflight fails from the Angular dev server / a new deployment origin | Check `app.cors.allowed-origin` (env `CORS_ALLOWED_ORIGIN`) matches that origin EXACTLY (scheme + host + port) -- `SecurityConfig.corsConfigurationSource()` is deliberately a single explicit origin, never a wildcard, so a mismatch fails closed rather than degrading to "works but insecure." |
 | `mvn test` hangs or fails trying to reach an SMTP server | Check `TestMailConfig` (`gateway-api/src/test/java/.../mail/`) is still being picked up -- it's a real `@Configuration @Profile("test")` class (not `@TestConfiguration`, which component scanning wouldn't auto-discover), providing an inert mock `JavaMailSender` that suppresses Spring Boot's real Brevo-pointed autoconfiguration for every `@SpringBootTest`. If it's ever deleted or moved out of the scanned `com.enterprisehub` package tree, tests that call `UserService.create()` will try a real SMTP connection with the placeholder credentials in `application.yml` and fail. |
 | `PagedModel` JSON looks different from what you expected (no top-level `totalElements`, etc.) | Working as designed -- `GET /agents/executions` returns `PagedModel<T>` (`{content: [...], page: {size, number, totalElements, totalPages}}`), not a raw Spring Data `Page`. Raw `Page` serialization depends on which Jackson modules happen to be registered in the serving `ApplicationContext` (Spring Boot's own docs call this out as unstable across versions) -- `PagedModel` doesn't need any special Jackson configuration to serialize predictably, which is exactly why it's used here instead. |
+| "RAG features need an active OpenAI, Gemini, or Local credential" (400, from retrieval or an upload) | Working as designed -- `EmbeddingProviderResolver` found no active `OPENAI`/`GEMINI`/`LOCAL` vendor credential for the TRIGGERING user (not the tenant broadly -- same per-user rule as the chat model). `PUT /vendor-credentials` for one of those three first. Anthropic-only tenants will always hit this until they connect a second provider -- Anthropic has no embeddings API at all, see `EmbeddingModelFactory`'s javadoc. |
+| `retrieval` tool always says "No knowledge source is attached" | Working as designed if `agent_knowledge_source_binding` has no row for `(tenantId, agentDefinitionId)` -- `PUT /knowledge-sources/{id}/agent-bindings/{agentSlug}` (ADMIN) attaches one. Check `GET /knowledge-sources/agent-bindings/{agentSlug}` to see current state before assuming it's a bug. |
+| `document_chunk`/`knowledge_source` migrations fail with "permission denied to create extension" or the app fails to start entirely on a fresh DB | `hub_user` (deliberately never a superuser) can't self-install `pgvector` -- confirmed live, even though it owns `agent_hub`. A superuser has to run `CREATE EXTENSION vector` once per database FIRST (docker-compose's `init.sh` does this automatically; a manual local Postgres needs the same step by hand -- see README's Setup section). `V28__enable_pgvector.sql`'s own `CREATE EXTENSION IF NOT EXISTS` can only ever confirm it's already there. |
+| App fails to start: "No qualifying bean of type ...rag.repository.*Repository" | `GatewayApplication`'s `@EntityScan`/`@EnableJpaRepositories` must explicitly list `com.enterprisehub.rag.entity`/`com.enterprisehub.rag.repository` alongside the `gateway` packages -- `@SpringBootApplication(scanBasePackages=...)` only widens plain `@ComponentScan`, NOT Spring Data JPA's repository/entity scanning, which silently defaults to `AutoConfigurationPackages` (this class's own package) regardless of that override. If this ever regresses, it's because someone touched `GatewayApplication`'s annotations without knowing this. |
+| Hybrid search returns results in a surprising order, or misses an obviously-relevant chunk | Check which signal actually mattered: `HybridScoreMerger`'s default weights are 0.6 vector / 0.4 text. A chunk found by only ONE of the two candidate queries (top-20 nearest-by-vector, top-20 by `ts_rank`) still gets a real score for that signal and 0 for the other -- it's never excluded just for missing one side, but a chunk outside BOTH top-20 pools genuinely never surfaces. Widening `CANDIDATE_POOL_SIZE` in `RetrievalServiceImpl` is the fix if the pools themselves are too narrow for a large source. |
+| `EmbeddingModel.embed()`/`embedAll()` throws or hangs against `LOCAL` | Confirm Ollama (or whichever OpenAI-compatible server) is actually running at `app.llm.local-base-url` (default `http://localhost:11434/v1`) AND that the embedding model name (`EmbeddingModelFactory`'s `DEFAULT_LOCAL_EMBEDDING_MODEL`, `nomic-embed-text`) is actually pulled (`ollama list`) -- a chat-only model like `qwen2.5-coder` will not work here even though it's fine for `LlmEngineFactory`'s chat path; embeddings need a model that actually exposes an embedding head. |
 
 ---
 
