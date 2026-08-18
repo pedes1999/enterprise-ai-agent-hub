@@ -307,8 +307,7 @@ each reusable independently of the web layer.
   real request. `AgentPromptRunner` holds the actual "run this prompt with
   tools for this tenant" logic, extracted out of `AgentPingService` so the
   synchronous spike and the async worker share one implementation instead
-  of two copies drifting apart. See `CODE_WALKTHROUGH.md` for the full
-  claim → run → complete call stack.
+  of two copies drifting apart.
 
 **Two real bugs were caught by live-testing `GitCloneTool` against actual
 E2B infrastructure** (not by unit tests, which all passed throughout —
@@ -605,8 +604,7 @@ URL-embedded Basic auth) were tried and each genuinely improved something,
 but none of them could have fixed this, because the token never reached
 the sandbox at all in any of them. Found by bypassing gateway-api
 entirely and hitting the sidecar directly with a known test env var, and
-confirmed against the SDK's own shipped type definitions. See
-`CODE_WALKTHROUGH.md`'s symptom table for the full diagnostic trail.
+confirmed against the SDK's own shipped type definitions.
 
 A fourth: `app.credentials.local-key`'s fallback (used when
 `CREDENTIAL_LOCAL_KEY` isn't set) was a real, working AES-256 key
