@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: agent-hub
+spec:
+  selector:
+    app: gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: agent-hub
+spec:
+  # TWO on purpose. This app was built for it and has never been able to show
+  # it: the job queue claims with FOR UPDATE SKIP LOCKED so workers never
+  # double-process (V5), the heartbeat/reaper recovers runs abandoned when an
+  # instance dies mid-execution (V32) -- which is exactly what a rolling
+  # restart does -- and the SSE stream is DB-polled rather than in-process, so
+  # a browser attached to one pod still sees a run executing on the other.
+  # A single replica would leave all three claims untested.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      # Must exceed preStop + the app's shutdown timeout (5 + 20), or the
+      # kubelet SIGKILLs the pod mid-drain and both settings are wasted.
+      # Pod-level, not container-level -- the API server rejects it outright
+      # on a container, which is the sort of thing a dry-run catches and
+      # eyeballing the YAML does not.
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        # The image already declares USER app; asserting it here means the
+        # cluster rejects the pod if a future image regresses to root, rather
+        # than silently running privileged.
+        runAsNonRoot: true
+        # runAsNonRoot alone is NOT enough, and the failure is not obvious:
+        # the Dockerfile's `USER app` is a NAME, and the kubelet cannot resolve
+        # a name to a uid without running the image, so it refuses the pod with
+        # CreateContainerConfigError ("image has non-numeric user"). The uid
+        # has to be stated here. 100/101 is what `adduser -S app -G app`
+        # allocates on the alpine base -- verify with `docker run --rm
+        # --entrypoint sh <image> -c id` if the base image ever changes.
+        runAsUser: 100
+        runAsGroup: 101
+      containers:
+        - name: gateway
+          image: agent-hub/gateway-api:poc
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: gateway-config }
+            - secretRef: { name: gateway-secrets }
+          startupProbe:
+            # Spring Boot plus Flyway needs far longer to come up than it does
+            # to answer once it has. Without a startup probe the liveness
+            # probe would kill the pod mid-migration and the deployment would
+            # never converge -- the classic Spring-on-Kubernetes failure.
+            #
+            # Both replicas run Flyway at boot and race for it. That is safe:
+            # Flyway takes a Postgres advisory lock, so one migrates and the
+            # other waits. Worth knowing rather than discovering.
+            httpGet: { path: /actuator/health, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            # Gates Service membership: a pod that cannot reach the database
+            # is pulled from load balancing instead of serving errors.
+            httpGet: { path: /actuator/health, port: 8080 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            periodSeconds: 20
+          lifecycle:
+            preStop:
+              # Graceful shutdown in the app is necessary but NOT sufficient.
+              # Endpoint removal is eventually consistent: for a moment after
+              # a pod starts terminating, kube-proxy on some nodes still
+              # routes NEW connections to it. Sleeping here keeps the process
+              # accepting them while that propagates, so the pod stops
+              # receiving traffic before it stops serving it. Without this,
+              # a rolling restart dropped 4 of 150 requests; with it, 0.
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+          resources:
+            requests: { cpu: 250m, memory: 768Mi }
+            # A JVM without a memory limit will happily size its heap against
+            # the whole node. The limit is what makes the container's
+            # footprint predictable; the JVM reads it via cgroups.
+            limits: { memory: 1536Mi }

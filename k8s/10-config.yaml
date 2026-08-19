@@ -1,0 +1,44 @@
+# Non-secret configuration. Split from the Secret below on the usual line --
+# these values are safe in `kubectl describe`, a git diff, or a screenshot;
+# the ones in the Secret are not.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: agent-hub
+data:
+  # Service DNS, not an IP: "postgres" resolves to the ClusterIP Service in
+  # this namespace, so nothing here changes when the database pod is
+  # rescheduled onto another node with a different address.
+  DB_URL: jdbc:postgresql://postgres:5432/agent_hub
+  SANDBOX_SIDECAR_URL: http://sidecar:8090/
+  # The browser talks to the gateway through the frontend's own origin (see
+  # nginx.conf), so this is what the BROWSER must be able to reach -- not an
+  # in-cluster Service name, which a browser cannot resolve.
+  CORS_ALLOWED_ORIGIN: http://localhost:8081
+  # ANTHROPIC is the server-wide default; a tenant overrides it per-tenant via
+  # PUT /tenant-settings. No key is baked in anywhere -- vendor credentials
+  # are per-user and encrypted at rest (see VendorCredentialService).
+  LLM_PROVIDER: ANTHROPIC
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: agent-hub
+data:
+  # Mounted into docker-entrypoint-initdb.d, which the official image runs
+  # once against an empty data directory. Mirrors docker/postgres/init.sh for
+  # the same reason it exists there: the app's role must NOT be the superuser,
+  # or Postgres silently ignores every RLS policy in the schema (V1/V2).
+  init.sh: |
+    #!/bin/sh
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+        CREATE ROLE ${DB_USERNAME} LOGIN PASSWORD '${DB_PASSWORD}';
+        CREATE DATABASE agent_hub OWNER ${DB_USERNAME};
+    EOSQL
+    # pgvector must be installed by a superuser, so it happens here rather
+    # than in V28, whose CREATE EXTENSION can then only ever be a no-op.
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" -d agent_hub \
+      -c "CREATE EXTENSION IF NOT EXISTS vector;"

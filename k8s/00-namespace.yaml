@@ -1,0 +1,9 @@
+# Everything lives in one namespace so the whole proof-of-concept is created
+# and destroyed as a unit -- `kubectl delete namespace agent-hub` is the
+# complete teardown, with no stray cluster-scoped objects left behind.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-hub
+  labels:
+    app.kubernetes.io/part-of: enterprise-ai-agent-hub

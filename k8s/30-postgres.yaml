@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: agent-hub
+spec:
+  # Headless: nothing needs to load-balance across database pods, and a stable
+  # DNS name is the only thing the gateway actually wants.
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: agent-hub
+spec:
+  serviceName: postgres
+  # Exactly one. This is a single-writer database with no replication
+  # configured -- scaling it would produce two independent databases sharing a
+  # Service, not a cluster, which is worse than not scaling it at all.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          # pgvector/pgvector, not stock postgres: V28's CREATE EXTENSION
+          # fails outright against an image that lacks the extension binary.
+          image: pgvector/pgvector:pg16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: gateway-secrets, key: DB_PASSWORD }
+            # Read by init.sh to create the app's own non-superuser role.
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef: { name: gateway-secrets, key: DB_USERNAME }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: gateway-secrets, key: DB_PASSWORD }
+            # The default data dir is the volume's mount point, and an
+            # ext4/PVC mount often contains lost+found -- which initdb refuses
+            # to run into. A subdirectory sidesteps that.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            # pg_isready, not a TCP check: the port accepts connections before
+            # the server is ready to answer queries, so a TCP probe would let
+            # the gateway start migrating against a database that then refuses.
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

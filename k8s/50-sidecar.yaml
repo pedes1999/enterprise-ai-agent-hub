@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sidecar
+  namespace: agent-hub
+spec:
+  selector:
+    app: sidecar
+  ports:
+    - port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sidecar
+  namespace: agent-hub
+spec:
+  # One replica: it is a thin stateless proxy onto E2B, and every tool call
+  # ultimately costs the same single upstream account either way (see the
+  # E2B_API_KEY note in the Secret) -- scaling it would multiply concurrency
+  # against that account without adding capacity of our own.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sidecar
+  template:
+    metadata:
+      labels:
+        app: sidecar
+    spec:
+      containers:
+        - name: sidecar
+          image: agent-hub/sidecar:poc
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8090
+          env:
+            - name: PORT
+              value: "8090"
+            - name: E2B_API_KEY
+              valueFrom:
+                secretKeyRef: { name: gateway-secrets, key: E2B_API_KEY }
+          readinessProbe:
+            httpGet: { path: /health, port: 8090 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }

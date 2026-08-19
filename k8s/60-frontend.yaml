@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: agent-hub
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: agent-hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          # The API base URL is baked into the JS bundle at build time
+          # (frontend/Dockerfile's API_BASE_URL arg) because Angular has no
+          # runtime config. It is therefore a property of the IMAGE, not of
+          # this manifest -- an env var here would do nothing, so the build
+          # arg has to match wherever the browser will reach the gateway.
+          image: agent-hub/frontend:poc
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
