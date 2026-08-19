@@ -67,6 +67,15 @@ export const routes: Routes = [
     loadComponent: () => import('./features/knowledge/knowledge').then((m) => m.Knowledge),
   },
   {
+    // Readable by every role, matching AgentExecutionController.getSpend() --
+    // a developer about to trigger an expensive run benefits from seeing the
+    // remaining budget. Only the budget EDITOR inside the page is admin-only,
+    // gated client-side via authService.isAdmin() the way Credentials does it.
+    path: 'spend',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/spend/spend').then((m) => m.Spend),
+  },
+  {
     path: 'team',
     canActivate: [authGuard, adminGuard],
     loadComponent: () => import('./features/team/team').then((m) => m.Team),

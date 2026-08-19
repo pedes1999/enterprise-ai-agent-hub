@@ -1,0 +1,177 @@
+<div class="spend-page">
+  <h1>Spend</h1>
+
+  @if (loading()) {
+    <div class="loading-state"><span class="spinner"></span> Loading spend…</div>
+  } @else if (loadError()) {
+    <div class="banner banner-error">{{ loadError() }}</div>
+  } @else if (summary(); as s) {
+    <p class="period">
+      Month to date — since {{ s.periodStart | date: 'd MMMM y' }}. Billing periods are UTC calendar
+      months, matching how vendors invoice.
+    </p>
+
+    <!-- KPI row. These are headline numbers, so they are stat tiles rather than
+         a chart -- a bar chart of four unrelated measures would be harder to
+         read than the numbers themselves. -->
+    <section class="kpi-row" aria-label="Spend summary">
+      <div class="kpi">
+        <span class="kpi-label">Spent this period</span>
+        <span class="kpi-value hero mono">{{ formatUsd(s.spendUsd) }}</span>
+        @if (s.unpricedExecutions > 0) {
+          <span class="kpi-note">at least — see below</span>
+        }
+      </div>
+
+      <div class="kpi">
+        <span class="kpi-label">Monthly budget</span>
+        @if (s.budgetUsd === null) {
+          <span class="kpi-value mono muted">Unlimited</span>
+          <span class="kpi-note">No ceiling configured</span>
+        } @else {
+          <span class="kpi-value mono">{{ formatUsd(s.budgetUsd) }}</span>
+        }
+      </div>
+
+      <div class="kpi">
+        <span class="kpi-label">Remaining</span>
+        @if (s.remainingUsd === null) {
+          <!-- Null because there is no budget. Showing 0 here would imply a
+               ceiling that does not exist. -->
+          <span class="kpi-value mono muted">—</span>
+        } @else {
+          <span class="kpi-value mono">{{ formatUsd(s.remainingUsd) }}</span>
+        }
+      </div>
+
+      <div class="kpi">
+        <span class="kpi-label">Unpriced runs</span>
+        <span class="kpi-value mono" [class.attention]="s.unpricedExecutions > 0">{{ s.unpricedExecutions }}</span>
+        @if (s.unpricedExecutions > 0) {
+          <span class="kpi-note">cost unknown, not zero</span>
+        }
+      </div>
+    </section>
+
+    <!-- A single ratio against a limit: a meter, not a gauge or a two-slice
+         pie. The written state beside it is not decoration -- amber and red are
+         nearly indistinguishable under deuteranopia, so the words carry the
+         meaning and the color only reinforces it. -->
+    @if (s.budgetUsd !== null && s.percentUsed !== null) {
+      <section class="meter-block" aria-label="Budget usage">
+        <div class="meter-head">
+          <span class="meter-state" [attr.data-state]="budgetState()">
+            <span class="meter-dot" aria-hidden="true"></span>
+            {{ budgetLabel() }}
+          </span>
+          <span class="meter-pct mono">{{ s.percentUsed.toFixed(1) }}% of {{ formatUsd(s.budgetUsd) }}</span>
+        </div>
+        <div
+          class="meter-track"
+          role="meter"
+          [attr.aria-valuenow]="s.percentUsed"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          [attr.aria-label]="budgetLabel()"
+        >
+          <div class="meter-fill" [attr.data-state]="budgetState()" [style.width.%]="meterWidth()"></div>
+        </div>
+      </section>
+    }
+
+    @if (s.unpricedExecutions > 0) {
+      <div class="banner banner-warn">
+        <strong>{{ s.unpricedExecutions }}</strong> completed run(s) this period could not be priced, so the
+        total above is a lower bound rather than a complete figure. That happens when no pricing row covers
+        the model a run used — an unknown cost is deliberately never recorded as a free one.
+      </div>
+    }
+
+    <!-- Breakdown. One measure across categories, so one hue for every bar:
+         colouring each agent differently would spend the only free channel on
+         information the bar length already shows, and darker-where-bigger would
+         double-encode it. The value column doubles as the table view, so no
+         label rides the bars. -->
+    <section class="breakdown" aria-label="Spend by agent">
+      <h2>By agent</h2>
+      @if (s.byAgent.length === 0) {
+        <p class="empty">No completed executions in this period yet.</p>
+      } @else {
+        <table class="breakdown-table">
+          <thead>
+            <tr>
+              <th scope="col">Agent</th>
+              <th scope="col" class="bar-col">Share of spend</th>
+              <th scope="col" class="num">Cost</th>
+              <th scope="col" class="num">Runs</th>
+              <th scope="col" class="num">Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of s.byAgent; track row.agentSlug) {
+              <tr>
+                <th scope="row" class="mono">{{ row.agentSlug }}</th>
+                <td class="bar-col">
+                  @if (row.costUsd === null) {
+                    <!-- No bar at all: drawing an empty one would read as "no
+                         spend", which is exactly the wrong conclusion. -->
+                    <span class="bar-none">not priced</span>
+                  } @else {
+                    <span
+                      class="bar"
+                      [style.width.%]="barWidth(row)"
+                      [attr.title]="row.agentSlug + ': ' + formatUsd(row.costUsd)"
+                    ></span>
+                  }
+                </td>
+                <td class="num mono">
+                  @if (row.costUsd === null) {
+                    <span class="muted" title="No pricing row covers this agent's model — cost unknown, not zero">—</span>
+                  } @else {
+                    {{ formatUsd(row.costUsd) }}
+                  }
+                </td>
+                <td class="num mono">{{ row.executionCount }}</td>
+                <td class="num mono">{{ row.totalTokens === null ? '—' : row.totalTokens.toLocaleString() }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </section>
+
+    @if (authService.isAdmin() && settings()) {
+      <section class="budget-editor" aria-label="Budget settings">
+        <h2>Monthly budget</h2>
+        <p class="hint">
+          Checked before an execution is queued, across every trigger — the API, a GitHub webhook, and
+          delegated sub-runs. Leave it empty for no ceiling; <strong>0</strong> freezes this tenant without
+          deleting anything. A run already in flight is never killed, so spend can overshoot by whatever was
+          running when the ceiling was crossed.
+        </p>
+        @if (saveError()) {
+          <div class="banner banner-error">{{ saveError() }}</div>
+        }
+        @if (saveSuccess()) {
+          <div class="banner banner-success">{{ saveSuccess() }}</div>
+        }
+        <div class="budget-form">
+          <label for="budget">USD per month</label>
+          <input
+            id="budget"
+            type="number"
+            min="0"
+            step="0.01"
+            class="mono"
+            placeholder="Unlimited"
+            [(ngModel)]="budgetInput"
+            [disabled]="saving()"
+          />
+          <button type="button" (click)="saveBudget()" [disabled]="saving()">
+            {{ saving() ? 'Saving…' : 'Save budget' }}
+          </button>
+        </div>
+      </section>
+    }
+  }
+</div>

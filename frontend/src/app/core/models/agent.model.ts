@@ -88,6 +88,42 @@ export interface AgentTokenUsageStats {
   maxTokens: number | null;
 }
 
+/**
+ * One agent's share of the tenant's spend this period.
+ *
+ * costUsd is null when every run of this agent in the window was unpriced --
+ * NOT zero. Rendering it as $0.00 would undo the backend's whole point (an
+ * unknown cost is not a free one) and would sort a possibly-expensive agent
+ * to the bottom of the list.
+ */
+export interface AgentSpendBreakdown {
+  agentSlug: string;
+  executionCount: number;
+  costUsd: number | null;
+  totalTokens: number | null;
+}
+
+/**
+ * Backs GET /agents/executions/spend.
+ *
+ * The nullable fields carry meaning and must not be coalesced in the view:
+ *  - budgetUsd null  = no ceiling configured (unlimited), NOT a budget of 0.
+ *  - remainingUsd / percentUsed are null exactly when budgetUsd is -- there is
+ *    nothing to be a fraction of.
+ *  - unpricedExecutions > 0 means spendUsd is a LOWER BOUND, not a total, and
+ *    the UI is expected to say so rather than present a partial figure as
+ *    complete.
+ */
+export interface TenantSpendSummary {
+  periodStart: string;
+  spendUsd: number;
+  budgetUsd: number | null;
+  remainingUsd: number | null;
+  percentUsed: number | null;
+  unpricedExecutions: number;
+  byAgent: AgentSpendBreakdown[];
+}
+
 /** Mirrors Spring's PagedModel<T> JSON shape -- {content, page: {size, number, totalElements, totalPages}}. */
 export interface PagedModel<T> {
   content: T[];

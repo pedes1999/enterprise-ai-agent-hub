@@ -54,6 +54,8 @@ export interface TenantSettings {
   maxTokensPerExecution: number | null;
   /** Never null -- whatever maxTokensPerExecution actually resolves to (this override, or the server default). */
   effectiveMaxTokensPerExecution: number;
+  /** Null means no spend ceiling (unlimited) -- distinct from 0, which means "spend nothing". */
+  monthlyBudgetUsd: number | null;
   availableProviders: LlmProviderAvailability[];
 }
 

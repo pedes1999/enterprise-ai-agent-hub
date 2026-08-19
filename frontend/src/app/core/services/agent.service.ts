@@ -9,6 +9,7 @@ import {
   AgentExecutionAccepted,
   AgentExecutionStatusResponse,
   AgentTokenUsageStats,
+  TenantSpendSummary,
   ExecutionUsage,
   PagedModel,
   ToolExecutionRecord,
@@ -159,6 +160,11 @@ export class AgentService {
 
   getUsage(): Observable<ExecutionUsage> {
     return this.http.get<ExecutionUsage>(`${environment.apiBaseUrl}/agents/executions/usage`);
+  }
+
+  /** Month-to-date spend against the tenant's budget -- see TenantSpendSummary on why its nulls matter. */
+  getSpend(): Observable<TenantSpendSummary> {
+    return this.http.get<TenantSpendSummary>(`${environment.apiBaseUrl}/agents/executions/spend`);
   }
 
   getTokenUsageStats(agentSlug: string): Observable<AgentTokenUsageStats> {

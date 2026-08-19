@@ -52,6 +52,13 @@ const PAIRED_TOOL_KIND: Record<string, string> = { GIT: 'GITHUB', GITHUB: 'GIT' 
 export class Credentials implements OnInit {
   private readonly credentialService = inject(CredentialService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
+  /**
+   * Held only so savePreferredProvider() can send it back untouched.
+   * updateSettings is a full replace, not a patch, so omitting it here would
+   * silently clear the tenant's monthly spend ceiling every time an admin
+   * saved an unrelated LLM preference. Edited on the Spend page, never here.
+   */
+  private readonly monthlyBudgetUsd = signal<number | null>(null);
   private readonly authService = inject(AuthService);
 
   readonly vendorProviders = VENDOR_PROVIDERS;
@@ -189,6 +196,7 @@ export class Credentials implements OnInit {
           this.preferredModelSelection.set(settings.preferredModelName ?? '');
           this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
           this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
+          this.monthlyBudgetUsd.set(settings.monthlyBudgetUsd);
           this.availableProviders.set(settings.availableProviders);
           this.markSaved();
           this.loadModels();
@@ -322,13 +330,16 @@ export class Credentials implements OnInit {
 
     this.savingPreference.set(true);
     this.preferenceMessage.set(null);
-    this.tenantSettingsService.updateSettings(provider || null, modelName || null, maxTokens).subscribe({
+    this.tenantSettingsService
+      .updateSettings(provider || null, modelName || null, maxTokens, this.monthlyBudgetUsd())
+      .subscribe({
       next: (settings) => {
         this.savingPreference.set(false);
         this.preferredProviderSelection.set(settings.preferredLlmProvider ?? '');
         this.preferredModelSelection.set(settings.preferredModelName ?? '');
         this.maxTokensSelection.set(settings.maxTokensPerExecution != null ? String(settings.maxTokensPerExecution) : '');
         this.effectiveMaxTokens.set(settings.effectiveMaxTokensPerExecution);
+        this.monthlyBudgetUsd.set(settings.monthlyBudgetUsd);
         this.availableProviders.set(settings.availableProviders);
         this.markSaved();
         this.preferenceMessage.set({ kind: 'success', text: 'Preference saved.' });

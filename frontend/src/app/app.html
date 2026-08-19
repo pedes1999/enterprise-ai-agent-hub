@@ -24,6 +24,7 @@
     <nav class="primary-nav" [class.open]="mobileMenuOpen()">
       <a routerLink="/agents" routerLinkActive="active">Agents</a>
       <a routerLink="/executions" routerLinkActive="active">Executions</a>
+      <a routerLink="/spend" routerLinkActive="active">Spend</a>
       @if (authService.canManageOwnCredentials()) {
         <a routerLink="/credentials" routerLinkActive="active">Credentials</a>
         <a routerLink="/knowledge" routerLinkActive="active">Knowledge</a>

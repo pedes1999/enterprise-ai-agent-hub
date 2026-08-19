@@ -1,0 +1,303 @@
+.spend-page {
+  padding: var(--space-6);
+  max-width: 960px;
+}
+
+@media (max-width: 640px) {
+  .spend-page {
+    padding: var(--space-4);
+  }
+}
+
+h1 {
+  font-size: var(--font-size-xl);
+  margin-bottom: var(--space-2);
+}
+
+h2 {
+  font-size: var(--font-size-md);
+  margin-bottom: var(--space-3);
+}
+
+.period {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-5);
+}
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-3);
+  max-width: 70ch;
+}
+
+.empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+/* ---------- KPI row ---------- */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.kpi-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kpi-value {
+  font-size: var(--font-size-lg);
+  color: var(--color-text);
+}
+
+/* The one number the page leads with gets hero treatment; the rest stay
+   supporting, so the eye lands on total spend first. */
+.kpi-value.hero {
+  font-size: 34px;
+  line-height: var(--line-height-tight);
+}
+
+.kpi-note {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+/* Not a status color: this only says "look here", and the adjacent note
+   carries the actual meaning. */
+.kpi-value.attention {
+  color: var(--color-status-cancelled);
+}
+
+/* ---------- Budget meter ---------- */
+
+.meter-block {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+}
+
+.meter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* The state is text first. Colour is the reinforcement, never the carrier --
+   amber and red sit at ΔE 2.8 under deuteranopia, so a reader who cannot
+   separate them still reads the words. */
+.meter-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.meter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-accent);
+}
+
+.meter-state[data-state='ok'] .meter-dot {
+  background: var(--color-status-succeeded);
+}
+.meter-state[data-state='warn'] .meter-dot {
+  background: var(--color-status-cancelled);
+}
+.meter-state[data-state='over'] .meter-dot {
+  background: var(--color-status-failed);
+}
+
+.meter-pct {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Recessive track, one step off the surface -- the fill is the data, the
+   track is just the extent it is measured against. */
+.meter-track {
+  height: 10px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: width 160ms ease-out;
+}
+
+.meter-fill[data-state='ok'] {
+  background: var(--color-status-succeeded);
+}
+.meter-fill[data-state='warn'] {
+  background: var(--color-status-cancelled);
+}
+.meter-fill[data-state='over'] {
+  background: var(--color-status-failed);
+}
+
+/* ---------- Warning banner ---------- */
+
+.banner-warn {
+  background: var(--color-status-cancelled-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-status-cancelled);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  margin-bottom: var(--space-5);
+}
+
+/* ---------- Breakdown table ---------- */
+
+.breakdown {
+  margin-bottom: var(--space-6);
+}
+
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+}
+
+.breakdown-table th,
+.breakdown-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  /* Hairline, solid, one step off the surface -- never dashed. */
+  border-bottom: 1px solid var(--color-border);
+}
+
+.breakdown-table thead th {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  background: var(--color-surface-alt);
+}
+
+.breakdown-table tbody tr:last-child th,
+.breakdown-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.breakdown-table tbody th {
+  font-weight: 400;
+  color: var(--color-text);
+}
+
+.breakdown-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bar-col {
+  width: 40%;
+  min-width: 120px;
+}
+
+/* One hue for every bar: this is a single measure across categories, so
+   colour carries no extra information and per-agent hues would only compete
+   with the length. Thin, with the rounded end at the data tip and a square
+   foot on the baseline. */
+.bar {
+  display: block;
+  height: 10px;
+  /* No min-width: a zero-width bar must render as genuinely nothing. The 1%
+     floor in barWidth() already keeps a real-but-tiny cost visible, so a CSS
+     minimum here would only ever resurrect the bar this is meant to suppress
+     -- the free self-hosted run that cost exactly $0.00. */
+  background: var(--color-accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.bar-none {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ---------- Budget editor ---------- */
+
+.budget-editor {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.budget-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.budget-form label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.budget-form input {
+  width: 140px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.budget-form button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.budget-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

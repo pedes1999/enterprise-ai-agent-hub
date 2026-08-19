@@ -17,11 +17,13 @@ export class TenantSettingsService {
     preferredLlmProvider: string | null,
     preferredModelName: string | null,
     maxTokensPerExecution: number | null,
+    monthlyBudgetUsd: number | null,
   ): Observable<TenantSettings> {
     return this.http.put<TenantSettings>(`${environment.apiBaseUrl}/tenant-settings`, {
       preferredLlmProvider,
       preferredModelName,
       maxTokensPerExecution,
+      monthlyBudgetUsd,
     });
   }
 }

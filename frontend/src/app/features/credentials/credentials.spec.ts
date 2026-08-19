@@ -31,6 +31,7 @@ describe('Credentials', () => {
     preferredModelName: null,
     maxTokensPerExecution: null,
     effectiveMaxTokensPerExecution: 500000,
+    monthlyBudgetUsd: null,
     availableProviders: [
       { provider: 'ANTHROPIC', hasActiveCredential: true },
       { provider: 'OPENAI', hasActiveCredential: false },
@@ -249,6 +250,7 @@ describe('Credentials', () => {
       preferredModelName: 'llama3.1',
       maxTokensPerExecution: 75000,
       effectiveMaxTokensPerExecution: 75000,
+      monthlyBudgetUsd: null,
       availableProviders: [
         { provider: 'ANTHROPIC', hasActiveCredential: true },
         { provider: 'LOCAL', hasActiveCredential: true },
@@ -278,6 +280,7 @@ describe('Credentials', () => {
       preferredModelName: null,
       maxTokensPerExecution: 50000,
       effectiveMaxTokensPerExecution: 50000,
+      monthlyBudgetUsd: null,
       availableProviders: [],
     });
 
@@ -295,12 +298,19 @@ describe('Credentials', () => {
 
     const putReq = httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`);
     expect(putReq.request.method).toBe('PUT');
-    expect(putReq.request.body).toEqual({ preferredLlmProvider: 'LOCAL', preferredModelName: 'llama3.1', maxTokensPerExecution: 75000 });
+    expect(putReq.request.body).toEqual({
+      preferredLlmProvider: 'LOCAL',
+      preferredModelName: 'llama3.1',
+      maxTokensPerExecution: 75000,
+      // Sent back unchanged -- saving an LLM preference must never clear the spend ceiling.
+      monthlyBudgetUsd: null,
+    });
     putReq.flush({
       preferredLlmProvider: 'LOCAL',
       preferredModelName: 'llama3.1',
       maxTokensPerExecution: 75000,
       effectiveMaxTokensPerExecution: 75000,
+      monthlyBudgetUsd: null,
       availableProviders: [{ provider: 'LOCAL', hasActiveCredential: true }],
     });
 
@@ -314,6 +324,7 @@ describe('Credentials', () => {
       preferredModelName: 'llama3.1',
       maxTokensPerExecution: 75000,
       effectiveMaxTokensPerExecution: 75000,
+      monthlyBudgetUsd: null,
       availableProviders: [{ provider: 'LOCAL', hasActiveCredential: true }],
     });
     const component = fixture.componentInstance;
@@ -324,12 +335,18 @@ describe('Credentials', () => {
     component.savePreferredProvider();
 
     const putReq = httpMock.expectOne(`${environment.apiBaseUrl}/tenant-settings`);
-    expect(putReq.request.body).toEqual({ preferredLlmProvider: null, preferredModelName: null, maxTokensPerExecution: null });
+    expect(putReq.request.body).toEqual({
+      preferredLlmProvider: null,
+      preferredModelName: null,
+      maxTokensPerExecution: null,
+      monthlyBudgetUsd: null,
+    });
     putReq.flush({
       preferredLlmProvider: null,
       preferredModelName: null,
       maxTokensPerExecution: null,
       effectiveMaxTokensPerExecution: 500000,
+      monthlyBudgetUsd: null,
       availableProviders: [],
     });
   });
