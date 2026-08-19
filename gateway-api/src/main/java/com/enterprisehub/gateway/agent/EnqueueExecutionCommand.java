@@ -33,7 +33,28 @@ public record EnqueueExecutionCommand(
         Map<String, String> inputParameters,
         Integer maxTokens,
         UUID triggeredBy,
-        UUID parentExecutionId) {
+        UUID parentExecutionId,
+        String triggerSource) {
+
+    /**
+     * trigger_source is NOT NULL in the schema, and unlike every other field
+     * here it has a sensible universal default -- so a record constructed
+     * directly (tests do this) can't accidentally break the insert.
+     */
+    public EnqueueExecutionCommand {
+        if (triggerSource == null) {
+            triggerSource = DEFAULT_TRIGGER_SOURCE;
+        }
+    }
+
+    /**
+     * What kicked this run off -- persisted to agent_executions.trigger_source,
+     * whose documented vocabulary (CI_CD, WEBHOOK, CLI, DASHBOARD) has existed
+     * since V1__init_schema.sql while the code hardcoded this one value. It
+     * stays the default so no existing call site has to say so explicitly;
+     * WebhookIngestService is the first caller to override it.
+     */
+    public static final String DEFAULT_TRIGGER_SOURCE = "API";
 
     /** Starts a command for the two values every caller always has. */
     public static Builder forAgent(UUID tenantId, String agentSlug) {
@@ -51,6 +72,7 @@ public record EnqueueExecutionCommand(
         private Integer maxTokens;
         private UUID triggeredBy;
         private UUID parentExecutionId;
+        private String triggerSource = DEFAULT_TRIGGER_SOURCE;
 
         private Builder(UUID tenantId, String agentSlug) {
             this.tenantId = tenantId;
@@ -97,9 +119,15 @@ public record EnqueueExecutionCommand(
             return this;
         }
 
+        /** Defaults to "API" -- only a non-API entry point (currently just webhooks) needs to set this. */
+        public Builder triggerSource(String triggerSource) {
+            this.triggerSource = triggerSource;
+            return this;
+        }
+
         public EnqueueExecutionCommand build() {
             return new EnqueueExecutionCommand(tenantId, agentSlug, prompt, repositoryUrl, repositoryBranch,
-                    inputParameters, maxTokens, triggeredBy, parentExecutionId);
+                    inputParameters, maxTokens, triggeredBy, parentExecutionId, triggerSource);
         }
     }
 }

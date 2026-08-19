@@ -122,7 +122,7 @@ public class AgentExecutionService {
         AgentExecution execution = new AgentExecution();
         execution.setTenantId(tenantId);
         execution.setAgentType(agentSlug);
-        execution.setTriggerSource("API");
+        execution.setTriggerSource(command.triggerSource());
         execution.setLlmProvider(tenantLlmProviderResolver.resolve(tenantId).name());
         // prompt is optional at the DTO/validation level (see validateRequiredInputs()) but
         // the column itself is NOT NULL (V5__agent_execution_queue.sql) -- coerce null to the

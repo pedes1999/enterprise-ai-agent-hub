@@ -3415,6 +3415,406 @@
           ]
         }
       ]
+    },
+    {
+      "name": "9. Webhook Triggers (GitHub)",
+      "item": [
+        {
+          "name": "Create Webhook Endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhook-endpoints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook-endpoints"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agentSlug\": \"general-assistant\",\n  \"label\": \"acme/widgets pull requests\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Secret is returned exactly this once', () => pm.expect(json.secret).to.match(/^whsec_/));",
+                  "pm.test('Delivery URL is ready to paste into GitHub', () => pm.expect(json.deliveryUrl).to.include('/webhooks/github/'));",
+                  "pm.collectionVariables.set('webhookEndpointId', json.id);",
+                  "pm.collectionVariables.set('webhookSecret', json.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Signed pull_request Delivery Queues a Run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-GitHub-Event",
+                "value": "pull_request"
+              },
+              {
+                "key": "X-GitHub-Delivery",
+                "value": "{{webhookDeliveryId}}"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "{{webhookSignature}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/github/{{webhookEndpointId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "github",
+                "{{webhookEndpointId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookPayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The signature must cover the EXACT bytes sent, so the payload is",
+                  "// stashed in a variable here and the body is just {{webhookPayload}} --",
+                  "// anything Postman substitutes afterwards would change the bytes and",
+                  "// the HMAC would no longer match, which is precisely the failure mode",
+                  "// this endpoint is built to reject.",
+                  "const payload = JSON.stringify({",
+                  "  action: 'opened',",
+                  "  number: 128,",
+                  "  pull_request: {",
+                  "    title: 'Add exponential backoff to the retry helper',",
+                  "    body: 'The retry helper sleeps a fixed 100ms, which makes the suite flaky.',",
+                  "    html_url: 'https://github.com/acme/widgets/pull/128',",
+                  "    head: { ref: 'add-retry-backoff' },",
+                  "    base: { ref: 'main' }",
+                  "  },",
+                  "  repository: {",
+                  "    full_name: 'acme/widgets',",
+                  "    clone_url: 'https://github.com/acme/widgets.git'",
+                  "  }",
+                  "});",
+                  "pm.collectionVariables.set('webhookPayload', payload);",
+                  "",
+                  "// Same computation GitHub performs on its side.",
+                  "const secret = pm.collectionVariables.get('webhookSecret');",
+                  "const digest = CryptoJS.HmacSHA256(payload, secret).toString(CryptoJS.enc.Hex);",
+                  "pm.collectionVariables.set('webhookSignature', 'sha256=' + digest);",
+                  "",
+                  "// Kept so the redelivery request below can reuse the SAME id -- that",
+                  "// reuse is what GitHub does on a retry, and what dedupe keys off.",
+                  "pm.collectionVariables.set('webhookDeliveryId', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202 Accepted', () => pm.response.to.have.status(202));",
+                  "const json = pm.response.json();",
+                  "pm.test('A new execution was queued', () => pm.expect(json.outcome).to.eql('QUEUED'));",
+                  "pm.test('The queued execution id is reported back', () => pm.expect(json.executionId).to.be.a('string'));",
+                  "pm.collectionVariables.set('webhookExecutionId', json.executionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Redelivery of the Same Delivery Id Does Not Re-run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-GitHub-Event",
+                "value": "pull_request"
+              },
+              {
+                "key": "X-GitHub-Delivery",
+                "value": "{{webhookDeliveryId}}"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "{{webhookSignature}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/github/{{webhookEndpointId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "github",
+                "{{webhookEndpointId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookPayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK, not a second 202', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Recognised as a duplicate', () => pm.expect(json.outcome).to.eql('DUPLICATE'));",
+                  "pm.test('Reports the ORIGINAL run, so no second run was billed', () =>",
+                  "  pm.expect(json.executionId).to.eql(pm.collectionVariables.get('webhookExecutionId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tampered Body Is Rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-GitHub-Event",
+                "value": "pull_request"
+              },
+              {
+                "key": "X-GitHub-Delivery",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "{{webhookSignature}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/github/{{webhookEndpointId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "github",
+                "{{webhookEndpointId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"opened\",\n  \"number\": 128,\n  \"pull_request\": { \"title\": \"x\", \"head\": { \"ref\": \"b\" }, \"base\": { \"ref\": \"main\" } },\n  \"repository\": { \"full_name\": \"attacker/evil\", \"clone_url\": \"https://github.com/attacker/evil.git\" }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The signature from the previous request is genuine -- but it covers",
+                  "// different bytes. Swapping the repository under a valid-looking",
+                  "// signature is exactly the attack HMAC verification exists to stop.",
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown Endpoint Id Returns 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-GitHub-Event",
+                "value": "pull_request"
+              },
+              {
+                "key": "X-GitHub-Delivery",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "{{webhookSignature}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/github/11111111-2222-3333-4444-555555555555",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "github",
+                "11111111-2222-3333-4444-555555555555"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookPayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('Says nothing about whether it exists elsewhere', () =>",
+                  "  pm.expect(pm.response.json().message).to.eql('No such webhook endpoint'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Endpoints Never Returns the Secret",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhook-endpoints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook-endpoints"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('The secret is not recoverable after creation', () =>",
+                  "  pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get('webhookSecret')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deactivate Endpoint",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhook-endpoints/{{webhookEndpointId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook-endpoints",
+                "{{webhookEndpointId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -3510,6 +3910,36 @@
     },
     {
       "key": "executionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookEndpointId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookSecret",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookPayload",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookSignature",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookDeliveryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookExecutionId",
       "value": "",
       "type": "string"
     }

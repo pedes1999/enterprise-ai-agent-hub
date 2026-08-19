@@ -71,6 +71,25 @@ class AgentExecutionServiceTest {
         verify(repository).save(any(AgentExecution.class));
     }
 
+    /**
+     * trigger_source was hardcoded to "API" from V1 until webhooks needed to
+     * say otherwise. Both halves matter: an unset source must still default,
+     * so no existing call site had to change.
+     */
+    @Test
+    void enqueue_triggerSource_defaultsToApiButCanBeOverridden() {
+        AgentExecution defaulted = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("list files")
+                .build());
+        AgentExecution fromWebhook = service.enqueue(EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                .prompt("a pull request was opened")
+                .triggerSource("WEBHOOK")
+                .build());
+
+        assertThat(defaulted.getTriggerSource()).isEqualTo("API");
+        assertThat(fromWebhook.getTriggerSource()).isEqualTo("WEBHOOK");
+    }
+
     @Test
     void enqueue_llmProvider_reflectsWhateverTheTenantResolvesTo_notAlwaysAnthropic() {
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.LOCAL);

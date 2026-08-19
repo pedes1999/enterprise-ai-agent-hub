@@ -216,6 +216,7 @@ annotation on a method signature can't carry.
 ```mermaid
 stateDiagram-v2
     [*] --> QUEUED: POST /agents/execute
+    [*] --> QUEUED: signed GitHub webhook delivery
     QUEUED --> RUNNING: worker claims it
     QUEUED --> CANCELLED: POST .../cancel
     RUNNING --> SUCCEEDED: answer produced
@@ -253,6 +254,64 @@ That's the intended tradeoff: cancellation exists to stop the expensive case (a 
 multi-round tool loop burning paid calls), and the in-flight provider call itself is not
 interruptible. Where it does bite, it bites hard — a run cancelled before its first round
 stops in ~16ms having spent **zero** tokens.
+
+## Webhook triggers
+
+A `pull_request` event on a wired repository queues an agent run with nobody watching. An
+ADMIN creates an endpoint (`POST /webhook-endpoints`), pastes the returned URL and secret
+into GitHub, and every matching event from then on becomes an ordinary queued execution —
+same validation, same concurrency cap, same worker, same cancellation and live streaming as
+a human-triggered one. Only `trigger_source` and who it runs as differ.
+
+Three problems here are worth spelling out, because they're the ones this route creates that
+no other endpoint has.
+
+**Resolving a tenant before authentication exists.** Every other endpoint gets a tenant for
+free: authenticate, read it off the principal, and `TenantAwareDataSource` has RLS set up
+before the handler runs. A webhook carries no JWT, no API key, no session — only the
+endpoint id in its own URL. So `webhook_endpoints` has a deliberately open `SELECT` policy
+(`USING (true)`), because *discovering* the tenant is the point of the query and it therefore
+cannot itself be tenant-scoped. It's safe on the same grounds `platform_api_keys` has allowed
+an unscoped lookup by hash since `V1`: the thing being matched is an unguessable random
+value, and the row's secret is ciphertext whose key never leaves the application.
+
+That openness has a consequence worth stating plainly: for this one table the *database* is
+not filtering by tenant, so the tenant predicate in `WebhookEndpointRepository` is
+load-bearing security rather than the natural query shape. `webhook_deliveries`, by
+contrast, is written only after the tenant is known and keeps ordinary closed RLS. Verified
+directly against Postgres: with no tenant context set, `webhook_endpoints` returns its rows
+and `webhook_deliveries` returns none of the rows that exist.
+
+The ordering this forces is easy to get wrong. `TenantAwareDataSource` sets the Postgres
+session variable at *connection checkout*, so the lookup and the write cannot share a
+transaction — the connection would already be pinned to an empty tenant. The write half
+lives in a separate bean (`WebhookDeliveryRecorder`) precisely so its transaction begins
+after `TenantContext` is set.
+
+**Authentication is the signature, over the exact bytes.** `WebhookController` takes a
+`byte[]` body, never a mapped DTO: GitHub signs what it sent, and letting Jackson parse and
+re-serialize first would compare the HMAC against different bytes and reject every genuine
+delivery. Comparison is constant-time (`MessageDigest.isEqual`) — a byte-at-a-time compare
+leaks, through timing, how many leading bytes of a guess were right. Nothing logs the secret
+or the expected digest, since the expected digest is as good as the secret for forging one
+request.
+
+**Idempotency, because GitHub redelivers.** Retries and manual redeliveries reuse the same
+`X-GitHub-Delivery` id, so `UNIQUE (endpoint_id, delivery_id)` is what stops one pull
+request billing two agent runs. GitHub sends no timestamp header — unlike Stripe there is no
+signed timestamp to enforce a replay window against — so this uniqueness *is* the replay
+defence, not a nicety. A redelivery returns `200` with the id of the run the **first**
+delivery created, so the caller learns where the work went instead of just being told "no".
+
+**Whose API key pays?** Vendor credentials are per-user with no tenant fallback, and
+`AgentPromptRunner.resolveApiKey()` rejects a null user outright — so an unattended run has
+to name someone. `webhook_endpoints.run_as_user_id` is `NOT NULL` for that reason: creating
+an endpoint is an explicit decision about whose billed usage its runs spend, and the audit
+trail stays honest about it.
+
+Status codes are chosen for how they read in a repository's delivery log: a ping, an ignored
+action, and a redelivery are all successes, because GitHub retries `5xx` and shows `4xx` in
+red — neither is the right prompt for "we deliberately did nothing".
 
 ## Retrieval (RAG)
 
@@ -421,6 +480,8 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | `POST /knowledge-sources/{id}/documents` | ADMIN, DEVELOPER | Multipart upload — extracts, chunks, embeds, stores. Returns the chunk count. |
 | `POST /knowledge-sources/{id}/query` | ADMIN, DEVELOPER | Hybrid-search one source directly, for testing outside an agent run. |
 | `PUT/DELETE /knowledge-sources/{id}/agent-bindings/{slug}` · `GET /knowledge-sources/agent-bindings/{slug}` | ADMIN | Attach, detach, and read which source is bound to an agent. |
+| `POST /webhook-endpoints` · `GET /webhook-endpoints` · `DELETE /webhook-endpoints/{id}` | ADMIN | Wire a GitHub repository to an agent. Create returns the signing secret **once** and the copy-paste delivery URL; the list view never carries it. |
+| `POST /webhooks/github/{endpointId}` | none — HMAC signature | GitHub's delivery target. `202` with the queued execution id, `200 DUPLICATE` for a redelivery, `200 IGNORED` for a ping or an action this endpoint doesn't act on, `401` if the signature doesn't verify, `404` for an unknown or deactivated endpoint. See [Webhook triggers](#webhook-triggers). |
 | `GET /actuator/health` | none | Health check. |
 | `GET /actuator/prometheus` | any | Metrics in Prometheus exposition format: `agent.execution` (count + latency by `status`) and `agent.tool.execution` (by `tool` + `outcome`). Deliberately not public like health — a scrape job authenticates with a platform API key like any other caller. |
 
@@ -435,12 +496,12 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | RAG | Working | Upload, hybrid search, bind to an agent. No document list or delete yet. |
 | Observability | Improved | Execution id in the MDC on every log line beneath a run; `/actuator/prometheus` exposes execution and tool-call metrics (count, latency, outcome). |
 | Live visibility | Working | SSE stream per execution — status changes and tool calls arrive as they happen, DB-polled so it works across instances. |
-| Triggers | **Next** | Human-click only. No schedules, no webhooks — `trigger_source` is still hardcoded. |
+| Triggers | Working | GitHub `pull_request` webhooks run agents unattended — signature-verified, deduplicated, attributed. No schedules yet, and no provider but GitHub. |
 | Frontend tidiness | Gap | `credentials.ts` holds four unrelated concerns in one component. |
 
-**Next up**: scheduled and webhook triggers, which is what turns this from a manual runner
-into automation — `trigger_source` already exists on the row as a hardcoded placeholder
-waiting for exactly this.
+**Next up**: a management UI for webhook endpoints (the API exists, nothing in the Angular
+app calls it yet), then scheduled triggers — the other half of "runs without a human", and
+the one that needs no inbound ingress at all.
 
 **Further out**: a CLI client and GitHub Actions integration; an automated
 security-patching agent (SonarQube finding → LLM patch → verified PR); and the multi-agent

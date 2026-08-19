@@ -65,7 +65,14 @@ public class SecurityConfig {
                 // chain already authorized, so re-authorizing it adds nothing.
                 .shouldFilterAllDispatcherTypes(false)
                 .requestMatchers("/auth/**", "/actuator/health").permitAll()
-                .requestMatchers("/webhooks/**").permitAll() // signature validation happens in the webhook controller itself
+                // Unauthenticated by necessity -- GitHub has no account here
+                // and sends no JWT or API key. Authentication is instead the
+                // HMAC-SHA256 signature over the raw request body, verified
+                // in WebhookIngestService before anything is parsed, read, or
+                // written. That service is also where the tenant gets
+                // resolved (from the endpoint id in the URL), since nothing
+                // upstream can do it for this route.
+                .requestMatchers("/webhooks/**").permitAll()
                 // API docs describe the surface, they don't expose it -- every endpoint
                 // listed here still enforces its own auth when actually called.
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()

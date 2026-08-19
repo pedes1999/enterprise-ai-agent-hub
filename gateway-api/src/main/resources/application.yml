@@ -185,6 +185,13 @@ app:
     poll-interval-ms: ${EXECUTION_STREAM_POLL_INTERVAL_MS:1000}
     timeout: ${EXECUTION_STREAM_TIMEOUT:10m}
     poll-threads: ${EXECUTION_STREAM_POLL_THREADS:4}
+  webhooks:
+    # Only used to build the copy-paste delivery URL returned by
+    # POST /webhook-endpoints -- see WebhookProperties. Set this to whatever
+    # origin GitHub can actually reach (your public hostname, or the smee.io/
+    # ngrok forwarding URL in local development); the default is only right
+    # for a caller running on this machine.
+    public-base-url: ${WEBHOOK_PUBLIC_BASE_URL:http://localhost:8080}
   mail:
     # Must be a sender address verified in the Brevo account above, or
     # Brevo rejects the send outright.
