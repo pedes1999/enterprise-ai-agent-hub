@@ -80,16 +80,27 @@ services:
       CREDENTIAL_LOCAL_KEY: "${CREDENTIAL_LOCAL_KEY:?generate one -- python3 -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())'}"
       SANDBOX_SIDECAR_URL: http://sidecar:8090/
       CORS_ALLOWED_ORIGIN: http://localhost:4200
+      # Server-wide default provider. A tenant can override it for itself via
+      # PUT /tenant-settings (TenantLlmProviderResolver), so this only decides
+      # what a tenant with no preference of its own gets -- but without it in
+      # this list the container could never be pointed at Ollama at all, since
+      # compose passes through nothing it does not name.
+      LLM_PROVIDER: ${LLM_PROVIDER:-ANTHROPIC}
       # "localhost" inside this container means the container itself, not
       # your host machine where Ollama actually runs -- host.docker.internal
       # is Docker Desktop's DNS name for the host. Only relevant if you use
       # the LOCAL provider; harmless otherwise (LlmEngineFactory only reads
       # this for LOCAL).
       LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
-      # Must match a tag actually pulled in Ollama (`ollama list`) -- Ollama
-      # matches tags exactly, "llama3.1" != "llama3.1:8b". A tenant can still
-      # override this per-tenant via preferredModelName regardless.
-      LLM_LOCAL_MODEL_NAME: ${LLM_LOCAL_MODEL_NAME:-llama3.1:8b}
+      # Must match a tag actually pulled in Ollama (`ollama list`) -- tags are
+      # matched exactly, so "llama3.1:8b" only resolves if you pulled that
+      # exact tag. The untagged default below is deliberate: `ollama pull
+      # llama3.1` stores llama3.1:latest, which IS addressable as plain
+      # "llama3.1", so this matches the obvious pull rather than one specific
+      # size. Kept identical to application.yml's default on purpose -- when
+      # these two disagree, whichever file you happen to read is wrong.
+      # A tenant can still override this per-tenant via preferredModelName.
+      LLM_LOCAL_MODEL_NAME: ${LLM_LOCAL_MODEL_NAME:-llama3.1}
       # Optional -- team-invite emails silently have nowhere to go without these.
       BREVO_SMTP_USERNAME: ${BREVO_SMTP_USERNAME:-}
       BREVO_SMTP_KEY: ${BREVO_SMTP_KEY:-}
