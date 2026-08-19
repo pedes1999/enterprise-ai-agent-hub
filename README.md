@@ -398,6 +398,28 @@ provider's error never collects an irrelevant model list. It reaches both the sy
 ping and the error stored on a failed execution row — the async one matters more, since
 that's what gets read out of history hours later.
 
+## Rate limiting
+
+Only the routes reachable without a credential are capped — `/webhooks/**` and `/auth/**`.
+That asymmetry is the point: an authenticated caller is already bounded by things that cost
+real money and are enforced server-side (the concurrency cap, the monthly budget) and is
+identifiable and revocable. An anonymous one is neither, so the request rate has to be the
+ceiling.
+
+Both guarded routes do real work *before* they can reject a caller. `/webhooks/**` verifies
+an HMAC and queries the database — required, since the signature is the only credential —
+and `/auth/**` hashes a password. So `RateLimitFilter` runs **first in the chain**, ahead of
+authentication: a limiter placed after the work it exists to prevent would be decorative.
+Rejections carry `Retry-After`, which GitHub's redelivery honours.
+
+Two limitations, stated rather than hidden. The counters are per-instance, so N replicas
+admit N× the rate — making that exact needs shared state this project doesn't run, and the
+ceiling still stops a flood from being free. And `X-Forwarded-For` is honoured (otherwise
+everyone behind an ingress shares one bucket) but is caller-supplied and spoofable, which is
+why the tracking map is size-capped with LRU eviction — an unbounded one would make the
+limiter itself the exhaustion vector. A deployment behind an ingress that already rate-limits
+should set `RATE_LIMIT_ENABLED=false` rather than run two limiters in series.
+
 ## Retrieval (RAG)
 
 A knowledge source is a tenant-owned collection of uploaded documents. On upload, text is

@@ -8,6 +8,7 @@ import com.enterprisehub.gateway.config.JobWorkerProperties;
 import com.enterprisehub.gateway.config.LlmProperties;
 import com.enterprisehub.gateway.config.MailProperties;
 import com.enterprisehub.gateway.config.SandboxProperties;
+import com.enterprisehub.gateway.config.RateLimitProperties;
 import com.enterprisehub.gateway.config.SecurityProperties;
 import com.enterprisehub.gateway.config.WebhookProperties;
 import org.springframework.boot.SpringApplication;
@@ -52,7 +53,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @EnableConfigurationProperties({SecurityProperties.class, CredentialsProperties.class, LlmProperties.class,
         SandboxProperties.class, ExecutionLimitProperties.class, CorsProperties.class, MailProperties.class,
-        JobWorkerProperties.class, ExecutionStreamProperties.class, WebhookProperties.class})
+        JobWorkerProperties.class, ExecutionStreamProperties.class, WebhookProperties.class,
+        RateLimitProperties.class})
 public class GatewayApplication {
 
     public static void main(String[] args) {

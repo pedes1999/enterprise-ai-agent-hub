@@ -185,6 +185,24 @@ app:
     poll-interval-ms: ${EXECUTION_STREAM_POLL_INTERVAL_MS:1000}
     timeout: ${EXECUTION_STREAM_TIMEOUT:10m}
     poll-threads: ${EXECUTION_STREAM_POLL_THREADS:4}
+  rate-limit:
+    # Guards only the routes reachable without a credential. An authenticated
+    # caller is already bounded by the concurrency cap and the monthly budget,
+    # and is identifiable and revocable; an anonymous one is neither.
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    # /webhooks/** verifies an HMAC and queries the database before it can
+    # reject a bogus caller; /auth/** hashes a password. Both do real work
+    # before they can say no, which is what makes them worth capping.
+    path-prefixes: ${RATE_LIMIT_PATH_PREFIXES:/webhooks/,/auth/}
+    # Generous next to real traffic: GitHub sends one delivery per event, and
+    # a human logs in a handful of times. It is set to make a flood cost
+    # something, not to police normal use.
+    requests: ${RATE_LIMIT_REQUESTS:60}
+    window: ${RATE_LIMIT_WINDOW:1m}
+    # Bounds the limiter's own memory. Caller-supplied X-Forwarded-For is
+    # spoofable, so without a cap the tracking map is itself the exhaustion
+    # vector -- least-recently-seen clients are evicted past this.
+    max-tracked-clients: ${RATE_LIMIT_MAX_TRACKED_CLIENTS:10000}
   webhooks:
     # Only used to build the copy-paste delivery URL returned by
     # POST /webhook-endpoints -- see WebhookProperties. Set this to whatever

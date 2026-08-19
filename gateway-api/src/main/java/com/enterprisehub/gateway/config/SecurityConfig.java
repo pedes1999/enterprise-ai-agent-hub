@@ -1,6 +1,7 @@
 package com.enterprisehub.gateway.config;
 
 import com.enterprisehub.gateway.security.JwtAuthFilter;
+import com.enterprisehub.gateway.security.RateLimitFilter;
 import com.enterprisehub.gateway.security.PasswordChangeRequiredFilter;
 import com.enterprisehub.gateway.security.TenantResolvingFilter;
 import org.springframework.context.annotation.Bean;
@@ -35,13 +36,16 @@ public class SecurityConfig {
     private final TenantResolvingFilter tenantResolvingFilter;
     private final JwtAuthFilter jwtAuthFilter;
     private final PasswordChangeRequiredFilter passwordChangeRequiredFilter;
+    private final RateLimitFilter rateLimitFilter;
     private final CorsProperties corsProperties;
 
     public SecurityConfig(TenantResolvingFilter tenantResolvingFilter, JwtAuthFilter jwtAuthFilter,
-                           PasswordChangeRequiredFilter passwordChangeRequiredFilter, CorsProperties corsProperties) {
+                           PasswordChangeRequiredFilter passwordChangeRequiredFilter, CorsProperties corsProperties,
+                           RateLimitFilter rateLimitFilter) {
         this.tenantResolvingFilter = tenantResolvingFilter;
         this.jwtAuthFilter = jwtAuthFilter;
         this.passwordChangeRequiredFilter = passwordChangeRequiredFilter;
+        this.rateLimitFilter = rateLimitFilter;
         this.corsProperties = corsProperties;
     }
 
@@ -93,7 +97,13 @@ public class SecurityConfig {
         // PasswordChangeRequiredFilter runs right after it -- fail-fast
         // before tenant resolution or any handler code runs at all, if this
         // caller still needs to set their own password (see its javadoc).
-        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        // FIRST in the chain, ahead of authentication. The unauthenticated
+        // routes it guards do real work before they can reject a caller --
+        // /webhooks/** verifies an HMAC and hits the database, /auth/**
+        // hashes a password -- so a limiter placed after any of that would be
+        // protecting nothing. See RateLimitFilter.
+        http.addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterAfter(jwtAuthFilter, RateLimitFilter.class);
         http.addFilterAfter(passwordChangeRequiredFilter, JwtAuthFilter.class);
         http.addFilterAfter(tenantResolvingFilter, UsernamePasswordAuthenticationFilter.class);
 

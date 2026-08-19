@@ -22,3 +22,13 @@ app:
     # real -- never reuse this value (or copy this pattern) for an actual
     # deployment's CREDENTIAL_LOCAL_KEY.
     local-key: Pe2FHA6ZfpQW7AsD8eraRLuBv7gImE4fYZGA+cL/dlw=
+
+  rate-limit:
+    # Left ON so the filter is genuinely in the chain for @SpringBootTest, but
+    # with a ceiling no test run can reach. Integration tests deliberately
+    # burst the unauthenticated routes -- registering a tenant per test from
+    # one address -- and a production-shaped limit would turn that into
+    # flakiness that grows with the suite rather than a meaningful signal.
+    # The filter's actual behaviour is pinned by RateLimitFilterTest, which
+    # drives it directly at real limits.
+    requests: 1000000
