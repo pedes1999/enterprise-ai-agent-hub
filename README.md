@@ -337,8 +337,15 @@ on read would silently re-price last quarter every time a vendor changed a rate.
 means a scheduled price change needs no cutover job: insert next month's rate today, and
 runs keep costing the old one until that instant passes.
 
+**A self-hosted run is free; an unpriced one is unknown.** These are different answers and
+the report says so. Ollama, LM Studio, and vLLM produce no vendor invoice, so a `LOCAL` run
+is costed at an honest `$0.00` and a tenant running entirely on local models sees a complete
+total with nothing flagged. (That's vendor spend, not total cost of ownership — the
+electricity is real, it just isn't billed through this system.) This also can't be solved by
+seeding prices: a local model name is whatever the operator happened to pull.
+
 **An unpriced run is never a free run.** This is the invariant the whole feature rests on.
-When no `model_pricing` row covers a model, `cost_usd` stays `NULL` — never `0`. The two are
+When no `model_pricing` row covers a *hosted* model, `cost_usd` stays `NULL` — never `0`. The two are
 indistinguishable inside a `SUM()`, and only one of them is true: a tenant running entirely
 on an unpriced model would otherwise show `$0.00` forever and sail through every budget check
 while spending real money. `GET /agents/executions/spend` reports the unpriced count

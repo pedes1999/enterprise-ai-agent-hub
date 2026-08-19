@@ -344,7 +344,8 @@ public class AgentExecutionService {
      */
     private void applyCost(AgentExecution execution) {
         ExecutionCostCalculator.ExecutionCost cost = costCalculator.calculate(
-                execution.getModelName(), execution.getInputTokens(), execution.getOutputTokens(),
+                execution.getLlmProvider(), execution.getModelName(),
+                execution.getInputTokens(), execution.getOutputTokens(),
                 execution.getCompletedAt());
         execution.setCostUsd(cost.costUsd());
     }

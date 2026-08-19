@@ -52,7 +52,7 @@ class ExecutionCostCalculatorTest {
 
         // 1,000,000 in + 100,000 out = $3.00 + $1.50 = $4.50
         ExecutionCostCalculator.ExecutionCost cost =
-                calculator.calculate("claude-sonnet-4-5-20250929", 1_000_000, 100_000, now);
+                calculator.calculate("ANTHROPIC", "claude-sonnet-4-5-20250929", 1_000_000, 100_000, now);
 
         assertThat(cost.isPriced()).isTrue();
         assertThat(cost.costUsd()).isEqualByComparingTo("4.50");
@@ -66,8 +66,8 @@ class ExecutionCostCalculatorTest {
         // split two ways -- the costs must differ.
         priced("claude-opus-5", "5", "25");
 
-        BigDecimal inputHeavy = calculator.calculate("claude-opus-5", 190_000, 10_000, now).costUsd();
-        BigDecimal outputHeavy = calculator.calculate("claude-opus-5", 10_000, 190_000, now).costUsd();
+        BigDecimal inputHeavy = calculator.calculate("ANTHROPIC", "claude-opus-5", 190_000, 10_000, now).costUsd();
+        BigDecimal outputHeavy = calculator.calculate("ANTHROPIC", "claude-opus-5", 10_000, 190_000, now).costUsd();
 
         assertThat(inputHeavy).isEqualByComparingTo("1.20");   // 0.95 + 0.25
         assertThat(outputHeavy).isEqualByComparingTo("4.80");  // 0.05 + 4.75
@@ -81,7 +81,7 @@ class ExecutionCostCalculatorTest {
         // thousands of them would show no spend at all.
         priced("claude-haiku-4-5-20251001", "1", "5");
 
-        BigDecimal cost = calculator.calculate("claude-haiku-4-5-20251001", 1_000, 200, now).costUsd();
+        BigDecimal cost = calculator.calculate("ANTHROPIC", "claude-haiku-4-5-20251001", 1_000, 200, now).costUsd();
 
         // 1000/1M * $1 = $0.001 ; 200/1M * $5 = $0.001 => $0.002
         assertThat(cost).isEqualByComparingTo("0.002");
@@ -92,7 +92,7 @@ class ExecutionCostCalculatorTest {
     void unknownModelIsUnpricedAndNeverFree() {
         when(pricingRepository.findEffectivePrice(any(), any())).thenReturn(Optional.empty());
 
-        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("gpt-4o-mini", 50_000, 5_000, now);
+        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("ANTHROPIC", "gpt-4o-mini", 50_000, 5_000, now);
 
         assertThat(cost.outcome()).isEqualTo(ExecutionCostCalculator.Outcome.NO_PRICE);
         // The assertion this whole class exists for: null, not ZERO. A zero
@@ -104,7 +104,7 @@ class ExecutionCostCalculatorTest {
 
     @Test
     void runThatRecordedNoUsageIsUnpricedRatherThanZero() {
-        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("claude-opus-5", null, null, now);
+        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("ANTHROPIC", "claude-opus-5", null, null, now);
 
         assertThat(cost.outcome()).isEqualTo(ExecutionCostCalculator.Outcome.NO_USAGE);
         assertThat(cost.costUsd()).isNull();
@@ -113,7 +113,7 @@ class ExecutionCostCalculatorTest {
     @Test
     void executionWithNoRecordedModelIsUnpriced() {
         // Rows predating V35 have no model_name, so they cannot be costed.
-        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate(null, 1_000, 1_000, now);
+        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("ANTHROPIC", null, 1_000, 1_000, now);
 
         assertThat(cost.outcome()).isEqualTo(ExecutionCostCalculator.Outcome.NO_PRICE);
         assertThat(cost.costUsd()).isNull();
@@ -125,7 +125,7 @@ class ExecutionCostCalculatorTest {
         // tokens' worth of billing -- distinct from reporting nothing at all.
         priced("claude-opus-5", "5", "25");
 
-        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("claude-opus-5", 200_000, null, now);
+        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("ANTHROPIC", "claude-opus-5", 200_000, null, now);
 
         assertThat(cost.isPriced()).isTrue();
         assertThat(cost.costUsd()).isEqualByComparingTo("1.00");
@@ -139,8 +139,43 @@ class ExecutionCostCalculatorTest {
         priced("claude-sonnet-5", "2", "10");
         Instant completedAt = Instant.parse("2026-08-01T09:30:00Z");
 
-        calculator.calculate("claude-sonnet-5", 1_000_000, 0, completedAt);
+        calculator.calculate("ANTHROPIC", "claude-sonnet-5", 1_000_000, 0, completedAt);
 
         org.mockito.Mockito.verify(pricingRepository).findEffectivePrice("claude-sonnet-5", completedAt);
+    }
+
+    @Test
+    void selfHostedRunsAreFreeRatherThanUnknown() {
+        // Ollama / LM Studio / vLLM: no vendor invoice exists, so the honest
+        // answer is $0.00 and the total is COMPLETE. Reporting these as
+        // unpriced would imply missing data and bury a real gap elsewhere in
+        // a wall of false positives.
+        ExecutionCostCalculator.ExecutionCost cost =
+                calculator.calculate("LOCAL", "qwen2.5-coder:7b", 4_673, 102, now);
+
+        assertThat(cost.outcome()).isEqualTo(ExecutionCostCalculator.Outcome.FREE_SELF_HOSTED);
+        assertThat(cost.costUsd()).isEqualByComparingTo("0");
+        assertThat(cost.isPriced()).isTrue();
+    }
+
+    @Test
+    void selfHostedNeedsNoPricingRowForWhateverModelWasPulled() {
+        // A LOCAL model name is whatever the operator pulled, so it could
+        // never be seeded by name -- the price list is never consulted.
+        calculator.calculate("LOCAL", "some-model-nobody-has-heard-of:latest", 100, 100, now);
+
+        org.mockito.Mockito.verifyNoInteractions(pricingRepository);
+    }
+
+    @Test
+    void aHostedModelWithNoPriceIsStillUnknownNotFree() {
+        // The LOCAL carve-out must not leak into hosted providers: an
+        // unpriced OpenAI model is still unknown, not free.
+        when(pricingRepository.findEffectivePrice(any(), any())).thenReturn(Optional.empty());
+
+        ExecutionCostCalculator.ExecutionCost cost = calculator.calculate("OPENAI", "gpt-4o-mini", 1_000, 1_000, now);
+
+        assertThat(cost.outcome()).isEqualTo(ExecutionCostCalculator.Outcome.NO_PRICE);
+        assertThat(cost.costUsd()).isNull();
     }
 }

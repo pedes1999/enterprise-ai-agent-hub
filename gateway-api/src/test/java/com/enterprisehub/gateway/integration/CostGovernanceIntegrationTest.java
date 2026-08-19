@@ -117,11 +117,16 @@ class CostGovernanceIntegrationTest {
      * never starts.
      */
     private void recordCompletedRun(UUID tenantId, String modelName, int inputTokens, int outputTokens) {
+        recordCompletedRun(tenantId, "ANTHROPIC", modelName, inputTokens, outputTokens);
+    }
+
+    private void recordCompletedRun(UUID tenantId, String provider, String modelName, int inputTokens, int outputTokens) {
         TenantContext.set(tenantId.toString());
         try {
             AgentExecution execution = new AgentExecution();
             execution.setTenantId(tenantId);
             execution.setAgentType("general-assistant");
+            execution.setLlmProvider(provider);
             execution.setTriggerSource("API");
             execution.setPrompt("say hello");
             execution.setStatus("SUCCEEDED");
@@ -132,7 +137,7 @@ class CostGovernanceIntegrationTest {
             execution.setStartedAt(Instant.now());
             execution.setCompletedAt(Instant.now());
             execution.setCostUsd(costCalculator
-                    .calculate(modelName, inputTokens, outputTokens, execution.getCompletedAt())
+                    .calculate(provider, modelName, inputTokens, outputTokens, execution.getCompletedAt())
                     .costUsd());
             executionRepository.save(execution);
         } finally {
@@ -288,5 +293,19 @@ class CostGovernanceIntegrationTest {
                 String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void selfHostedRunsReportAsFreeWithNothingFlaggedAsUnpriced() {
+        // An all-Ollama tenant should see a complete $0.00, not a wall of
+        // "unpriced" implying we lost their data.
+        AuthResponse tenant = registerTenant("cost-local");
+        UUID tenantId = UUID.fromString(tenant.tenantId());
+
+        recordCompletedRun(tenantId, "LOCAL", "qwen2.5-coder:7b", 4_673, 102);
+
+        TenantSpendSummary summary = spend(tenant);
+        assertThat(summary.spendUsd()).isEqualByComparingTo("0");
+        assertThat(summary.unpricedExecutions()).isZero();
     }
 }

@@ -57,7 +57,7 @@ class AgentExecutionServiceTest {
         // status/token transitions, not on money. A run that cannot be priced
         // stores a null cost (see AgentExecution.costUsd), which is exactly
         // what every existing assertion here already expects.
-        when(costCalculator.calculate(any(), any(), any(), any()))
+        when(costCalculator.calculate(any(), any(), any(), any(), any()))
                 .thenReturn(ExecutionCostCalculator.ExecutionCost.unpriced(ExecutionCostCalculator.Outcome.NO_USAGE));
         service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5),
                 tenantLlmProviderResolver, meterRegistry, costCalculator, budgetService);

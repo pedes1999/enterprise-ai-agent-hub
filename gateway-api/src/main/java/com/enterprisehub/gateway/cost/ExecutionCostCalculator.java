@@ -28,6 +28,12 @@ import java.util.Optional;
  * spending real money. NULL propagates as "unknown" and is reported as
  * unpriced; zero would quietly assert something false.
  *
+ * The mirror of that rule matters just as much: a genuinely free run must not
+ * be reported as unknown. Self-hosted inference (LlmProvider.LOCAL -- Ollama
+ * and friends) has no vendor invoice, so it is costed at an honest $0.00 and
+ * a tenant running entirely on it sees a complete total with nothing flagged,
+ * rather than a wall of "unpriced" that implies missing data.
+ *
  * BigDecimal throughout, never double -- see ModelPricing.
  */
 @Component
@@ -47,6 +53,9 @@ public class ExecutionCostCalculator {
      */
     private static final int COST_SCALE = 6;
 
+    /** LlmProvider.LOCAL -- any OpenAI-compatible server on the operator's own machine. */
+    private static final String LOCAL_PROVIDER = "LOCAL";
+
     private final ModelPricingRepository pricingRepository;
 
     public ExecutionCostCalculator(ModelPricingRepository pricingRepository) {
@@ -56,6 +65,12 @@ public class ExecutionCostCalculator {
     public enum Outcome {
         /** Priced successfully -- costUsd is non-null. */
         PRICED,
+        /**
+         * A self-hosted model (Ollama, LM Studio, vLLM). Genuinely free, and
+         * costUsd is an honest 0.00 rather than null -- there is no vendor to
+         * bill, so this is a known cost, not a missing one.
+         */
+        FREE_SELF_HOSTED,
         /** The run reported no token usage at all, so there is nothing to price. */
         NO_USAGE,
         /** No model_pricing row covers this model at this date. NOT free -- just unknown. */
@@ -63,7 +78,10 @@ public class ExecutionCostCalculator {
     }
 
     /**
-     * costUsd is non-null if and only if outcome is {@link Outcome#PRICED}.
+     * costUsd is non-null exactly when the run could be costed -- i.e. for
+     * {@link Outcome#PRICED} and {@link Outcome#FREE_SELF_HOSTED}. It is null
+     * for the two unknown cases, and those are the only ones a report must
+     * flag.
      */
     public record ExecutionCost(Outcome outcome, BigDecimal costUsd) {
 
@@ -71,22 +89,44 @@ public class ExecutionCostCalculator {
             return new ExecutionCost(Outcome.PRICED, costUsd);
         }
 
+        /** Self-hosted inference: known to cost nothing, as opposed to unknown. */
+        public static ExecutionCost free() {
+            return new ExecutionCost(Outcome.FREE_SELF_HOSTED, BigDecimal.ZERO);
+        }
+
         public static ExecutionCost unpriced(Outcome outcome) {
             return new ExecutionCost(outcome, null);
         }
 
         public boolean isPriced() {
-            return outcome == Outcome.PRICED;
+            return outcome == Outcome.PRICED || outcome == Outcome.FREE_SELF_HOSTED;
         }
     }
 
     /**
+     * @param provider     the resolved LlmProvider (agent_executions.llm_provider)
      * @param modelName    the model that actually ran (agent_executions.model_name)
      * @param inputTokens  may be null -- treated as 0 provided the other side is present
      * @param outputTokens may be null -- likewise
      * @param at           when the run completed; picks the price in effect then
      */
-    public ExecutionCost calculate(String modelName, Integer inputTokens, Integer outputTokens, Instant at) {
+    public ExecutionCost calculate(String provider, String modelName, Integer inputTokens, Integer outputTokens, Instant at) {
+        // Self-hosted inference costs zero, and that is a FACT rather than a
+        // gap in the price list -- there is no vendor invoice for a model
+        // running on your own hardware. Checked before everything below,
+        // because a LOCAL model name is whatever the operator happened to
+        // pull ("qwen2.5-coder:7b", "llama3.1:8b", ...) and could never be
+        // seeded by name. Without this branch an all-Ollama tenant reports
+        // every run as unpriced -- technically "unknown", but misleading,
+        // since the honest answer is $0.00 and the total really is complete.
+        //
+        // Note this is vendor spend, not total cost of ownership: the
+        // electricity and the hardware are real, they are simply not billed
+        // through this system and are not what a budget here governs.
+        if (LOCAL_PROVIDER.equals(provider)) {
+            return ExecutionCost.free();
+        }
+
         // No usage recorded at all. Distinct from a genuine zero-token run
         // (which cannot happen -- a request that reached the model always
         // consumed input tokens), so this really does mean "the provider
