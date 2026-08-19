@@ -99,6 +99,14 @@ public class AgentJobWorker {
         log.info("Starting agent execution: agent={} tenant={} repository={}",
                 job.getAgentType(), job.getTenantId(), job.getRepositoryUrl());
         try {
+            // Stamp the model BEFORE the run, not after: this is what makes
+            // the run costable (pricing is per model -- see V35), and doing
+            // it up front means a crash, a reap, or a cancellation mid-run
+            // still leaves a row that can be attributed rather than an
+            // unpriceable orphan.
+            executionService.recordResolvedModel(job.getId(),
+                    agentPromptRunner.resolveModelName(job.getTenantId(), job.getAgentType()));
+
             ToolCallingChatEngine.ToolChatResult result = agentPromptRunner.run(
                     AgentRunRequest.of(job.getTenantId(), job.getTriggeredBy(), job.getId().toString(), job.getAgentType())
                             .prompt(job.getPrompt())

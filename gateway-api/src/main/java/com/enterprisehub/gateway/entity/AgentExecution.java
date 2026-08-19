@@ -112,6 +112,37 @@ public class AgentExecution {
     @Column(name = "total_tokens")
     private Integer totalTokens;
 
+    /**
+     * The model that actually ran -- resolved per execution by
+     * AgentPromptRunner (the agent definition's preferred model, else the
+     * tenant's, else the server default), so it is knowable only at run
+     * time, not at enqueue time. Stamped by AgentJobWorker before the run
+     * starts rather than after it, so a crash mid-run still leaves an
+     * attributable row.
+     *
+     * Load-bearing for cost, not decorative: pricing is per MODEL, and
+     * llmProvider above cannot stand in for it -- claude-haiku-4-5 and
+     * claude-opus-5 are both ANTHROPIC and differ 25x on output tokens.
+     * Null on rows predating V35.
+     */
+    @Column(name = "model_name")
+    private String modelName;
+
+    /**
+     * What this run cost in USD, at the price in effect when it completed
+     * (see ModelPricing on why the price is captured rather than looked up
+     * on read).
+     *
+     * Null means UNPRICED, which is emphatically not zero -- either the run
+     * recorded no token usage, or no model_pricing row covers its model.
+     * Anything that sums this column must treat null as unknown and report
+     * it (see AgentExecutionRepository.countUnpricedSince); coalescing it to
+     * zero would let a tenant on an unpriced model show no spend forever
+     * while spending real money.
+     */
+    @Column(name = "cost_usd")
+    private java.math.BigDecimal costUsd;
+
     @Column(name = "started_at")
     private Instant startedAt;
 

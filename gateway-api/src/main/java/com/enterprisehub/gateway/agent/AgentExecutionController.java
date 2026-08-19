@@ -5,6 +5,7 @@ import com.enterprisehub.dto.AgentDefinitionSummary;
 import com.enterprisehub.dto.AgentExecutionAccepted;
 import com.enterprisehub.dto.AgentExecutionStatusResponse;
 import com.enterprisehub.dto.AgentTokenUsageStats;
+import com.enterprisehub.dto.TenantSpendSummary;
 import com.enterprisehub.dto.ExecutionUsage;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.dto.TriggerAgentExecutionRequest;
@@ -47,13 +48,16 @@ public class AgentExecutionController {
     private final AgentDefinitionService agentDefinitionService;
     private final AgentExecutionResponseMapper responseMapper;
     private final ExecutionStreamService executionStreamService;
+    private final com.enterprisehub.gateway.cost.TenantBudgetService budgetService;
 
     public AgentExecutionController(AgentExecutionService executionService, AgentDefinitionService agentDefinitionService,
-                                     AgentExecutionResponseMapper responseMapper, ExecutionStreamService executionStreamService) {
+                                     AgentExecutionResponseMapper responseMapper, ExecutionStreamService executionStreamService,
+                                     com.enterprisehub.gateway.cost.TenantBudgetService budgetService) {
         this.executionService = executionService;
         this.agentDefinitionService = agentDefinitionService;
         this.responseMapper = responseMapper;
         this.executionStreamService = executionStreamService;
+        this.budgetService = budgetService;
     }
 
     @PostMapping("/execute")
@@ -119,6 +123,24 @@ public class AgentExecutionController {
     public ResponseEntity<AgentTokenUsageStats> getTokenUsageStats(@AuthenticationPrincipal PlatformPrincipal principal,
                                                                       @RequestParam String agentSlug) {
         return ResponseEntity.ok(executionService.getTokenUsageStats(UUID.fromString(principal.tenantId()), agentSlug));
+    }
+
+    /**
+     * What this tenant has spent this billing period, against what they are
+     * allowed to spend, broken down by agent.
+     *
+     * Readable by every role, not ADMIN-only: a developer about to trigger
+     * an expensive run benefits from seeing the remaining budget, the same
+     * reasoning /executions/usage applies to the concurrency cap. CHANGING
+     * the budget is ADMIN-only and lives on /tenant-settings.
+     *
+     * Another literal segment ahead of {id} -- see getUsage() on the routing
+     * specificity this relies on.
+     */
+    @GetMapping("/executions/spend")
+    @PreAuthorize("hasAnyRole('ADMIN','DEVELOPER','READONLY')")
+    public ResponseEntity<TenantSpendSummary> getSpend(@AuthenticationPrincipal PlatformPrincipal principal) {
+        return ResponseEntity.ok(budgetService.summarize(UUID.fromString(principal.tenantId())));
     }
 
     @GetMapping("/executions/{id}")

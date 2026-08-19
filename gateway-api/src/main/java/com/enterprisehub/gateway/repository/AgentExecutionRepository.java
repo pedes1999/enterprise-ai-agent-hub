@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -127,4 +128,47 @@ public interface AgentExecutionRepository extends JpaRepository<AgentExecution, 
     @Query("select count(e), min(e.totalTokens), avg(e.totalTokens), max(e.totalTokens) "
             + "from AgentExecution e where e.tenantId = :tenantId and e.agentType = :agentSlug and e.totalTokens is not null")
     Object[] tokenUsageStatsRaw(UUID tenantId, String agentSlug);
+
+    /**
+     * This tenant's total priced spend since {@code since} -- the figure the
+     * monthly budget is checked against, so it runs on the enqueue path of
+     * every execution (idx_agent_executions_tenant_cost in V35 exists for it).
+     *
+     * Returns null, not zero, when no priced execution matches: SUM() over an
+     * empty set is SQL NULL. Callers coalesce deliberately at the call site
+     * rather than here, because "no spend yet" and "spend we could not price"
+     * are different states and only the first is honestly zero -- see
+     * countUnpricedSince().
+     *
+     * Filters on completedAt, not createdAt: an execution is billed when it
+     * finishes, and a run queued on the 31st that completes on the 1st
+     * belongs to the month it actually consumed tokens in.
+     */
+    @Query("select sum(e.costUsd) from AgentExecution e "
+            + "where e.tenantId = :tenantId and e.completedAt >= :since and e.costUsd is not null")
+    BigDecimal sumCostSince(UUID tenantId, Instant since);
+
+    /**
+     * How many completed executions in the window could NOT be priced. This
+     * is the honesty check on the number above: a tenant whose spend reads
+     * $4.00 against a $50 budget looks comfortable, and looks entirely
+     * different if 900 of their runs are unpriced. Surfaced in the spend
+     * report rather than swallowed, so nobody reads a partial total as a
+     * complete one.
+     */
+    @Query("select count(e) from AgentExecution e "
+            + "where e.tenantId = :tenantId and e.completedAt >= :since and e.costUsd is null "
+            + "and e.status in ('SUCCEEDED', 'FAILED')")
+    long countUnpricedSince(UUID tenantId, Instant since);
+
+    /**
+     * Spend broken down by agent, newest window first -- "which agent is
+     * costing us the money", the question a budget alert immediately raises.
+     * Rows are (agentSlug, executionCount, totalCostUsd, totalTokens); the
+     * cost and token sums are null for an agent whose runs were all unpriced.
+     */
+    @Query("select e.agentType, count(e), sum(e.costUsd), sum(e.totalTokens) from AgentExecution e "
+            + "where e.tenantId = :tenantId and e.completedAt >= :since "
+            + "group by e.agentType order by sum(e.costUsd) desc nulls last")
+    List<Object[]> spendByAgentSince(UUID tenantId, Instant since);
 }

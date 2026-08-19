@@ -91,7 +91,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "LOCAL")).thenReturn(true);
 
-        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest("local", null, null));
+        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest("local", null, null, null));
 
         assertThat(response.preferredLlmProvider()).isEqualTo("LOCAL");
         assertThat(tenant.getPreferredLlmProvider()).isEqualTo("LOCAL");
@@ -105,7 +105,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of());
 
-        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest(null, null, null));
+        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest(null, null, null, null));
 
         assertThat(response.preferredLlmProvider()).isNull();
         assertThat(tenant.getPreferredLlmProvider()).isNull();
@@ -118,7 +118,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of());
 
-        service.update(tenantId, new UpdateTenantSettingsRequest("  ", null, null));
+        service.update(tenantId, new UpdateTenantSettingsRequest("  ", null, null, null));
 
         assertThat(tenant.getPreferredLlmProvider()).isNull();
     }
@@ -127,7 +127,7 @@ class TenantSettingsServiceTest {
     void update_unparseableProvider_throwsBadRequest_doesNotSave() {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
 
-        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("COHERE", null, null)))
+        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("COHERE", null, null, null)))
                 .isInstanceOf(TenantSettingsException.class)
                 .satisfies(e -> assertThat(((TenantSettingsException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
         verify(tenantRepository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
@@ -138,7 +138,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
         when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "LOCAL")).thenReturn(false);
 
-        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("LOCAL", null, null)))
+        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("LOCAL", null, null, null)))
                 .isInstanceOf(TenantSettingsException.class)
                 .hasMessageContaining("PUT /vendor-credentials")
                 .satisfies(e -> assertThat(((TenantSettingsException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -151,7 +151,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of());
 
-        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest(null, "claude-opus-4-1-20250805", null));
+        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest(null, "claude-opus-4-1-20250805", null, null));
 
         assertThat(response.preferredModelName()).isEqualTo("claude-opus-4-1-20250805");
         assertThat(tenant.getPreferredModelName()).isEqualTo("claude-opus-4-1-20250805");
@@ -164,7 +164,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of());
 
-        service.update(tenantId, new UpdateTenantSettingsRequest(null, "  ", null));
+        service.update(tenantId, new UpdateTenantSettingsRequest(null, "  ", null, null));
 
         assertThat(tenant.getPreferredModelName()).isNull();
     }
@@ -174,7 +174,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
         when(vendorCredentialRepository.existsByTenantIdAndProviderAndActiveTrue(tenantId, "LOCAL")).thenReturn(false);
 
-        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("LOCAL", null, null)))
+        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest("LOCAL", null, null, null)))
                 .isInstanceOf(TenantSettingsException.class)
                 .satisfies(e -> assertThat(((TenantSettingsException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
@@ -185,7 +185,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of());
 
-        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest(null, null, 50_000));
+        TenantSettingsResponse response = service.update(tenantId, new UpdateTenantSettingsRequest(null, null, 50_000, null));
 
         assertThat(response.maxTokensPerExecution()).isEqualTo(50_000);
         assertThat(tenant.getMaxTokensPerExecution()).isEqualTo(50_000);
@@ -198,7 +198,7 @@ class TenantSettingsServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(vendorCredentialRepository.findByTenantId(tenantId)).thenReturn(List.of());
 
-        service.update(tenantId, new UpdateTenantSettingsRequest(null, null, null));
+        service.update(tenantId, new UpdateTenantSettingsRequest(null, null, null, null));
 
         assertThat(tenant.getMaxTokensPerExecution()).isNull();
     }
@@ -207,10 +207,10 @@ class TenantSettingsServiceTest {
     void update_zeroOrNegativeMaxTokens_throwsBadRequest_doesNotSave() {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant()));
 
-        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest(null, null, 0)))
+        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest(null, null, 0, null)))
                 .isInstanceOf(TenantSettingsException.class)
                 .satisfies(e -> assertThat(((TenantSettingsException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
-        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest(null, null, -1)))
+        assertThatThrownBy(() -> service.update(tenantId, new UpdateTenantSettingsRequest(null, null, -1, null)))
                 .isInstanceOf(TenantSettingsException.class);
         verify(tenantRepository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
     }

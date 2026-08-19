@@ -3,6 +3,8 @@ package com.enterprisehub.gateway.agent;
 import com.enterprisehub.core.llm.LlmProvider;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
+import com.enterprisehub.gateway.cost.ExecutionCostCalculator;
+import com.enterprisehub.gateway.cost.TenantBudgetService;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
 import com.enterprisehub.gateway.entity.ToolExecution;
@@ -37,6 +39,8 @@ class AgentExecutionServiceTest {
     private TenantLlmProviderResolver tenantLlmProviderResolver;
     private SimpleMeterRegistry meterRegistry;
     private AgentExecutionService service;
+    private ExecutionCostCalculator costCalculator;
+    private TenantBudgetService budgetService;
     private final UUID tenantId = UUID.randomUUID();
 
     @BeforeEach
@@ -47,8 +51,16 @@ class AgentExecutionServiceTest {
         tenantLlmProviderResolver = mock(TenantLlmProviderResolver.class);
         meterRegistry = new SimpleMeterRegistry();
         when(tenantLlmProviderResolver.resolve(any())).thenReturn(LlmProvider.ANTHROPIC);
+        costCalculator = mock(ExecutionCostCalculator.class);
+        budgetService = mock(TenantBudgetService.class);
+        // Unpriced by default: these tests predate cost tracking and assert on
+        // status/token transitions, not on money. A run that cannot be priced
+        // stores a null cost (see AgentExecution.costUsd), which is exactly
+        // what every existing assertion here already expects.
+        when(costCalculator.calculate(any(), any(), any(), any()))
+                .thenReturn(ExecutionCostCalculator.ExecutionCost.unpriced(ExecutionCostCalculator.Outcome.NO_USAGE));
         service = new AgentExecutionService(repository, agentDefinitionRepository, toolExecutionRepository, new ExecutionLimitProperties(5),
-                tenantLlmProviderResolver, meterRegistry);
+                tenantLlmProviderResolver, meterRegistry, costCalculator, budgetService);
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentDefinitionRepository.findBySlugAndActiveTrue("coding-agent"))
                 .thenReturn(Optional.of(new AgentDefinition()));
@@ -766,5 +778,35 @@ class AgentExecutionServiceTest {
         when(repository.findStaleRunning(any(Instant.class))).thenReturn(List.of());
 
         assertThat(service.reapStaleRunning(Duration.ofMinutes(5))).isZero();
+    }
+
+    @Test
+    void enqueue_rejectsWhenTheTenantHasSpentItsMonthlyBudget() {
+        // The budget lives behind the same chokepoint as the concurrency cap
+        // so no entry point can bypass it -- this pins that enqueue() really
+        // does consult it, rather than only the API layer doing so.
+        org.mockito.Mockito.doThrow(new com.enterprisehub.gateway.cost.BudgetExceededException("over budget"))
+                .when(budgetService).requireWithinBudget(tenantId);
+
+        assertThatThrownBy(() -> service.enqueue(
+                EnqueueExecutionCommand.forAgent(tenantId, "coding-agent").prompt("do a thing").build()))
+                .isInstanceOf(com.enterprisehub.gateway.cost.BudgetExceededException.class);
+
+        // Nothing queued -- the run is refused before a row exists, so a
+        // rejected execution never occupies a concurrency slot either.
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void enqueue_checksTheBudgetOnEveryTriggerSourceIncludingWebhooks() {
+        org.mockito.Mockito.doThrow(new com.enterprisehub.gateway.cost.BudgetExceededException("over budget"))
+                .when(budgetService).requireWithinBudget(tenantId);
+
+        assertThatThrownBy(() -> service.enqueue(
+                EnqueueExecutionCommand.forAgent(tenantId, "coding-agent")
+                        .prompt("a pull request was opened")
+                        .triggerSource("WEBHOOK")
+                        .build()))
+                .isInstanceOf(com.enterprisehub.gateway.cost.BudgetExceededException.class);
     }
 }

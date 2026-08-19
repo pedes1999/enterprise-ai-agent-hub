@@ -9,10 +9,16 @@ package com.enterprisehub.dto;
  * null maxTokensPerExecution clears that override too, falling back to
  * app.llm.max-tokens-per-execution -- a non-null value must be positive,
  * see TenantSettingsService.
+ *
+ * null monthlyBudgetUsd clears the spend ceiling entirely (unlimited, the
+ * default). Zero is NOT the same as null and is a legitimate setting: it
+ * means "spend nothing", which is how an admin freezes a tenant's agent runs
+ * without deleting their configuration. Negative values are rejected.
  */
 public record UpdateTenantSettingsRequest(
         String preferredLlmProvider,
         String preferredModelName,
-        Integer maxTokensPerExecution
+        Integer maxTokensPerExecution,
+        java.math.BigDecimal monthlyBudgetUsd
 ) {
 }

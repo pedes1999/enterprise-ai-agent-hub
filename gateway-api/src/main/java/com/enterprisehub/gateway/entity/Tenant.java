@@ -51,4 +51,16 @@ public class Tenant {
     /** Null means "no override" -- falls back to app.llm.max-tokens-per-execution. See TenantLlmProviderResolver.resolveMaxTokens(). */
     @Column(name = "max_tokens_per_execution")
     private Integer maxTokensPerExecution;
+
+    /**
+     * Ceiling on this tenant's LLM spend per calendar month, in USD, checked
+     * at enqueue time (see TenantBudgetService).
+     *
+     * Null means no ceiling and is the default for every tenant -- V35 must
+     * not retroactively cut off anyone who never asked for a budget. Zero is
+     * a real, distinct value meaning "spend nothing", which is how an admin
+     * freezes a tenant's agent runs without deleting their configuration.
+     */
+    @Column(name = "monthly_budget_usd")
+    private java.math.BigDecimal monthlyBudgetUsd;
 }

@@ -42,7 +42,8 @@ class AgentExecutionControllerTest {
         agentDefinitionService = mock(AgentDefinitionService.class);
         executionStreamService = mock(ExecutionStreamService.class);
         mockMvc = MockMvcBuilders.standaloneSetup(new AgentExecutionController(executionService, agentDefinitionService,
-                        new AgentExecutionResponseMapper(executionService), executionStreamService))
+                        new AgentExecutionResponseMapper(executionService), executionStreamService,
+                        mock(com.enterprisehub.gateway.cost.TenantBudgetService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver(), new PageableHandlerMethodArgumentResolver())
                 .build();

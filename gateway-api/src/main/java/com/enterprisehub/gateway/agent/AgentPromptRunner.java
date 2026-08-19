@@ -104,6 +104,32 @@ public class AgentPromptRunner {
         this.inputSourceResolverRegistry = inputSourceResolverRegistry;
     }
 
+    /**
+     * Which model a run of {@code agentSlug} will actually use for this
+     * tenant. Public so AgentJobWorker can stamp it onto the execution row
+     * for cost attribution (see AgentExecutionService.recordResolvedModel) --
+     * and routed through the same method run() uses, deliberately, so the
+     * recorded model can never drift from the one that really ran. A second
+     * copy of this two-line rule would be exactly the kind of duplication
+     * that silently misprices every delegated run the day someone changes
+     * one copy.
+     */
+    public String resolveModelName(UUID tenantId, String agentSlug) {
+        AgentDefinition definition = resolveAgentDefinition(agentSlug);
+        return resolveModelName(tenantId, definition, tenantLlmProviderResolver.resolve(tenantId));
+    }
+
+    /**
+     * The definition's own preferred model (if set) overrides the tenant's
+     * resolved model name -- provider is untouched either way, only which
+     * model that same credential talks to. See AgentDefinition.preferredModelName.
+     */
+    private String resolveModelName(UUID tenantId, AgentDefinition definition, LlmProvider provider) {
+        return definition.getPreferredModelName() != null
+                ? definition.getPreferredModelName()
+                : tenantLlmProviderResolver.resolveModelName(tenantId, provider);
+    }
+
     /** The model name depends on which provider the tenant resolves to -- see TenantLlmProviderResolver. */
     public String modelName(UUID tenantId) {
         return tenantLlmProviderResolver.resolveModelName(tenantId, tenantLlmProviderResolver.resolve(tenantId));
@@ -138,9 +164,7 @@ public class AgentPromptRunner {
         // credential apiKey above resolved) is untouched either way, only
         // which model that same credential talks to. See
         // AgentDefinition.preferredModelName's javadoc.
-        String modelName = definition.getPreferredModelName() != null
-                ? definition.getPreferredModelName()
-                : tenantLlmProviderResolver.resolveModelName(tenantId, provider);
+        String modelName = resolveModelName(tenantId, definition, provider);
         Integer maxTokens = maxTokensOverride != null ? maxTokensOverride : tenantLlmProviderResolver.resolveMaxTokens(tenantId);
         String resolvedInput = resolveInput(definition, tenantId, request.inputParameters());
         String assembledPrompt = assemblePrompt(request.repositoryUrl(), request.repositoryBranch(), resolvedInput, request.prompt());

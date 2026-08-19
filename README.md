@@ -313,6 +313,55 @@ Status codes are chosen for how they read in a repository's delivery log: a ping
 action, and a redelivery are all successes, because GitHub retries `5xx` and shows `4xx` in
 red — neither is the right prompt for "we deliberately did nothing".
 
+## Cost governance
+
+Tokens have been recorded per execution since V19. What was missing was money — and a
+ceiling.
+
+That gap mattered less when every run started with a human clicking something. Webhook
+triggers changed it: a busy repository, a CI loop pushing fifty commits, or one
+misconfigured endpoint now spends a real vendor credential with nobody watching. The
+per-execution `maxTokens` cap bounds one run and the concurrency cap bounds how many run at
+once, but neither bounds spend over time — five concurrent runs, forever, is unbounded.
+
+**Pricing is per model, so the model has to be recorded.** `agent_executions` stored
+`llm_provider` but not the model name, and that isn't good enough: `claude-haiku-4-5` and
+`claude-opus-5` are both `ANTHROPIC` and differ 25× on output tokens. `AgentJobWorker` now
+stamps the resolved model onto the row *before* the run starts, so a crash mid-run still
+leaves something attributable.
+
+**A run is costed at the price that applied when it ran.** `model_pricing` is effective-dated
+and append-only by convention — a price change is a new row with a later `effective_from`,
+never an edit — and `cost_usd` is denormalized onto the execution at completion. Recomputing
+on read would silently re-price last quarter every time a vendor changed a rate. It also
+means a scheduled price change needs no cutover job: insert next month's rate today, and
+runs keep costing the old one until that instant passes.
+
+**An unpriced run is never a free run.** This is the invariant the whole feature rests on.
+When no `model_pricing` row covers a model, `cost_usd` stays `NULL` — never `0`. The two are
+indistinguishable inside a `SUM()`, and only one of them is true: a tenant running entirely
+on an unpriced model would otherwise show `$0.00` forever and sail through every budget check
+while spending real money. `GET /agents/executions/spend` reports the unpriced count
+alongside the total, so a partial figure is never presented as a complete one.
+
+**The budget is a soft ceiling, checked at enqueue.** It lives behind the same chokepoint as
+the concurrency cap — inside `AgentExecutionService.enqueue()` — so the API, a webhook
+delivery, and a `delegate_to_agent` sub-run are all covered without any of them remembering
+to ask. A run already in flight is never killed for crossing the line: that would waste
+everything already spent and can leave a cloned repository half-modified with no PR to show
+for it. The honest consequence, stated rather than hidden: actual spend can overshoot by at
+most the cost of what was in flight when the ceiling was crossed.
+
+It answers `402 Payment Required`, not the `429` the concurrency cap uses. A concurrency slot
+frees itself, so `429`'s "try again shortly" is true there. A spent budget does not — retrying
+fails identically until the month rolls over or an admin raises the ceiling, and answering
+`429` would invite exactly the retry loop that can never succeed, which GitHub's webhook
+redelivery would happily supply.
+
+The period is the UTC calendar month, matching how vendors invoice, so the figure reconciles
+against a real Anthropic bill instead of drifting against every statement the way a rolling
+30-day window would.
+
 ## Retrieval (RAG)
 
 A knowledge source is a tenant-owned collection of uploaded documents. On upload, text is
@@ -466,15 +515,16 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | `POST /vendor-credentials/test` · `GET /vendor-credentials/{provider}/models` | any | Live-validate a stored key with a real billed call; list that provider's model catalog. |
 | `GET /vendor-credentials/team` · `POST .../team/{userId}/{provider}/deactivate` | ADMIN | Read-only view across the team; blind deactivate without ever reading the token. |
 | `PUT/GET/DELETE /tool-credentials` · `POST /tool-credentials/test` | ADMIN | Credentials sandboxed tools need — `GIT` (clone auth) and `GITHUB` (PAT for opening PRs). |
-| `GET/PUT /tenant-settings` | ADMIN | Tenant LLM provider preference, model override, and per-execution token budget. |
+| `GET/PUT /tenant-settings` | ADMIN | Tenant LLM provider preference, model override, per-execution token budget, and the monthly spend ceiling (`null` = unlimited, `0` = frozen). |
 | `GET /agents/definitions` · `GET /agents/definitions/{slug}` | all roles | Browse the agent catalog; read one definition's full configuration. Browsing only — no admin CRUD. |
-| `POST /agents/execute` | ADMIN, DEVELOPER | The real execution model: enqueues and returns `202` immediately. Rejects an unknown agent (`400`), unmet `requiredInputs` (`400`, listing every one), or a tenant at its concurrency cap (`429`) — all before persisting. |
+| `POST /agents/execute` | ADMIN, DEVELOPER | The real execution model: enqueues and returns `202` immediately. Rejects an unknown agent (`400`), unmet `requiredInputs` (`400`, listing every one), a tenant at its concurrency cap (`429`), or one over its monthly budget (`402`) — all before persisting. |
 | `POST /agents/executions/{id}/cancel` | ADMIN, DEVELOPER | Cancels a `QUEUED` or `RUNNING` execution — instant for the former, cooperative (next round boundary) for the latter, see [Execution states](#execution-states). `404` unknown/wrong-tenant id, `409` if already terminal. |
 | `GET /agents/executions` · `GET /agents/executions/{id}` | all roles | Paginated history and single-execution status. Returns `PagedModel`, not a raw `Page`. |
 | `GET /agents/executions/{id}/tool-executions` | all roles | The ordered tool-call trace — what a skeptical teammate opens to verify what an agent actually did. |
 | `GET /agents/executions/{id}/stream` | all roles | The same trace, pushed live over Server-Sent Events: a `status` event on every status change, a `tool` event per tool call, then the stream closes when the run is terminal. Replays everything so far on connect, so it never matters how late you attach. |
 | `GET /agents/executions/{id}/children` | all roles | Executions that `delegate_to_agent` queued from this one. |
 | `GET /agents/executions/usage` · `GET /agents/executions/token-usage-stats` | all roles | Remaining concurrency capacity; past token usage, so a trigger form can suggest a budget. |
+| `GET /agents/executions/spend` | all roles | Month-to-date spend against the tenant's budget, broken down by agent — plus the count of executions that couldn't be priced, so a partial total is never read as a complete one. See [Cost governance](#cost-governance). |
 | `POST /agents/ping` · `POST /agents/ping-with-tools` | ADMIN, DEVELOPER | Synchronous spike endpoints. Prove the credential → provider chain and the full tool loop respectively. Not the real execution model. |
 | `POST/GET /knowledge-sources` | ADMIN, DEVELOPER | Create and list a tenant's RAG knowledge sources. |
 | `POST /knowledge-sources/{id}/documents` | ADMIN, DEVELOPER | Multipart upload — extracts, chunks, embeds, stores. Returns the chunk count. |

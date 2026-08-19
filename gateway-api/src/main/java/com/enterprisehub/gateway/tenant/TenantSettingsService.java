@@ -40,7 +40,8 @@ public class TenantSettingsService {
     public TenantSettingsResponse get(UUID tenantId) {
         Tenant tenant = requireTenant(tenantId);
         return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(),
-                tenant.getMaxTokensPerExecution(), tenantLlmProviderResolver.resolveMaxTokens(tenantId), availableProviders(tenantId));
+                tenant.getMaxTokensPerExecution(), tenantLlmProviderResolver.resolveMaxTokens(tenantId),
+                tenant.getMonthlyBudgetUsd(), availableProviders(tenantId));
     }
 
     public TenantSettingsResponse update(UUID tenantId, UpdateTenantSettingsRequest request) {
@@ -71,9 +72,21 @@ public class TenantSettingsService {
         }
         tenant.setMaxTokensPerExecution(requestedMaxTokens);
 
+        // Null clears the ceiling (unlimited). Zero is allowed and distinct:
+        // it means "spend nothing", the way an admin freezes a tenant. Only
+        // a negative budget is nonsense, and it is rejected here rather than
+        // left to the CHECK constraint so the caller gets a 400 with an
+        // explanation instead of a 500 from a constraint violation.
+        java.math.BigDecimal requestedBudget = request.monthlyBudgetUsd();
+        if (requestedBudget != null && requestedBudget.signum() < 0) {
+            throw new TenantSettingsException(HttpStatus.BAD_REQUEST, "monthlyBudgetUsd cannot be negative");
+        }
+        tenant.setMonthlyBudgetUsd(requestedBudget);
+
         tenantRepository.save(tenant);
         return new TenantSettingsResponse(tenant.getPreferredLlmProvider(), tenant.getPreferredModelName(),
-                tenant.getMaxTokensPerExecution(), tenantLlmProviderResolver.resolveMaxTokens(tenantId), availableProviders(tenantId));
+                tenant.getMaxTokensPerExecution(), tenantLlmProviderResolver.resolveMaxTokens(tenantId),
+                tenant.getMonthlyBudgetUsd(), availableProviders(tenantId));
     }
 
     private List<LlmProviderAvailability> availableProviders(UUID tenantId) {

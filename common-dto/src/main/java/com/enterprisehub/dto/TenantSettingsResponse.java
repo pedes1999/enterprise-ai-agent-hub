@@ -10,12 +10,17 @@ import java.util.List;
  * resolves to (this tenant's override, or the server-wide default when
  * maxTokensPerExecution itself is null) -- lets the frontend show a
  * concrete number ("Default: 500,000") instead of vague placeholder text.
+ *
+ * monthlyBudgetUsd is null when this tenant has no spend ceiling, which is
+ * the default -- null means unlimited, not zero. See
+ * TenantBudgetService for what the ceiling actually does.
  */
 public record TenantSettingsResponse(
         String preferredLlmProvider,
         String preferredModelName,
         Integer maxTokensPerExecution,
         Integer effectiveMaxTokensPerExecution,
+        java.math.BigDecimal monthlyBudgetUsd,
         List<LlmProviderAvailability> availableProviders
 ) {
 }

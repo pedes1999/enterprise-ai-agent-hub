@@ -4,6 +4,8 @@ import com.enterprisehub.dto.AgentTokenUsageStats;
 import com.enterprisehub.dto.ExecutionUsage;
 import com.enterprisehub.dto.ToolExecutionRecord;
 import com.enterprisehub.gateway.config.ExecutionLimitProperties;
+import com.enterprisehub.gateway.cost.ExecutionCostCalculator;
+import com.enterprisehub.gateway.cost.TenantBudgetService;
 import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
 import com.enterprisehub.gateway.entity.AgentDefinition;
 import com.enterprisehub.gateway.entity.AgentExecution;
@@ -61,17 +63,22 @@ public class AgentExecutionService {
     private final ExecutionLimitProperties executionLimitProperties;
     private final TenantLlmProviderResolver tenantLlmProviderResolver;
     private final MeterRegistry meterRegistry;
+    private final ExecutionCostCalculator costCalculator;
+    private final TenantBudgetService budgetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AgentExecutionService(AgentExecutionRepository repository, AgentDefinitionRepository agentDefinitionRepository,
                                   ToolExecutionRepository toolExecutionRepository, ExecutionLimitProperties executionLimitProperties,
-                                  TenantLlmProviderResolver tenantLlmProviderResolver, MeterRegistry meterRegistry) {
+                                  TenantLlmProviderResolver tenantLlmProviderResolver, MeterRegistry meterRegistry,
+                                  ExecutionCostCalculator costCalculator, TenantBudgetService budgetService) {
         this.repository = repository;
         this.agentDefinitionRepository = agentDefinitionRepository;
         this.toolExecutionRepository = toolExecutionRepository;
         this.executionLimitProperties = executionLimitProperties;
         this.tenantLlmProviderResolver = tenantLlmProviderResolver;
         this.meterRegistry = meterRegistry;
+        this.costCalculator = costCalculator;
+        this.budgetService = budgetService;
     }
 
     /**
@@ -118,6 +125,14 @@ public class AgentExecutionService {
                     "This tenant already has " + activeCount + " agent executions in progress (limit " + limit
                             + ") -- wait for one to finish before starting another.");
         }
+
+        // Spend ceiling, checked in the same place as the concurrency cap and
+        // for the same reason: this is the one chokepoint every entry point
+        // funnels through -- the API, a GitHub webhook (V34), and a
+        // delegate_to_agent sub-run -- so neither cap can be bypassed by
+        // adding a new trigger that forgets to ask. Throws 402, deliberately
+        // not the 429 above; see TenantBudgetService.requireWithinBudget().
+        budgetService.requireWithinBudget(tenantId);
 
         AgentExecution execution = new AgentExecution();
         execution.setTenantId(tenantId);
@@ -266,6 +281,7 @@ public class AgentExecutionService {
             execution.setErrorMessage("Execution was abandoned -- the worker running it stopped reporting for more than "
                     + staleAfter.toMinutes() + " minute(s) (most likely the app was restarted or killed mid-run).");
             execution.setCompletedAt(Instant.now());
+            applyCost(execution);
             recordExecutionOutcome("FAILED", execution.getStartedAt(), execution.getCompletedAt());
         }
         return stale.size();
@@ -287,6 +303,7 @@ public class AgentExecutionService {
             execution.setOutputTokens(outputTokens);
             execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
+            applyCost(execution);
             recordExecutionOutcome("SUCCEEDED", execution.getStartedAt(), execution.getCompletedAt());
         });
     }
@@ -306,8 +323,44 @@ public class AgentExecutionService {
             execution.setOutputTokens(outputTokens);
             execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
+            applyCost(execution);
             recordExecutionOutcome("FAILED", execution.getStartedAt(), execution.getCompletedAt());
         });
+    }
+
+    /**
+     * Prices a run at the moment it reaches a terminal state, and stores the
+     * result on the row.
+     *
+     * Costed here rather than computed on read for the reason ModelPricing
+     * explains: the price that applied is a fact about when the run happened,
+     * and recomputing it later would silently re-price historical spend every
+     * time a vendor changes a rate.
+     *
+     * Leaves costUsd NULL when the run cannot be priced. That is not an
+     * oversight to tidy up into a zero -- see AgentExecution.costUsd. The
+     * unpriced case is counted separately and surfaced in the spend report,
+     * so a partial total is never mistaken for a complete one.
+     */
+    private void applyCost(AgentExecution execution) {
+        ExecutionCostCalculator.ExecutionCost cost = costCalculator.calculate(
+                execution.getModelName(), execution.getInputTokens(), execution.getOutputTokens(),
+                execution.getCompletedAt());
+        execution.setCostUsd(cost.costUsd());
+    }
+
+    /**
+     * Records which model a run is about to use. Called by AgentJobWorker
+     * once it has claimed the job and resolved the model, BEFORE the run
+     * starts -- so a crash, a reap, or a cancellation mid-run still leaves an
+     * attributable row. The model cannot be known any earlier than this:
+     * AgentPromptRunner resolves it from the agent definition's preferred
+     * model, else the tenant's, else the server default, none of which is
+     * settled at enqueue time.
+     */
+    @Transactional
+    public void recordResolvedModel(UUID executionId, String modelName) {
+        repository.findById(executionId).ifPresent(execution -> execution.setModelName(modelName));
     }
 
     /**
@@ -374,6 +427,7 @@ public class AgentExecutionService {
             execution.setOutputTokens(outputTokens);
             execution.setTotalTokens(totalTokens);
             execution.setCompletedAt(Instant.now());
+            applyCost(execution);
             recordExecutionOutcome("CANCELLED", execution.getStartedAt(), execution.getCompletedAt());
         });
     }
