@@ -78,6 +78,26 @@ public class VendorModelCatalogService {
         };
     }
 
+    /**
+     * The model ids a LOCAL endpoint currently serves, for error messages --
+     * no credential required, unlike {@link #list}. Self-hosted servers do
+     * not authenticate their /models route (listOpenAiCompatible already
+     * passes a null key for LOCAL), so the useful "what CAN I run?" answer
+     * does not need a stored credential to reach.
+     *
+     * Never throws: an unreachable endpoint means an empty list, so a caller
+     * enriching a failure message can never turn one failure into two.
+     */
+    public List<String> listLocalModelIds() {
+        try {
+            return listOpenAiCompatible(resolveLocalBaseUrl(), null, "Local").stream()
+                    .map(ModelOption::id)
+                    .toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
     private String resolveLocalBaseUrl() {
         String configured = llmProperties.baseUrl(LlmProvider.LOCAL);
         return (configured != null && !configured.isBlank()) ? configured : LOCAL_DEFAULT_BASE_URL;

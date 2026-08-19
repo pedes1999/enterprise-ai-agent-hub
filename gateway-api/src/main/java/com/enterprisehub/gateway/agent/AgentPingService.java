@@ -6,6 +6,7 @@ import com.enterprisehub.core.tool.ToolCallingChatEngine;
 import com.enterprisehub.dto.AgentPingResponse;
 import com.enterprisehub.dto.AgentToolPingResponse;
 import com.enterprisehub.gateway.config.LlmProperties;
+import com.enterprisehub.gateway.credential.LocalModelHint;
 import com.enterprisehub.gateway.credential.VendorCredentialService;
 import com.enterprisehub.gateway.entity.VendorCredential;
 import com.enterprisehub.gateway.repository.VendorCredentialRepository;
@@ -37,19 +38,22 @@ public class AgentPingService {
     private final LlmProperties llmProperties;
     private final TenantLlmProviderResolver tenantLlmProviderResolver;
     private final AgentPromptRunner agentPromptRunner;
+    private final LocalModelHint localModelHint;
 
     public AgentPingService(VendorCredentialRepository vendorCredentialRepository,
                              VendorCredentialService vendorCredentialService,
                              LlmEngineFactory llmEngineFactory,
                              LlmProperties llmProperties,
                              TenantLlmProviderResolver tenantLlmProviderResolver,
-                             AgentPromptRunner agentPromptRunner) {
+                             AgentPromptRunner agentPromptRunner,
+                             LocalModelHint localModelHint) {
         this.vendorCredentialRepository = vendorCredentialRepository;
         this.vendorCredentialService = vendorCredentialService;
         this.llmEngineFactory = llmEngineFactory;
         this.llmProperties = llmProperties;
         this.tenantLlmProviderResolver = tenantLlmProviderResolver;
         this.agentPromptRunner = agentPromptRunner;
+        this.localModelHint = localModelHint;
     }
 
     public AgentPingResponse ping(UUID tenantId, UUID userId, String prompt) {
@@ -63,7 +67,7 @@ public class AgentPingService {
         try {
             reply = model.chat(prompt);
         } catch (RuntimeException e) {
-            throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + e.getMessage());
+            throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + localModelHint.enrich(provider, e.getMessage()));
         }
 
         return new AgentPingResponse(provider.name(), modelName, reply);
@@ -88,7 +92,7 @@ public class AgentPingService {
         } catch (AgentException e) {
             throw e; // already the right status (e.g. unknown agent, no credential) -- don't relabel it as a provider failure
         } catch (RuntimeException e) {
-            throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + e.getMessage());
+            throw new AgentException(HttpStatus.BAD_GATEWAY, provider + " call failed: " + localModelHint.enrich(provider, e.getMessage()));
         }
 
         return new AgentToolPingResponse(provider.name(), agentPromptRunner.modelName(tenantId), result.reply(), result.toolWasUsed(), resolvedSlug);

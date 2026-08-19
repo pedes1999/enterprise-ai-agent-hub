@@ -11,6 +11,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import com.enterprisehub.gateway.tenant.TenantLlmProviderResolver;
+import com.enterprisehub.gateway.credential.LocalModelHint;
 
 /**
  * The "durable job orchestration" piece: a poll loop claiming one QUEUED
@@ -50,12 +52,18 @@ public class AgentJobWorker {
     private final AgentExecutionService executionService;
     private final AgentPromptRunner agentPromptRunner;
     private final ExecutionHeartbeatMonitor heartbeatMonitor;
+    private final LocalModelHint localModelHint;
+    private final TenantLlmProviderResolver tenantLlmProviderResolver;
 
     public AgentJobWorker(AgentExecutionService executionService, AgentPromptRunner agentPromptRunner,
-                           ExecutionHeartbeatMonitor heartbeatMonitor) {
+                           ExecutionHeartbeatMonitor heartbeatMonitor,
+                           LocalModelHint localModelHint,
+                           TenantLlmProviderResolver tenantLlmProviderResolver) {
         this.executionService = executionService;
         this.agentPromptRunner = agentPromptRunner;
         this.heartbeatMonitor = heartbeatMonitor;
+        this.localModelHint = localModelHint;
+        this.tenantLlmProviderResolver = tenantLlmProviderResolver;
     }
 
     @Scheduled(fixedDelayString = "${app.job-worker.poll-interval-ms:2000}")
@@ -151,14 +159,33 @@ public class AgentJobWorker {
             // javadoc. Recording that spend here is the whole reason this
             // catch exists ahead of the plain RuntimeException one below.
             log.warn("Agent execution failed after {}", elapsed(startedAtNanos), e);
-            executionService.fail(job.getId(), e.getMessage(), e.inputTokens(), e.outputTokens(), e.totalTokens());
+            executionService.fail(job.getId(), describeFailure(job, e), e.inputTokens(), e.outputTokens(), e.totalTokens());
         } catch (RuntimeException e) {
             log.warn("Agent execution failed after {}", elapsed(startedAtNanos), e);
-            executionService.fail(job.getId(), e.getMessage());
+            executionService.fail(job.getId(), describeFailure(job, e));
         } finally {
             heartbeatMonitor.untrack(job.getId());
             MDC.remove(MDC_EXECUTION_ID);
             TenantContext.clear();
+        }
+    }
+
+    /**
+     * The message stored on the failed execution row. Routed through
+     * LocalModelHint so a self-hosted run that named a model this machine
+     * does not have says which models it DOES have -- the error is read hours
+     * later out of the history UI, long after the operator could have run
+     * `ollama list` themselves.
+     *
+     * Resolves the provider from the tenant rather than the row, because a
+     * run can fail before anything provider-shaped was recorded.
+     */
+    private String describeFailure(AgentExecution job, RuntimeException e) {
+        try {
+            return localModelHint.enrich(tenantLlmProviderResolver.resolve(job.getTenantId()), e.getMessage());
+        } catch (RuntimeException ignored) {
+            // Enriching an error must never replace it with a different one.
+            return e.getMessage();
         }
     }
 

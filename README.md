@@ -369,6 +369,35 @@ The period is the UTC calendar month, matching how vendors invoice, so the figur
 against a real Anthropic bill instead of drifting against every statement the way a rolling
 30-day window would.
 
+## Running against a local model
+
+`GET /vendor-credentials/LOCAL/models` lists what a self-hosted server (Ollama, LM Studio,
+vLLM) is actually serving, so the Credentials page offers a dropdown of real models rather
+than a free-text guess.
+
+Choosing one is still explicit — the app never silently picks a model for you. Two reasons.
+Every execution here is costed and audited, so the model that ran has to be the model
+somebody chose; and it isn't safely guessable anyway, because the OpenAI-compatible
+`/models` route these servers share reports **no capabilities**, leaving an embedding-only
+model indistinguishable from a chat model in that listing. Picking the wrong one fails later
+and more confusingly than naming a missing model does.
+
+What the app does instead is make that failure actionable. Because tags match exactly, the
+most common local failure is naming a model this machine doesn't have — so the error carries
+the answer the app already knows:
+
+```
+model 'llama3.1' not found
+ This local endpoint currently serves: nomic-embed-text:latest, qwen2.5-coder:7b.
+ Set one as the tenant's preferredModelName (PUT /tenant-settings) or as LLM_LOCAL_MODEL_NAME.
+```
+
+The hint is strictly additive (see `LocalModelHint`): it appends to a LOCAL model-not-found
+and otherwise returns the provider's message untouched, so a refused connection or a hosted
+provider's error never collects an irrelevant model list. It reaches both the synchronous
+ping and the error stored on a failed execution row — the async one matters more, since
+that's what gets read out of history hours later.
+
 ## Retrieval (RAG)
 
 A knowledge source is a tenant-owned collection of uploaded documents. On upload, text is

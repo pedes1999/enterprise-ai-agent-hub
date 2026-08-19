@@ -45,6 +45,8 @@ class AgentPingServiceTest {
     private final UUID tenantId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
 
+    private com.enterprisehub.gateway.credential.LocalModelHint localModelHint;
+
     @BeforeEach
     void setUp() {
         vendorCredentialRepository = mock(VendorCredentialRepository.class);
@@ -57,8 +59,10 @@ class AgentPingServiceTest {
         when(tenantLlmProviderResolver.resolve(tenantId)).thenReturn(LlmProvider.ANTHROPIC);
         when(tenantLlmProviderResolver.resolveModelName(tenantId, LlmProvider.ANTHROPIC)).thenReturn("claude-3-5-sonnet-20240620");
         when(agentPromptRunner.modelName(tenantId)).thenReturn("claude-3-5-sonnet-20240620");
+        localModelHint = mock(com.enterprisehub.gateway.credential.LocalModelHint.class);
+        when(localModelHint.enrich(any(), any())).thenAnswer(i -> i.getArgument(1));
         service = new AgentPingService(vendorCredentialRepository, vendorCredentialService, llmEngineFactory,
-                properties, tenantLlmProviderResolver, agentPromptRunner);
+                properties, tenantLlmProviderResolver, agentPromptRunner, localModelHint);
     }
 
     private VendorCredential activeCredential() {

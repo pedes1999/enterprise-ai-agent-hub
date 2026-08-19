@@ -26,12 +26,19 @@ class AgentJobWorkerTest {
     private ExecutionHeartbeatMonitor heartbeatMonitor;
     private AgentJobWorker worker;
 
+    private com.enterprisehub.gateway.credential.LocalModelHint localModelHint;
+
     @BeforeEach
     void setUp() {
         executionService = mock(AgentExecutionService.class);
         agentPromptRunner = mock(AgentPromptRunner.class);
         heartbeatMonitor = mock(ExecutionHeartbeatMonitor.class);
-        worker = new AgentJobWorker(executionService, agentPromptRunner, heartbeatMonitor);
+        // A pass-through hint: these tests assert on the raw provider error,
+        // and enrichment only ever appends to a LOCAL model-not-found.
+        localModelHint = mock(com.enterprisehub.gateway.credential.LocalModelHint.class);
+        when(localModelHint.enrich(any(), any())).thenAnswer(i -> i.getArgument(1));
+        worker = new AgentJobWorker(executionService, agentPromptRunner, heartbeatMonitor, localModelHint,
+                mock(com.enterprisehub.gateway.tenant.TenantLlmProviderResolver.class));
         // Every AgentExecution mocked in this test file leaves inputParameters
         // unset -- matches AgentExecutionService's own real "none stored" contract.
         when(executionService.deserializeInputParameters(any())).thenReturn(Map.of());
