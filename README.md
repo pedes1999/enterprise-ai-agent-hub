@@ -8,9 +8,11 @@ A multi-tenant platform for running LLM agents that actually touch code — clon
 repository, edit it, run its tests, and open a real pull request — with every tenant's data
 isolated at the database level and every tool call audited.
 
-![Walkthrough: login, agent catalog, triggering a run, the tool-call trace, spend, and webhook endpoints](docs/demo/agent-hub-demo.gif)
+![Walkthrough: login, agent catalog, triggering a run, the tool-call trace, a sandboxed test-fixer run, spend, and webhook endpoints](docs/demo/agent-hub-demo.gif)
 
-*Recorded against a live local stack — real executions on a self-hosted model, no vendor key.*
+*Recorded against a live local stack — real executions on a self-hosted model, no vendor key.
+Includes a `test-fixer` run that cloned a real repository into a Firecracker microVM, ran its
+test suite, and read the source before concluding no fix was needed.*
 
 ## Why this exists
 
@@ -451,6 +453,16 @@ engine unaudited — the same posture as enforcing isolation at the database rat
 every query to remember a `WHERE` clause. Found by running the thing and reading the UI, not
 by a test: every test passed both before and after, because they all asserted the behaviour of
 tools that happened to be audited.
+
+**A failing tool was invisible to everyone except the model.** `ToolCallingChatEngine` turns a
+tool exception into a string the model can read and recover from, which is deliberate — but it
+returned that string without logging anything, and the class had no logger at all. Combined
+with the auditing gap above, a tool that failed left no log line, no audit row, and a run
+still marked `SUCCEEDED`, with the only trace being whatever the model chose to say about it.
+The first recorded demo run caught this in the act: it answered "unable to retrieve the
+current date and time due to an internal error" and nothing anywhere explained why. Now both
+branches log at WARN, with the exception attached — the model only ever sees `getMessage()`,
+so the stack trace existed nowhere else.
 
 **No sandboxed tool ever received a credential.** `sidecar/server.js` passed credentials to
 E2B's `Sandbox.create()` as `envVars`, but the installed SDK only recognises `envs` — silently

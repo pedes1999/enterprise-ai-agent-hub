@@ -16,6 +16,8 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -42,6 +44,8 @@ import java.util.function.BooleanSupplier;
  * answer instead of yet another tool request.
  */
 public class ToolCallingChatEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(ToolCallingChatEngine.class);
 
     /**
      * How many rounds of "model requests tools -> we run them -> feed
@@ -563,14 +567,29 @@ public class ToolCallingChatEngine {
         return message.toBuilder().text(placeholder).contents(List.<dev.langchain4j.data.message.Content>of()).build();
     }
 
+    /**
+     * A failing tool is turned into a string the model can read and recover
+     * from, which is deliberate -- but it must also reach an operator, which
+     * for a long time it did not. Both branches below used to return silently:
+     * no log, and (before AuditingTool) no audit row either for a tool that
+     * wasn't sandboxed, so a tool failing produced a run marked SUCCEEDED
+     * whose only trace was whatever the model chose to say about it. That is
+     * exactly how a demo run came to answer "unable to retrieve the current
+     * date and time due to an internal error" with nothing anywhere
+     * explaining why.
+     */
     private String executeTool(ToolExecutionRequest request) {
         AgentTool tool = toolsByName.get(request.name());
         if (tool == null) {
+            log.warn("Model called unknown tool '{}' -- not in this execution's tool list", request.name());
             return "Error: no tool registered with name '" + request.name() + "'";
         }
         try {
             return truncateForHistory(tool.execute(executionContext, parseArguments(request.arguments())));
         } catch (Exception e) {
+            // Logged with the exception, not just its message: the model only
+            // ever sees getMessage(), so the stack trace exists nowhere else.
+            log.warn("Tool '{}' failed; returning the error to the model to recover from", request.name(), e);
             return "Error executing tool '" + request.name() + "': " + e.getMessage();
         }
     }
