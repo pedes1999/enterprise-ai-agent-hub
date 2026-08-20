@@ -2,6 +2,7 @@ package com.enterprisehub.gateway.agent.catalog;
 
 import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.gateway.agent.AgentException;
+import com.enterprisehub.runtime.audit.AuditingTool;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxSession;
@@ -37,12 +38,18 @@ public class ToolCatalog {
      * AgentDefinition references a tool name that doesn't exist in the
      * catalog (a data-integrity problem with the definition itself, not a
      * caller error -- see AgentPromptRunner).
+     *
+     * Every tool is wrapped in AuditingTool on the way out, which is what
+     * makes "every tool call is audited" true by construction rather than
+     * by each tool remembering to do it -- see AuditingTool's javadoc for
+     * the three tools that silently weren't.
      */
     public List<AgentTool> instantiate(List<String> toolNames, SandboxSession session,
                                         ToolExecutionListener listener, CredentialResolver credentialResolver,
                                         ToolCreationContext toolContext) {
         return toolNames.stream()
-                .map(name -> factoryFor(name).create(session, listener, credentialResolver, toolContext))
+                .map(name -> factoryFor(name).create(session, credentialResolver, toolContext))
+                .map(tool -> (AgentTool) new AuditingTool(tool, listener))
                 .toList();
     }
 

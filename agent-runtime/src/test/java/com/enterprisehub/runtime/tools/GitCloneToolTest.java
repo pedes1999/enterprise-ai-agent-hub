@@ -1,6 +1,7 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
+import com.enterprisehub.runtime.audit.AuditingTool;
 import com.enterprisehub.runtime.audit.ToolExecutionAuditRecord;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.audit.ToolExecutionOutcome;
@@ -36,7 +37,7 @@ class GitCloneToolTest {
         sandboxClient = mock(SandboxClient.class);
         listener = mock(ToolExecutionListener.class);
         credentialResolver = mock(CredentialResolver.class);
-        tool = new GitCloneTool(sandboxClient, listener, credentialResolver);
+        tool = new GitCloneTool(sandboxClient, credentialResolver);
     }
 
     private void stubSandbox(CommandResult result) {
@@ -166,12 +167,13 @@ class GitCloneToolTest {
         assertThat(result).doesNotContain("Repository cloned"); // only printed on success
     }
 
+    /** Auditing lives in AuditingTool now, not in the tool -- so it is exercised through the wrapper ToolCatalog applies. */
     @Test
     void execute_success_audited() {
         when(credentialResolver.resolve(any(), any())).thenReturn(Map.of());
         stubSandbox(new CommandResult(0, "ok", "", false, Duration.ofMillis(500)));
 
-        tool.execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git"));
+        new AuditingTool(tool, listener).execute(CONTEXT, Map.of("repositoryUrl", "https://github.com/org/repo.git"));
 
         ArgumentCaptor<ToolExecutionAuditRecord> captor = ArgumentCaptor.forClass(ToolExecutionAuditRecord.class);
         verify(listener).onToolExecuted(captor.capture());

@@ -1,6 +1,7 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
+import com.enterprisehub.runtime.audit.AuditingTool;
 import com.enterprisehub.runtime.audit.ToolExecutionAuditRecord;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.audit.ToolExecutionOutcome;
@@ -32,7 +33,7 @@ class RunShellCommandToolTest {
     void setUp() {
         sandboxClient = mock(SandboxClient.class);
         listener = mock(ToolExecutionListener.class);
-        tool = new RunShellCommandTool(sandboxClient, listener);
+        tool = new RunShellCommandTool(sandboxClient);
     }
 
     @Test
@@ -131,7 +132,7 @@ class RunShellCommandToolTest {
     void execute_sandboxCreationFails_stillDestroysNothingButPropagates_andAudited() {
         when(sandboxClient.create(any())).thenThrow(new com.enterprisehub.runtime.sandbox.SandboxException("sidecar unreachable"));
 
-        assertThatThrownBy(() -> tool.execute(CONTEXT, Map.of("command", "ls")))
+        assertThatThrownBy(() -> new AuditingTool(tool, listener).execute(CONTEXT, Map.of("command", "ls")))
                 .isInstanceOf(com.enterprisehub.runtime.sandbox.SandboxException.class);
 
         verify(sandboxClient, never()).destroy(any());
@@ -151,7 +152,7 @@ class RunShellCommandToolTest {
         verify(sandboxClient).destroy(handle);
     }
 
-    // ---------- audit logging (via the AbstractSandboxedTool it extends) ----------
+    // ---------- audit logging (via the AuditingTool wrapper ToolCatalog applies) ----------
 
     @Test
     void execute_success_auditsWithSuccessOutcomeAndToolName() {
@@ -159,7 +160,7 @@ class RunShellCommandToolTest {
         when(sandboxClient.runCommand(any(), any(), any()))
                 .thenReturn(new CommandResult(0, "ok", "", false, Duration.ofMillis(50)));
 
-        tool.execute(CONTEXT, Map.of("command", "echo ok"));
+        new AuditingTool(tool, listener).execute(CONTEXT, Map.of("command", "echo ok"));
 
         ArgumentCaptor<ToolExecutionAuditRecord> captor = ArgumentCaptor.forClass(ToolExecutionAuditRecord.class);
         verify(listener).onToolExecuted(captor.capture());
@@ -175,7 +176,7 @@ class RunShellCommandToolTest {
     void execute_failure_auditsWithErrorMessage() {
         when(sandboxClient.create(any())).thenThrow(new RuntimeException("boom"));
 
-        assertThatThrownBy(() -> tool.execute(CONTEXT, Map.of("command", "ls")));
+        assertThatThrownBy(() -> new AuditingTool(tool, listener).execute(CONTEXT, Map.of("command", "ls")));
 
         ArgumentCaptor<ToolExecutionAuditRecord> captor = ArgumentCaptor.forClass(ToolExecutionAuditRecord.class);
         verify(listener).onToolExecuted(captor.capture());

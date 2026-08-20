@@ -1,7 +1,6 @@
 package com.enterprisehub.gateway.agent.catalog;
 
 import com.enterprisehub.core.tool.AgentTool;
-import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxSession;
 
@@ -19,6 +18,13 @@ import com.enterprisehub.runtime.sandbox.SandboxSession;
  * A tool that doesn't need sandboxing at all (e.g. CurrentDateTimeTool)
  * just ignores the parameters it doesn't need -- same for toolContext,
  * which only RetrievalToolFactory actually reads (see ToolCreationContext).
+ *
+ * Note what create() deliberately does NOT receive: a
+ * ToolExecutionListener. It used to, and three factories quietly dropped
+ * it on the floor, which is exactly how those tools ended up unaudited.
+ * Auditing is applied by ToolCatalog after create() returns (see
+ * AuditingTool), so it is not something a factory can opt out of by
+ * forgetting a constructor argument.
  */
 public interface ToolFactory {
 
@@ -28,6 +34,5 @@ public interface ToolFactory {
     /** Free-text grouping for a future catalog browsing UI (e.g. "utility", "git", "filesystem", "shell"). Not enforced. */
     String category();
 
-    AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver,
-                      ToolCreationContext toolContext);
+    AgentTool create(SandboxSession session, CredentialResolver credentialResolver, ToolCreationContext toolContext);
 }

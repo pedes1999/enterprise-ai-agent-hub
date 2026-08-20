@@ -1,7 +1,6 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
-import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.CommandResult;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
@@ -43,8 +42,8 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
     private final CredentialResolver credentialResolver;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public OpenPullRequestTool(SandboxClient sandboxClient, ToolExecutionListener listener, CredentialResolver credentialResolver) {
-        super(sandboxClient, listener);
+    public OpenPullRequestTool(SandboxClient sandboxClient, CredentialResolver credentialResolver) {
+        super(sandboxClient);
         this.credentialResolver = credentialResolver;
     }
 
@@ -86,7 +85,7 @@ public class OpenPullRequestTool extends AbstractSandboxedTool {
     }
 
     @Override
-    protected String doExecute(ToolExecutionContext context, Map<String, String> arguments) {
+    public String execute(ToolExecutionContext context, Map<String, String> arguments) {
         String repositoryUrl = requireArgument(arguments, "repositoryUrl");
         String[] ownerAndRepo = parseGitHubOwnerAndRepo(repositoryUrl);
         String branchName = requireArgument(arguments, "branchName");

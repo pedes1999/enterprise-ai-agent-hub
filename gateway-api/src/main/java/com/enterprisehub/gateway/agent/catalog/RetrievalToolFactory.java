@@ -4,7 +4,6 @@ import com.enterprisehub.core.tool.AgentTool;
 import com.enterprisehub.rag.repository.AgentKnowledgeSourceBindingRepository;
 import com.enterprisehub.rag.retrieval.RetrievalQueryService;
 import com.enterprisehub.rag.tool.RetrievalTool;
-import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.SandboxSession;
 import org.springframework.stereotype.Component;
@@ -41,8 +40,7 @@ public class RetrievalToolFactory implements ToolFactory {
     }
 
     @Override
-    public AgentTool create(SandboxSession session, ToolExecutionListener listener, CredentialResolver credentialResolver,
-                             ToolCreationContext toolContext) {
+    public AgentTool create(SandboxSession session, CredentialResolver credentialResolver, ToolCreationContext toolContext) {
         Optional<UUID> knowledgeSourceId = toolContext.agentDefinitionId() == null
                 ? Optional.empty()
                 : bindingRepository.findByTenantIdAndAgentDefinitionId(UUID.fromString(toolContext.tenantId()), toolContext.agentDefinitionId())

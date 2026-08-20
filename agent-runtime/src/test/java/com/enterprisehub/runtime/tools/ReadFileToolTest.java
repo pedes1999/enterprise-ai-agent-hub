@@ -27,7 +27,7 @@ class ReadFileToolTest {
     void setUp() {
         sandboxClient = mock(SandboxClient.class);
         listener = mock(ToolExecutionListener.class);
-        tool = new ReadFileTool(sandboxClient, listener);
+        tool = new ReadFileTool(sandboxClient);
     }
 
     @Test

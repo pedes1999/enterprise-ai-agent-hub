@@ -27,7 +27,7 @@ class WriteFileToolTest {
     void setUp() {
         sandboxClient = mock(SandboxClient.class);
         listener = mock(ToolExecutionListener.class);
-        tool = new WriteFileTool(sandboxClient, listener);
+        tool = new WriteFileTool(sandboxClient);
         when(sandboxClient.create(any())).thenReturn(new SandboxHandle("s1"));
     }
 

@@ -31,7 +31,7 @@ class SearchCodeToolTest {
     void setUp() {
         sandboxClient = mock(SandboxClient.class);
         listener = mock(ToolExecutionListener.class);
-        tool = new SearchCodeTool(sandboxClient, listener);
+        tool = new SearchCodeTool(sandboxClient);
     }
 
     @Test

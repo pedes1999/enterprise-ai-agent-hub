@@ -1,6 +1,7 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
+import com.enterprisehub.runtime.audit.AuditingTool;
 import com.enterprisehub.runtime.audit.ToolExecutionAuditRecord;
 import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.audit.ToolExecutionOutcome;
@@ -44,7 +45,7 @@ class OpenPullRequestToolTest {
         sandboxClient = mock(SandboxClient.class);
         listener = mock(ToolExecutionListener.class);
         credentialResolver = mock(CredentialResolver.class);
-        tool = new OpenPullRequestTool(sandboxClient, listener, credentialResolver);
+        tool = new OpenPullRequestTool(sandboxClient, credentialResolver);
         when(credentialResolver.resolve(any(), any())).thenReturn(Map.of("GITHUB_TOKEN", "ghp_secret"));
         when(sandboxClient.create(any())).thenReturn(new SandboxHandle("s1"));
     }
@@ -283,7 +284,7 @@ class OpenPullRequestToolTest {
                 .thenReturn(ok("{\"default_branch\":\"master\"}"))
                 .thenReturn(ok("{\"html_url\":\"https://github.com/x/y/pull/1\",\"number\":1}"));
 
-        tool.execute(CONTEXT, BASE_ARGS);
+        new AuditingTool(tool, listener).execute(CONTEXT, BASE_ARGS);
 
         ArgumentCaptor<ToolExecutionAuditRecord> captor = ArgumentCaptor.forClass(ToolExecutionAuditRecord.class);
         verify(listener).onToolExecuted(captor.capture());

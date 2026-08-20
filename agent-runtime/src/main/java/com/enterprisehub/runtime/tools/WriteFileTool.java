@@ -1,7 +1,6 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
-import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
 import com.enterprisehub.runtime.sandbox.SandboxHandle;
 import com.enterprisehub.runtime.sandbox.SandboxSpec;
@@ -23,8 +22,8 @@ public class WriteFileTool extends AbstractSandboxedTool {
     private static final Duration SANDBOX_MAX_LIFETIME = Duration.ofMinutes(2);
     private static final long MAX_CONTENT_BYTES = 256 * 1024;
 
-    public WriteFileTool(SandboxClient sandboxClient, ToolExecutionListener listener) {
-        super(sandboxClient, listener);
+    public WriteFileTool(SandboxClient sandboxClient) {
+        super(sandboxClient);
     }
 
     @Override
@@ -47,7 +46,7 @@ public class WriteFileTool extends AbstractSandboxedTool {
     }
 
     @Override
-    protected String doExecute(ToolExecutionContext context, Map<String, String> arguments) {
+    public String execute(ToolExecutionContext context, Map<String, String> arguments) {
         String path = WorkspacePath.resolve(arguments.get("path"));
         String content = arguments.get("content");
         if (content == null) {

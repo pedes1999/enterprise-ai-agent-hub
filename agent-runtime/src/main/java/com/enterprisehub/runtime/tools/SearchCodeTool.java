@@ -1,7 +1,6 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
-import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.sandbox.CommandResult;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
 import com.enterprisehub.runtime.sandbox.SandboxSpec;
@@ -30,8 +29,8 @@ public class SearchCodeTool extends AbstractSandboxedTool {
     private static final Duration SANDBOX_MAX_LIFETIME = Duration.ofMinutes(2);
     private static final long MAX_OUTPUT_BYTES = 64 * 1024;
 
-    public SearchCodeTool(SandboxClient sandboxClient, ToolExecutionListener listener) {
-        super(sandboxClient, listener);
+    public SearchCodeTool(SandboxClient sandboxClient) {
+        super(sandboxClient);
     }
 
     @Override
@@ -59,7 +58,7 @@ public class SearchCodeTool extends AbstractSandboxedTool {
     }
 
     @Override
-    protected String doExecute(ToolExecutionContext context, Map<String, String> arguments) {
+    public String execute(ToolExecutionContext context, Map<String, String> arguments) {
         String pattern = arguments.get("pattern");
         if (pattern == null || pattern.isBlank()) {
             throw new IllegalArgumentException("pattern argument is required");

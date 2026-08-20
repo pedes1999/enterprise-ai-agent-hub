@@ -1,7 +1,6 @@
 package com.enterprisehub.runtime.tools;
 
 import com.enterprisehub.core.tool.ToolExecutionContext;
-import com.enterprisehub.runtime.audit.ToolExecutionListener;
 import com.enterprisehub.runtime.credential.CredentialResolver;
 import com.enterprisehub.runtime.sandbox.CommandResult;
 import com.enterprisehub.runtime.sandbox.SandboxClient;
@@ -34,8 +33,8 @@ public class GitCloneTool extends AbstractSandboxedTool {
 
     private final CredentialResolver credentialResolver;
 
-    public GitCloneTool(SandboxClient sandboxClient, ToolExecutionListener listener, CredentialResolver credentialResolver) {
-        super(sandboxClient, listener);
+    public GitCloneTool(SandboxClient sandboxClient, CredentialResolver credentialResolver) {
+        super(sandboxClient);
         this.credentialResolver = credentialResolver;
     }
 
@@ -65,7 +64,7 @@ public class GitCloneTool extends AbstractSandboxedTool {
     }
 
     @Override
-    protected String doExecute(ToolExecutionContext context, Map<String, String> arguments) {
+    public String execute(ToolExecutionContext context, Map<String, String> arguments) {
         String repositoryUrl = arguments.get("repositoryUrl");
         validateRepositoryUrl(repositoryUrl);
         String branch = arguments.get("branch");

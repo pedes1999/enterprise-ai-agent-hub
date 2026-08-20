@@ -42,7 +42,7 @@ class RunShellCommandToolManualIT {
         SandboxClient sandboxClient = new SandboxClientHttpImpl(sidecarUri);
         ToolExecutionListener noopListener = record -> System.out.println("Audit: " + record);
 
-        RunShellCommandTool tool = new RunShellCommandTool(sandboxClient, noopListener);
+        RunShellCommandTool tool = new RunShellCommandTool(sandboxClient);
         ToolExecutionContext context = new ToolExecutionContext("manual-it-tenant", UUID.randomUUID().toString());
 
         String result = tool.execute(context, Map.of("command", "echo hello from a real sandbox"));
@@ -57,7 +57,7 @@ class RunShellCommandToolManualIT {
         SandboxClient sandboxClient = new SandboxClientHttpImpl(sidecarUri);
         ToolExecutionListener noopListener = record -> {
         };
-        RunShellCommandTool tool = new RunShellCommandTool(sandboxClient, noopListener);
+        RunShellCommandTool tool = new RunShellCommandTool(sandboxClient);
 
         // Two separate executions must not share state -- a file written in
         // one sandbox must not be visible in a fresh one.
