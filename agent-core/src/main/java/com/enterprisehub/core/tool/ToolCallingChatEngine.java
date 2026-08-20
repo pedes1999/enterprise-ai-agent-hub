@@ -620,12 +620,17 @@ public class ToolCallingChatEngine {
      * an actually-registered tool -- a real prose final answer that merely
      * mentions JSON never matches this, and one malformed/unrecognized
      * entry in an array rejects the whole batch rather than guessing.
+     *
+     * The response is passed through stripCodeFence() first: the same models
+     * that emit a tool call as text usually wrap it in a markdown fence, and
+     * for a long time that single detail meant this method never fired for
+     * the case it was written for. See stripCodeFence()'s javadoc.
      */
     private List<ToolExecutionRequest> recoverToolCallsFromText(String text) {
         if (text == null || text.isBlank()) {
             return List.of();
         }
-        String trimmed = text.trim();
+        String trimmed = stripCodeFence(text);
         if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
             return List.of();
         }
@@ -663,6 +668,41 @@ public class ToolCallingChatEngine {
                     .build());
         }
         return recovered;
+    }
+
+    /**
+     * Removes a surrounding markdown code fence, if one is there.
+     *
+     * Without this, recoverToolCallsFromText() above never fired for the most
+     * common shape of the very failure it exists to catch. A local
+     * qwen2.5-coder:7b asked to delegate produced a textually perfect
+     * delegate_to_agent call -- right tool, right arguments -- wrapped in
+     * ```...```, so the startsWith("{") check rejected it on the first
+     * character and the fenced JSON became the execution's "final answer"
+     * instead. Every planner run in this project's history had therefore
+     * delegated exactly nothing: no child execution was ever created.
+     *
+     * A language hint on the opening fence (```json) is common, so anything
+     * on that first line is treated as part of the fence rather than content.
+     * Everything after this stays as conservative as before -- the fenced
+     * body still has to be a complete tool-call-shaped JSON naming registered
+     * tools, so prose that merely contains a fenced snippet is not affected.
+     */
+    private static String stripCodeFence(String text) {
+        String trimmed = text.trim();
+        if (!trimmed.startsWith("```")) {
+            return trimmed;
+        }
+        int firstNewline = trimmed.indexOf('\n');
+        if (firstNewline < 0) {
+            return trimmed;
+        }
+        String body = trimmed.substring(firstNewline + 1);
+        if (body.stripTrailing().endsWith("```")) {
+            body = body.stripTrailing();
+            body = body.substring(0, body.length() - 3);
+        }
+        return body.trim();
     }
 
     private Map<String, String> parseArguments(String argumentsJson) throws Exception {

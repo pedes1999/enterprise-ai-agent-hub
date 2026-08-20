@@ -103,7 +103,7 @@ Four agents. The interesting part is how little separates them — only a prompt
 | Agent | Tools | For |
 |---|---|---|
 | `general-assistant` | `get_current_date_time` | The smoke test. Proves the loop, credentials, and tool plumbing work. |
-| `planner` | `delegate_to_agent` | Breaks a goal into stages and queues other agents to carry them out. |
+| `planner` | `delegate_to_agent` | Breaks a goal into stages and queues other agents to carry them out, each a separately-tracked child execution. |
 | `test-fixer` | clone, read, write, shell, search, open PR | Given only a repository: discovers its test command, runs the suite, fixes genuine failures one at a time, opens a PR. |
 | `ticket-resolver` | the same six, plus `retrieval` | Ticket → cloned repo → code change → verified tests → real pull request. |
 
@@ -356,7 +356,7 @@ negative cases is in [`postman/`](postman/). Interactive docs at `localhost:8080
 mvn test
 ```
 
-**707 automated tests** (57 `agent-core` + 114 `agent-runtime` + 17 `rag-service` + 519
+**710 automated tests** (60 `agent-core` + 114 `agent-runtime` + 17 `rag-service` + 519
 `gateway-api`). Integration tests run against `agent_hub_test`, a **separate** database, and
 boot the real Spring context, security filter chain, and Postgres RLS — that's what catches
 the class of bug mocks can't: cross-tenant isolation, RBAC denials, audit-table RLS, and the
@@ -453,6 +453,18 @@ engine unaudited — the same posture as enforcing isolation at the database rat
 every query to remember a `WHERE` clause. Found by running the thing and reading the UI, not
 by a test: every test passed both before and after, because they all asserted the behaviour of
 tools that happened to be audited.
+
+**Delegation never once happened, because of a markdown code fence.** Models that don't
+populate the OpenAI `tool_calls` field emit the call as assistant text instead, and
+`recoverToolCallsFromText()` exists precisely to catch that. It required the response to
+start with `{`. In practice those same models wrap the JSON in a ```` ``` ```` fence, so the
+check rejected it on the first character and the fenced tool call became the execution's
+"final answer". The result: `planner` had run many times, always reporting `SUCCEEDED`, and
+had delegated *nothing* — zero rows in the entire database had a `parent_execution_id`. The
+recovery is now fed through a fence-stripping step (a ```` ```json ```` language hint counts
+as fence, not payload) and is otherwise exactly as conservative as before. First run after
+the fix delegated correctly: `delegate_to_agent` in 13ms, a real child `test-fixer`
+execution, which cloned a repository into a microVM.
 
 **A failing tool was invisible to everyone except the model.** `ToolCallingChatEngine` turns a
 tool exception into a string the model can read and recover from, which is deliberate — but it

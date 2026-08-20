@@ -201,6 +201,61 @@ class ToolCallingChatEngineTest {
     }
 
     @Test
+    void chat_modelLeaksToolCallInsideMarkdownCodeFence_recoveredAndExecuted() {
+        // The shape that actually occurs in practice, and the one this missed
+        // for its entire existence: the same models that emit a tool call as
+        // text nearly always wrap it in a fence, so the startsWith("{") check
+        // rejected it on the first character. Every planner run in this
+        // project's history delegated nothing because of exactly this.
+        ChatModel model = mock(ChatModel.class);
+        String fenced = "```\n{\"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}\n```";
+
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(fenced)))
+                .thenReturn(response(AiMessage.from("Final answer using tool result")));
+
+        ToolCallingChatEngine.ToolChatResult result =
+                new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("Echo 'hello'");
+
+        assertThat(result.toolWasUsed()).isTrue();
+        assertThat(result.reply()).isEqualTo("Final answer using tool result");
+        verify(model, times(2)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    void chat_fencedToolCallWithLanguageHint_recoveredAndExecuted() {
+        // ```json is at least as common as a bare fence -- the hint is part of
+        // the fence, not part of the payload.
+        ChatModel model = mock(ChatModel.class);
+        String fenced = "```json\n{\"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}\n```";
+
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(response(AiMessage.from(fenced)))
+                .thenReturn(response(AiMessage.from("done")));
+
+        ToolCallingChatEngine.ToolChatResult result =
+                new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("go");
+
+        assertThat(result.toolWasUsed()).isTrue();
+        verify(model, times(2)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    void chat_fencedTextThatIsNotAToolCall_staysAFinalAnswer() {
+        // Stripping a fence must not make the recovery any less conservative:
+        // a fenced code snippet in a genuine prose answer is still an answer.
+        ChatModel model = mock(ChatModel.class);
+        String fencedProse = "```\nSystem.out.println(\"hello\");\n```";
+        when(model.chat(any(ChatRequest.class))).thenReturn(response(AiMessage.from(fencedProse)));
+
+        ToolCallingChatEngine.ToolChatResult result =
+                new ToolCallingChatEngine(model, List.of(echoTool), CONTEXT).chat("go");
+
+        assertThat(result.toolWasUsed()).isFalse();
+        assertThat(result.reply()).isEqualTo(fencedProse);
+    }
+
+    @Test
     void chat_textLooksLikeAToolCallButNameIsNotRegistered_treatedAsPlainFinalAnswer() {
         // The safety check: an unrecognized "name" must never be guessed at --
         // this stays a genuine final answer (the leaked JSON, verbatim) rather
