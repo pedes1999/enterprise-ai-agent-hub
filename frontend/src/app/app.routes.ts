@@ -80,5 +80,13 @@ export const routes: Routes = [
     canActivate: [authGuard, adminGuard],
     loadComponent: () => import('./features/team/team').then((m) => m.Team),
   },
+  {
+    // Same tier as Team, and for the same reason: creating an endpoint mints
+    // a standing credential that runs agents unattended (see
+    // WebhookEndpointController's javadoc).
+    path: 'webhooks',
+    canActivate: [authGuard, adminGuard],
+    loadComponent: () => import('./features/webhooks/webhooks').then((m) => m.Webhooks),
+  },
   { path: '**', redirectTo: 'login' },
 ];

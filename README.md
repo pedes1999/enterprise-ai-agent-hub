@@ -604,12 +604,11 @@ SANDBOX_SIDECAR_URL=http://localhost:8090/ mvn test -pl agent-runtime -Dtest=Run
 | RAG | Working | Upload, hybrid search, bind to an agent. No document list or delete yet. |
 | Observability | Improved | Execution id in the MDC on every log line beneath a run; `/actuator/prometheus` exposes execution and tool-call metrics (count, latency, outcome). |
 | Live visibility | Working | SSE stream per execution — status changes and tool calls arrive as they happen, DB-polled so it works across instances. |
-| Triggers | Working | GitHub `pull_request` webhooks run agents unattended — signature-verified, deduplicated, attributed. No schedules yet, and no provider but GitHub. |
+| Triggers | Working | GitHub `pull_request` webhooks run agents unattended — signature-verified, deduplicated, attributed, and manageable from the Angular app (`/webhooks`, ADMIN-only). No schedules yet, and no provider but GitHub. |
 | Frontend tidiness | Gap | `credentials.ts` holds four unrelated concerns in one component. |
 
-**Next up**: a management UI for webhook endpoints (the API exists, nothing in the Angular
-app calls it yet), then scheduled triggers — the other half of "runs without a human", and
-the one that needs no inbound ingress at all.
+**Next up**: scheduled triggers — the other half of "runs without a human", and the one that
+needs no inbound ingress at all.
 
 **Further out**: a CLI client and GitHub Actions integration; an automated
 security-patching agent (SonarQube finding → LLM patch → verified PR); and the multi-agent

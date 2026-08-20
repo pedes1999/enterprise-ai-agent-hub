@@ -1,0 +1,133 @@
+<div class="webhooks-page">
+  <h1>Webhook endpoints</h1>
+  <p class="intro">
+    Wire a GitHub repository to an agent. Every matching <code>pull_request</code> event queues
+    an ordinary agent run — same validation, concurrency cap, and audit trail as a
+    human-triggered one.
+  </p>
+
+  <form class="create-form" (ngSubmit)="createEndpoint()">
+    <h2>Create an endpoint</h2>
+    <div class="row">
+      <div>
+        <label for="newAgentSlug">Agent</label>
+        <select id="newAgentSlug" [(ngModel)]="newAgentSlug" name="newAgentSlug">
+          <option value="" disabled>Choose an agent…</option>
+          @for (agent of agents(); track agent.slug) {
+            <option [value]="agent.slug">{{ agent.name }}</option>
+          }
+        </select>
+      </div>
+      <div>
+        <label for="newLabel">Label</label>
+        <input id="newLabel" type="text" [(ngModel)]="newLabel" name="newLabel" placeholder="e.g. billing-service PRs" />
+      </div>
+      <div>
+        <label for="newRunAsUserId">Runs as</label>
+        <select id="newRunAsUserId" [(ngModel)]="newRunAsUserId" name="newRunAsUserId">
+          <option value="">Myself</option>
+          @for (user of users(); track user.id) {
+            <option [value]="user.id">{{ user.name }} ({{ user.email }})</option>
+          }
+        </select>
+      </div>
+      <button type="submit" [disabled]="creating() || !newAgentSlug || !newLabel">
+        @if (creating()) {
+          <span class="spinner"></span> Creating…
+        } @else {
+          Create
+        }
+      </button>
+    </div>
+    <p class="hint">
+      Whoever this "runs as" is charged for every run this endpoint triggers — their vendor
+      credential pays, and it's their spend budget the runs count against.
+    </p>
+    @if (createError()) {
+      <div class="banner banner-error" role="alert">{{ createError() }}</div>
+    }
+  </form>
+
+  @if (justCreated(); as created) {
+    <div class="secret-panel">
+      <h2>Endpoint created — copy these now</h2>
+      <p class="warn">
+        The signing secret is shown here exactly once. Paste both values into the GitHub
+        repository's webhook settings; if you lose the secret, delete this endpoint and create
+        a new one.
+      </p>
+      <div class="field">
+        <label>Payload URL</label>
+        <div class="copy-row">
+          <code class="mono">{{ created.deliveryUrl }}</code>
+          <button type="button" (click)="copy(created.deliveryUrl, 'url')">
+            {{ copied() === 'url' ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Secret</label>
+        <div class="copy-row">
+          <code class="mono">{{ created.secret }}</code>
+          <button type="button" (click)="copy(created.secret, 'secret')">
+            {{ copied() === 'secret' ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+      </div>
+      <button type="button" class="dismiss" (click)="dismissCreated()">Done</button>
+    </div>
+  }
+
+  @if (loading()) {
+    <div class="loading-state"><span class="spinner"></span> Loading webhook endpoints…</div>
+  } @else if (loadError()) {
+    <div class="banner banner-error" role="alert">{{ loadError() }}</div>
+  } @else if (endpoints().length === 0) {
+    <p class="empty">No webhook endpoints yet.</p>
+  } @else {
+    <table class="webhooks-table">
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Agent</th>
+          <th>Event</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (endpoint of endpoints(); track endpoint.id) {
+          <tr>
+            <td>{{ endpoint.label }}</td>
+            <td class="mono">{{ endpoint.agentSlug }}</td>
+            <td>{{ endpoint.eventType }}</td>
+            <td>{{ endpoint.createdAt | localDateTime }}</td>
+            <td>
+              <button
+                type="button"
+                class="danger"
+                (click)="deactivate(endpoint)"
+                [disabled]="pendingId() === endpoint.id"
+              >
+                @if (pendingId() === endpoint.id) {
+                  <span class="spinner"></span> Removing…
+                } @else {
+                  Remove
+                }
+              </button>
+            </td>
+          </tr>
+          @if (rowMessages[endpoint.id]; as msg) {
+            <tr class="message-row">
+              <td colspan="5">
+                <div class="banner" [class.banner-success]="msg.kind === 'success'" [class.banner-error]="msg.kind === 'error'">
+                  {{ msg.text }}
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  }
+</div>
